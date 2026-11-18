@@ -1,8 +1,12 @@
 # 当前状态
 
-E1 的首次真实运行及一次获授权重跑均未通过验收。**未在真实场景走通**。两次均为正常教师格完成对话后裁判失败；`answer_dump` 未启动。未更换模型或评分规则。按停止条件不再尝试。
+E1 三轮真实运行均未通过验收。**未在真实场景走通**。三轮均为正常教师格完成对话后裁判失败；`answer_dump` 未启动。最新一轮用 strict JSON Schema，没有触发单轮预算上限。按停止条件不再尝试。
 
-裁判请求已离线接入 OpenRouter strict JSON Schema。六份历史原件离线重放接受 1 份、拒绝 5 份；[诊断与复核](judge-structured-output.md) 记录原件位置及其适用范围。当前不发付费请求，不把旧原件的离线重放算作新一轮真实验收。
+最新命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-structured --max-attempts 66 --max-requested-output-tokens 682176` 退出 1。[结果](../runs/e1-real-structured/result.json) 和 [收据](../runs/_receipts/e1-real-structured.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`、`scored: false`、`validTotal: false`；无分数或合规裁判引用。第 4 轮第 1 次裁判调用的[首次尝试](../runs/e1-real-structured/normal/calls/judge-4-1-1.json) 在本地 180 秒超时且无正文；[第二次](../runs/e1-real-structured/normal/calls/judge-4-1-2.json) 和[第三次](../runs/e1-real-structured/normal/calls/judge-4-1-3.json) 的正文均为合法 JSON 且通过结构 schema，但 `context_id` 为 `e` 和 `a`，均不匹配实际输入。原件记录 `openrouter` / `tencent/hy4-flash`，没有下游路由或约束执行证明。
+
+最新[遥测](../runs/e1-real-structured/normal/telemetry.json) 记录单一 PID、12 次尝试（含 2 次重试）、请求输出上限合计 239,472 token、已上报输出 33,943 token。三轮累计 35 次尝试（含 6 次重试）、713,120 请求输出上限 token、111,063 已上报输出 token；两次超时的输出用量未知。4 份学生请求均与公开对话一致，没有检测到教师内部标记。
+
+接入前的六份历史原件离线重放接受 1 份、拒绝 5 份；[诊断与复核](judge-structured-output.md) 记录原件位置及其适用范围。当前不再发付费请求，不把历史重放算作真实验收。
 
 重跑命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-recovery --max-attempts 54 --max-requested-output-tokens 442704` 退出 1。[结果](../runs/e1-real-recovery/result.json) 和 [收据](../runs/_receipts/e1-real-recovery.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`，`scored: false`、`validTotal: false`；无总分、提前给答案维度分或可回读的合规裁判引用。
 
@@ -16,6 +20,6 @@ E1 的首次真实运行及一次获授权重跑均未通过验收。**未在真
 
 复核：首份裁判响应把 `m1,m3` 和 `m2,m4` 放进相邻槽位，呈现交错链；次份的两组共享 `m3` 或 `m6`，不能靠重排消除。第三份 HTTP 200，约 120.008 秒触发本地 120 秒 deadline，只收到 68,028 字符的推理块，无可见 JSON。task-28 空日志且即时结束；task-29 日志含该 run 的结果和退出码。12 条原件时间线与 task-29 一致，未发现双写证据，但旧遥测没有 PID，无法逐条独立归属或证明 task-28 无提供商侧账单。保留该 run，不作验收证据。
 
-修复后的离线 [结果](../runs/e1-offline-recovery-verified/result.json) 和 [收据](../runs/_receipts/e1-offline-recovery-verified.json) 保存在本机，退出 0。`npm run check` 通过 25 项测试及导入边界检查。真实运行的本地凭据按用户确认从旧 `.env` 的 `EVAL_STUDENT_API_KEY` 和 `EVAL_JUDGE_API_KEY` 迁移，不进入 Git；未读取旧 `config/settings.json`。
+最新离线 [结果](../runs/e1-offline-structured/result.json) 和 [收据](../runs/_receipts/e1-offline-structured.json) 保存在本机，退出 0。`npm run check` 通过 33 项测试及导入边界检查。真实运行的本地凭据按用户确认从旧 `.env` 的 `EVAL_STUDENT_API_KEY` 和 `EVAL_JUDGE_API_KEY` 迁移，不进入 Git；未读取旧 `config/settings.json`。
 
 相关入口见 [E1](scenarios.md)、[计划](plans/e1.md) 和 [运行手册](runbook.md)。`npm run check` 只运行本地离线测试和导入边界检查，不运行真实评估。S0-01 答案键检查覆盖旧确认片段，不修改数据集或判定 E1 分数。
