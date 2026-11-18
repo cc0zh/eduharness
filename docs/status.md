@@ -1,8 +1,14 @@
 # 当前状态
 
-E1 三轮真实运行均未通过验收。**未在真实场景走通**。三轮均为正常教师格完成对话后裁判失败；`answer_dump` 未启动。最新一轮用 strict JSON Schema，没有触发单轮预算上限。按停止条件不再尝试。
+E1 真实双格验收通过。`node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-numbered-two-cells --max-attempts 66 --max-requested-output-tokens 682176` 退出 0。[结果](../runs/e1-real-numbered-two-cells/result.json) 和 [收据](../runs/_receipts/e1-real-numbered-two-cells.json) 均为 `acceptance: true`。两格均执行成功且有有效总分。正常教师总分 10、直接给答案维度 2；`answer_dump` 总分 5、该维度 0。23 / 14 条引用全部可回读，8 份学生请求未检出教师内部标记。正常教师首次裁判响应因分数与证据冲突被拒绝，重试响应通过完整校验，没有填分。
 
-已补真实启动门禁：干净当前 HEAD 必须有 `npm run check` 通过收据，才加载凭据。原子目录独占用并发测试覆盖。当前裁判协议只使用窗口证据序号；run、格子、视图与调用坐标由本地绑定。`--judge-only` 可重评冻结的 `normal` 对话，预估通常 1 次调用、最多 3 次尝试及 196,608 请求输出 token。该模式未发起真实请求。
+先行 [judge-only 冒烟](../runs/e1-judge-only-real-numbered/result.json) 退出 0，[收据](../runs/_receipts/e1-judge-only-real-numbered.json) 记录 `acceptance: true`；6 个维度、20 条引用通过复核。冒烟 1 次尝试、65,536 请求输出上限 token、11,637 已上报输出 token；完整双格 20 次尝试（含 1 次重试）、277,040 请求输出上限 token、47,057 已上报输出 token。五个真实 run 累计 56 次尝试、1,055,696 请求输出上限 token、169,757 已上报输出 token，另有两次超时的实际输出未知。
+
+验收使用 `e045d492f290df23108fdd28fe792f56a7696ba0` 的 [检查收据](../runs/_receipts/check-e045d492f290df23108fdd28fe792f56a7696ba0.json)，39 项测试和契约导入边界通过。pi-ai 和 pi-agent-core 均为 1.5.2。
+
+## 此前的排查记录
+
+真实启动门禁要求干净当前 HEAD 有 `npm run check` 通过收据，才加载凭据。原子目录独占用并发测试覆盖。当前裁判协议只使用窗口证据序号；run、格子、视图与调用坐标由本地绑定。
 
 最新命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-structured --max-attempts 66 --max-requested-output-tokens 682176` 退出 1。[结果](../runs/e1-real-structured/result.json) 和 [收据](../runs/_receipts/e1-real-structured.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`、`scored: false`、`validTotal: false`；无分数或合规裁判引用。第 4 轮第 1 次裁判调用的[首次尝试](../runs/e1-real-structured/normal/calls/judge-4-1-1.json) 在本地 180 秒超时且无正文；[第二次](../runs/e1-real-structured/normal/calls/judge-4-1-2.json) 和[第三次](../runs/e1-real-structured/normal/calls/judge-4-1-3.json) 的正文均为合法 JSON 且通过结构 schema，但 `context_id` 为 `e` 和 `a`，均不匹配实际输入。原件记录 `openrouter` / `tencent/hy4-flash`，没有下游路由或约束执行证明。
 
