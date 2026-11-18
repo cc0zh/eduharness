@@ -4,8 +4,6 @@
 
 | 术语 | 定义 | 不是什么 | 判定依据 | 归属 |
 | --- | --- | --- | --- | --- |
-| 有效总分 `validTotal` | 所有必需维度都有合规分数，且证据通过契约校验后的总和。 | 不是均值、部分分或填补缺分。 | `validTotal: true`、`total` 为数值；审阅绑定裁判和对话原件。 | artifacts（结果）、judge（评分） |
-| 已打分 `scored` | 至少一个已校验维度有分数。 | 不承诺总分有效，也不等于原件已记录。 | 结果 `scored`；失败尝试原件不参与。 | artifacts |
 | 已记录 `recorded` | 格子的结果记录已经保存。 | 不等于执行成功或有分。 | 磁盘 `result.json` 中 `recorded: true`。 | artifacts |
 | 执行成功 `execution_success` | 格子的对话和评分流程无最终故障。 | 不等于场景验收通过。 | 格子 `status`，结合 `failure` 和 run `acceptance`。 | core / artifacts |
 | 基础设施故障 `infra_failure` | 运行未能产出合规证据或结果的技术故障。 | 不是教学差或零分。 | `failure.status`、`kind`，模型调用保存 `role`、`turn`、`call`、`attempt`、`attemptPath`。 | core |
@@ -29,7 +27,12 @@
 | 原始分档 `score` | 裁判为单个维度给出的档位。 | `null` 未定档不计为 0 分。 | `judge.json` 的维度 `score` 和绑定证据。 | [judge](../contracts/judge/README.md#评分维度) |
 | 观察窗口 `observation window` | 公开视图内可核对某行为发生或缺失的消息范围。 | 有后续发言不必然意味着有教学机会。 | `binding.messageIds`、证据槽及公开消息顺序。 | [judge](../contracts/judge/README.md#证据绑定与观察窗口) |
 | 教学机会 `teaching opportunity` | 公开对话中可合理期待教师执行目标教学动作的时机。 | 单有对应角色发言不足。 | 用机会消息和后续发言核对触发条件。 | [judge](../contracts/judge/README.md#证据绑定与观察窗口) |
-| 学生变化 `learner_change`（历史） | 模拟学生的认知、元认知和非认知变化。 | 不能据此归因给教师，也不计入现行总分。 | 历史学生状态更新、私有小测及按题排除记录。 | [judge](../contracts/judge/README.md#学生变化历史口径)（历史指标）、learner（测量输入） |
 | 不可判定 `inconclusive` | 原件不足以支撑某次教学对照结论。 | 不能当作无变化或尺度命中。 | 核对教学机会、身份差异、必要分档及绑定原件。当前无对应运行枚举。 | [judge](../contracts/judge/README.md#已知问题)（判定）、artifacts（证据） |
 
 评分维度的规范名称、分档和权重统一登记在[裁判契约](../contracts/judge/README.md#评分维度)。
+
+| 术语 | 权威来源 |
+| --- | --- |
+| 已打分 `scored` | [裁判契约 · 评分维度](../contracts/judge/README.md#评分维度) |
+| 有效总分 `validTotal` | [裁判契约 · 评分维度](../contracts/judge/README.md#评分维度) |
+| 学生变化 `learner_change`（历史） | [裁判契约 · 学生变化（历史口径）](../contracts/judge/README.md#学生变化历史口径) |
