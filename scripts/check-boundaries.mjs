@@ -22,6 +22,7 @@ for (const file of files) {
     const check = (ok, destination) => { if (!ok) throw new Error(`${relative(root, file)} cannot import ${destination}`); };
     check(specifier, 'a computed import');
     if (specifier.startsWith('@earendil-works/pi-ai')) check(file === at('src', 'models.mjs') || file === at('src', 'offline.mjs'), specifier);
+    if (top === 'contracts' && owner === 'judge' && ['@sinclair/typebox', '@sinclair/typebox/value'].includes(specifier)) continue;
     if (specifier.startsWith('node:')) {
       check(!teacher && top !== 'config' && (top !== 'contracts' || ['node:crypto', 'node:test', 'node:fs', 'node:assert/strict'].includes(specifier)), specifier);
       continue;

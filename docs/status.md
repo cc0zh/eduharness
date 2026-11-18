@@ -2,6 +2,8 @@
 
 E1 的首次真实运行及一次获授权重跑均未通过验收。**未在真实场景走通**。两次均为正常教师格完成对话后裁判失败；`answer_dump` 未启动。未更换模型或评分规则。按停止条件不再尝试。
 
+裁判请求已离线接入 OpenRouter strict JSON Schema。六份历史原件离线重放接受 1 份、拒绝 5 份；[诊断与复核](judge-structured-output.md) 记录原件位置及其适用范围。当前不发付费请求，不把旧原件的离线重放算作新一轮真实验收。
+
 重跑命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-recovery --max-attempts 54 --max-requested-output-tokens 442704` 退出 1。[结果](../runs/e1-real-recovery/result.json) 和 [收据](../runs/_receipts/e1-real-recovery.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`，`scored: false`、`validTotal: false`；无总分、提前给答案维度分或可回读的合规裁判引用。
 
 重跑第 4 轮第 1 次裁判调用的三份原件：[没有后续观察窗口](../runs/e1-real-recovery/normal/calls/judge-4-1-1.json)、[非法 JSON](../runs/e1-real-recovery/normal/calls/judge-4-1-2.json)、[非法 JSON](../runs/e1-real-recovery/normal/calls/judge-4-1-3.json)。两次重试都收到上一份校验摘要。三次均 HTTP 200、`finish_reason: stop`，耗时 88.299、98.353、62.888 秒，未触发 180 秒本地超时。[遥测](../runs/e1-real-recovery/normal/telemetry.json) 的 11 条记录均匹配 manifest 的单一 PID，规范化 0 次；4 份学生请求与公开对话逐条一致，没有检测到教师内部标记。

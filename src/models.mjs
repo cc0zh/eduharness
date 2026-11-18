@@ -67,7 +67,11 @@ export class Models {
 
   model(role) { return this.#roles[roleConfig(role)]; }
 
-  complete(scope, context, parse) { return this.#invoke(scope, context, {}, parse); }
+  usesStructuredJudgement(role) {
+    return roleConfig(role) === 'judge' && this.model(role).provider === 'openrouter' && routes.judge.responseFormat === 'json_schema';
+  }
+
+  complete(scope, context, parse, schema) { return this.#invoke(scope, context, {}, parse, undefined, schema); }
 
   stream(scope, context, options, validate) {
     const output = createAssistantMessageEventStream();
@@ -89,7 +93,7 @@ export class Models {
     return { model, provider, api };
   }
 
-  async #invoke(scope, context, agentOptions, parse, stream) {
+  async #invoke(scope, context, agentOptions, parse, stream, schema) {
     const { role, turn, call } = scope;
     const canonical = roleConfig(role);
     const config = policy[canonical];
@@ -99,7 +103,7 @@ export class Models {
     for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
       const coordinates = { role, turn, call, attempt };
       this.#reserve?.(coordinates, config.maxTokens);
-      const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and return a complete replacement JSON document for the same evidence view.` } : context;
+      const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
       const raw = { ...coordinates, context: request };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
       const startedAt = new Date().toISOString();
@@ -114,6 +118,11 @@ export class Models {
           const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
           if (!Number.isInteger(sent) || sent <= 0 || sent > config.maxTokens) throw new Error('provider request output cap invalid');
           requestLimit = sent;
+          if (schema) return {
+            ...payload,
+            provider: { ...payload.provider, require_parameters: true },
+            response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
+          };
         },
         onResponse({ status }) { httpStatus = status; },
         onProviderStreamEvent(chunk) {
@@ -156,6 +165,7 @@ export class Models {
         ...coordinates, ...this.identity(role), policyVersion: policy.version, requestLimit, finish_reason, httpStatus,
         startedAt, elapsedMs: Math.round(performance.now()-start), timeoutMs,
         normalized: originalOrder.length > 0, originalOrder,
+        ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
         failureKind: failureKind ?? null, detail: detail ?? null,

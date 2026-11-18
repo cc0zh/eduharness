@@ -18,3 +18,5 @@
 按 `failure.role/turn/call/attempt` 和 `attemptPath` 找故障原件；调用级最多重试 2 次，不再重跑格子或换模型。`usage` 来自 pi；无 provider 原因或 token 字段时记录 `null`，不以推理正文估算。`visibleTokens` 是输出减推理，可能含工具参数。调用原件可能包含私有画像、教学指令及模型推理；不要外发，不进 Git。对照须核实模式和评测身份。离线固定回答只是边界夹具，不用于判断教学质量。
 
 裁判校验失败时，下一次尝试携带上一份校验错误。仅可无损重排同一证据槽位的 ID 或互不重叠的组；记录 `normalized` 和 `originalOrder`，原件不改。各调用另记录 `elapsedMs` 和 `timeoutMs`；本地 deadline 到期与 provider 中断分别标记。
+
+OpenRouter HY4 裁判和复评通过 pi 的 `onPayload` 请求 `json_schema` 和 `provider.require_parameters`，`judgementMode` 记录对应分支。工具调用不是这个路由的备选；公开元数据没有承诺强制指定工具。语法和结构之后仍校验本地语义。历史正文重放使用兼容解析，不把重放分数写回原 run。
