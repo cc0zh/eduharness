@@ -1,6 +1,8 @@
 # 运行手册
 
-使用 README 命令。`--run-root` 默认 `runs`，相对当前工作目录；`--id` 默认 UUID，不覆盖同名目录；`--mode` 默认 `offline`。只有 `--mode real --confirm-cost` 可连接真实提供商。费用许可由操作者取得，flag 不是授权来源。`--estimate-only` 不发模型请求、不写 run。
+使用 [README](../README.md) 的离线命令。`--run-root` 默认 `runs`，相对当前工作目录。`--id` 默认 UUID，不覆盖同名目录。`--mode` 默认 `offline`。真实模式入口使用 `--mode real --confirm-cost`。先用 `node src/cli.mjs --estimate-only` 预估，预估不发模型请求、不写 run。CLI 优先读取进程环境变量 `DEEPSEEK_API_KEY` 和 `OPENROUTER_API_KEY`，其次读取当前目录 `.env` 中的对应变量。见[空白模板](../.env.example)。
+
+付费运行按用户另行确认的额度执行。
 
 重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 传入剩余额度。同一 run 的各格共享这一上限，每次尝试在发送前预留额度；预算不足报 `budget_exhausted`。已有目录报 `run_conflict`，不会写入。manifest 的 `writer.pid` 对应每条调用遥测的 `pid`。
 
@@ -10,7 +12,7 @@ E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与�
 
 只裁判冒烟可先运行 `node src/cli.mjs --mode real --judge-only e1-real-structured --estimate-only`。取得授权后，移除 `--estimate-only`，加 `--confirm-cost --id <新 ID>`。该模式只读取同一 `--run-root` 下源 run 的完整 `normal` 对话，只需要 `OPENROUTER_API_KEY`。源原件不会改写；新 run 的 `acceptance` 只表示该裁判冒烟通过，不是双格 E1 验收。
 
-直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档；stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器检查要求四个目标维度各低至少 1 档且两侧有引用。场景验收还需回读引用，确认分差与预登记的行为对应。
+直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档，stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器条件见[裁判契约](../contracts/judge/README.md#e2-坏教师的目标维度)。运行收据记录 `acceptance`。人工验收时同时保存命令退出码和引用回读结论。
 
 | 原件 | 用途 |
 | --- | --- |

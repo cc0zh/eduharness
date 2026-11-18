@@ -1,33 +1,14 @@
 # 当前状态
 
-E1 真实双格验收通过。`node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-numbered-two-cells --max-attempts 66 --max-requested-output-tokens 682176` 退出 0。[结果](../runs/e1-real-numbered-two-cells/result.json) 和 [收据](../runs/_receipts/e1-real-numbered-two-cells.json) 均为 `acceptance: true`。两格均执行成功且有有效总分。正常教师总分 10、直接给答案维度 2；`answer_dump` 总分 5、该维度 0。23 / 14 条引用全部可回读，8 份学生请求未检出教师内部标记。正常教师首次裁判响应因分数与证据冲突被拒绝，重试响应通过完整校验，没有填分。
+项目处于 [S1 稳定的环境](scenarios.md#s1-稳定的环境)。
 
-先行 [judge-only 冒烟](../runs/e1-judge-only-real-numbered/result.json) 退出 0，[收据](../runs/_receipts/e1-judge-only-real-numbered.json) 记录 `acceptance: true`；6 个维度、20 条引用通过复核。冒烟 1 次尝试、65,536 请求输出上限 token、11,637 已上报输出 token；完整双格 20 次尝试（含 1 次重试）、277,040 请求输出上限 token、47,057 已上报输出 token。五个真实 run 累计 56 次尝试、1,055,696 请求输出上限 token、169,757 已上报输出 token，另有两次超时的实际输出未知。
+文档重组待独立审查。提交前审查服务连接超时，审查由后续会话接手。
 
-验收使用 `e045d492f290df23108fdd28fe792f56a7696ba0` 的 [检查收据](../runs/_receipts/check-e045d492f290df23108fdd28fe792f56a7696ba0.json)，39 项测试和契约导入边界通过。pi-ai 和 pi-agent-core 均为 1.5.2。
+| 场景 | 状态 | 证据入口 |
+| --- | --- | --- |
+| E1 S0-06 真实双格 | 已验收 | `git show cd0de52:docs/status.md`。运行和检查收据见 [E1 卡](scenarios.md#e1-s0-06-真实双格)。 |
+| E2 四个坏教师自检 | 离线链路已验证，待真实验收 | `runs/e2-offline-reviewed/result.json` 与 `runs/_receipts/e2-offline-reviewed.json`。预登记及执行入口见 [E2 计划](plans/e2.md)。 |
+| S2 独立的改进环境 | 待 S1 通过 | [S2 卡](scenarios.md#s2-独立的改进环境)列出隔离验收所需原件。 |
+| S3 改进循环 | 待 S2 通过 | [S3 卡](scenarios.md#s3-改进循环)及其 E5 单轮对照。 |
 
-## 此前的排查记录
-
-真实启动门禁要求干净当前 HEAD 有 `npm run check` 通过收据，才加载凭据。原子目录独占用并发测试覆盖。当前裁判协议只使用窗口证据序号；run、格子、视图与调用坐标由本地绑定。
-
-最新命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-structured --max-attempts 66 --max-requested-output-tokens 682176` 退出 1。[结果](../runs/e1-real-structured/result.json) 和 [收据](../runs/_receipts/e1-real-structured.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`、`scored: false`、`validTotal: false`；无分数或合规裁判引用。第 4 轮第 1 次裁判调用的[首次尝试](../runs/e1-real-structured/normal/calls/judge-4-1-1.json) 在本地 180 秒超时且无正文；[第二次](../runs/e1-real-structured/normal/calls/judge-4-1-2.json) 和[第三次](../runs/e1-real-structured/normal/calls/judge-4-1-3.json) 的正文均为合法 JSON 且通过结构 schema，但 `context_id` 为 `e` 和 `a`，均不匹配实际输入。原件记录 `openrouter` / `tencent/hy4-flash`，没有下游路由或约束执行证明。
-
-最新[遥测](../runs/e1-real-structured/normal/telemetry.json) 记录单一 PID、12 次尝试（含 2 次重试）、请求输出上限合计 239,472 token、已上报输出 33,943 token。三轮累计 35 次尝试（含 6 次重试）、713,120 请求输出上限 token、111,063 已上报输出 token；两次超时的输出用量未知。4 份学生请求均与公开对话一致，没有检测到教师内部标记。
-
-接入前的六份历史原件离线重放接受 1 份、拒绝 5 份；[诊断与复核](judge-structured-output.md) 记录原件位置及其适用范围。当前不再发付费请求，不把历史重放算作真实验收。
-
-重跑命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-recovery --max-attempts 54 --max-requested-output-tokens 442704` 退出 1。[结果](../runs/e1-real-recovery/result.json) 和 [收据](../runs/_receipts/e1-real-recovery.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`，`scored: false`、`validTotal: false`；无总分、提前给答案维度分或可回读的合规裁判引用。
-
-重跑第 4 轮第 1 次裁判调用的三份原件：[没有后续观察窗口](../runs/e1-real-recovery/normal/calls/judge-4-1-1.json)、[非法 JSON](../runs/e1-real-recovery/normal/calls/judge-4-1-2.json)、[非法 JSON](../runs/e1-real-recovery/normal/calls/judge-4-1-3.json)。两次重试都收到上一份校验摘要。三次均 HTTP 200、`finish_reason: stop`，耗时 88.299、98.353、62.888 秒，未触发 180 秒本地超时。[遥测](../runs/e1-real-recovery/normal/telemetry.json) 的 11 条记录均匹配 manifest 的单一 PID，规范化 0 次；4 份学生请求与公开对话逐条一致，没有检测到教师内部标记。
-
-重跑使用 9 次逻辑调用、11 次尝试（含 2 次重试）、234,176 请求输出上限 token，上报输出 46,557 token。两次累计 23 次尝试、473,648 请求输出上限 token，上报输出 77,120 token；首次中止的一次真实用量未知。剩余授权 43 次尝试、208,528 请求输出上限 token，但裁判契约故障再次出现，按约定停止。
-
-真实命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-confirmed` 退出 1。[结果](../runs/e1-real-confirmed/result.json) 和 [收据](../runs/_receipts/e1-real-confirmed.json) 均记录 `acceptance: false`。正常教师格为 `infra_failure`、`scored: false`、`validTotal: false`，无总分和提前给答案维度分。裁判第 4 轮第 1 次调用的三份原件：[槽位错序](../runs/e1-real-confirmed/normal/calls/judge-4-1-1.json)、[分组错序](../runs/e1-real-confirmed/normal/calls/judge-4-1-2.json)、[请求中止](../runs/e1-real-confirmed/normal/calls/judge-4-1-3.json)。没有可用的裁判引用。
-
-[遥测](../runs/e1-real-confirmed/normal/telemetry.json) 记录 10 次逻辑调用、12 次尝试（含 2 次重试）；请求输出上限合计 239,472 token。已上报的输出合计 30,563 token，最后一次裁判请求中止，实际用量未知。四份学生模型请求均只包含公开对话，没有出现教师内部标记。`runs/` 和可达 Git 历史未命中两项凭据的原值。
-
-复核：首份裁判响应把 `m1,m3` 和 `m2,m4` 放进相邻槽位，呈现交错链；次份的两组共享 `m3` 或 `m6`，不能靠重排消除。第三份 HTTP 200，约 120.008 秒触发本地 120 秒 deadline，只收到 68,028 字符的推理块，无可见 JSON。task-28 空日志且即时结束；task-29 日志含该 run 的结果和退出码。12 条原件时间线与 task-29 一致，未发现双写证据，但旧遥测没有 PID，无法逐条独立归属或证明 task-28 无提供商侧账单。保留该 run，不作验收证据。
-
-最新离线 [结果](../runs/e1-offline-structured/result.json) 和 [收据](../runs/_receipts/e1-offline-structured.json) 保存在本机，退出 0。`npm run check` 通过 33 项测试及导入边界检查。真实运行的本地凭据按用户确认从旧 `.env` 的 `EVAL_STUDENT_API_KEY` 和 `EVAL_JUDGE_API_KEY` 迁移，不进入 Git；未读取旧 `config/settings.json`。
-
-相关入口见 [E1](scenarios.md)、[计划](plans/e1.md) 和 [运行手册](runbook.md)。`npm run check` 只运行本地离线测试和导入边界检查，不运行真实评估。S0-01 答案键检查覆盖旧确认片段，不修改数据集或判定 E1 分数。
+E1 真实结果为两格均有有效总分，`productive_struggle` 为正常格 2 分、`answer_dump` 格 0 分。23 / 14 条引用均可回读，8 份学生请求未检出教师内部标记。正常格首份裁判响应因分数与证据冲突被拒绝，重试通过。历史执行与排查记录保留在 `cd0de52` 的状态文档。裁判结构化输出故障另见[诊断与复核](judge-structured-output.md)。
