@@ -19,8 +19,14 @@ test('paid preflight requires a clean checkout and a passing receipt for this HE
   const head = git('rev-parse', 'HEAD');
   publishCheckReceipt(head, 3, root);
   assert.equal(requireCheckReceipt(root).passed, 3);
+  const startup = join(root, 'review-output', '_receipts', 'sample.start.json');
+  mkdirSync(join(root, 'review-output', '_receipts'), { recursive: true });
+  writeFileSync(startup, '{}');
+  assert.throws(() => requireCheckReceipt(root), denied);
+  assert.equal(requireCheckReceipt(root, [startup]).head, head);
   writeFileSync(join(root,'dirty'), 'untracked');
   assert.throws(() => requireCheckReceipt(root), denied);
+  assert.throws(() => requireCheckReceipt(root, [startup]), denied);
   assert.equal(publishCheckReceipt(head, 4, root), false);
   git('add','dirty');
   git('-c','user.name=test','-c','user.email=test@example.invalid','commit','-qm','new HEAD');

@@ -19,6 +19,8 @@
 | 教师 `teacher` | 模型 + harness。harness 负责提示、工具和教学阶段。 | 不是模型单独完成，也不拥有学生画像私有字段。 | manifest 的模型路由和教师源码指纹，结合调用原件与 `teacher-events.json`。 | teacher |
 | 会话目标完成 `goal-complete` | Agent 会话对目标状态的声明。 | 不是验收证据或替代验收。 | 会话控制工具的状态。 | artifacts（仅界定证据边界） |
 | 验收通过 `acceptance` | 证据覆盖对应场景卡的全部要求。 | 单有离线 `acceptance: true` 或 `goal-complete` 不足。 | 逐栏核对对应卡的证据。`result.acceptance` 记录当前模式的机器判断。 | artifacts（运行字段）、[场景卡](scenarios.md)（验收） |
+| 启动记录 `start record` | CLI 本次启动在首次外部请求前写入的进程快照。 | 不是评测 `manifest.json`，也不证明进程正常结束。 | `runs/_receipts/<id>.start.json` 的 run ID、HEAD、工作区状态、模式、参数摘要、PID 和开始时间。 | [artifacts](../contracts/artifacts/README.md#运行收据) |
+| 收据 `process receipt` | CLI 进程结束时记录退出码、请求数和验收状态的原件。 | 不是工具回执，也不能单独证明每次请求都可回读。 | `runs/_receipts/<id>.process.json` 与启动记录及请求日志通过 `--verify-run <id>` 一致性检查。 | [artifacts](../contracts/artifacts/README.md#运行收据) |
 
 以下条目补记三阶段场景使用的术语。学生变化沿用历史名称。
 

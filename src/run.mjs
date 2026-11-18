@@ -14,7 +14,7 @@ import { offlineResponses, sampleJudge } from './offline.mjs';
 import { createTeacher } from './teacher/session.mjs';
 
 const source = name => readFileSync(new URL(`../${name}`, import.meta.url));
-const identityFiles = ['package-lock.json', 'config/e1.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/models.mjs', 'src/run.mjs', 'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
+const identityFiles = ['package-lock.json', 'config/e1.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/models.mjs', 'src/run.mjs', 'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
 const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 const variants = scenario => scenario === 'E2' ? cellIds : ['normal', 'answer_dump'];
 export const scenarioName = ({scenario = 'E1', judgeOnly}) => judgeOnly ? 'E1-judge-only' : scenario;
@@ -71,7 +71,7 @@ function frozenDialogue(root, id) {
   } catch { throw failure('invalid_input', {}, 'judge-only requires a completed E1 normal dialogue'); }
 }
 
-export async function run({ mode, root, id, judgeOnly, scenario: requested, checkReceipt, limits }) {
+export async function run({ mode, root, id, judgeOnly, scenario: requested, checkReceipt, limits, recorder }) {
   const scenario = scenarioName({scenario:requested, judgeOnly});
   const ceiling = budget({ scenario, judgeOnly });
   limits ??= { maxAttempts: ceiling.maxCalls, maxRequestedOutputTokens: ceiling.maxOutputTokens };
@@ -117,7 +117,7 @@ export async function run({ mode, root, id, judgeOnly, scenario: requested, chec
     store(filenames.telemetry, telemetry);
     let turn = 0, role = frozen ? 'judge' : 'teacher', call = 0;
     try {
-      const models = new Models({ mode, responses: mode === 'offline' ? (frozen ? [sampleJudge(false)] : offlineResponses(variant)) : undefined, roles: frozen ? ['judge'] : undefined, save, reserve });
+      const models = new Models({ mode, responses: mode === 'offline' ? (frozen ? [sampleJudge(false)] : offlineResponses(variant)) : undefined, roles: frozen ? ['judge'] : undefined, save, reserve, recorder, cell: variant });
       if (!frozen) {
         const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event) });
         const { instructions, persona } = task.user_scenario;

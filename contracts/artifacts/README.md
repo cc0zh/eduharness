@@ -2,6 +2,14 @@
 
 [产物 schema](schema.mjs) 定义 run ID、文件名和格子结果。分数有效性由[裁判契约](../judge/README.md)定义。产物路径见[运行手册](../../docs/runbook.md)。
 
+## 运行收据
+
+`src/run-receipts.mjs` 写入 CLI 启动记录、请求日志和进程收据。每次评测或估算启动在首次外部请求前原子写入 `<run-root>/_receipts/<id>.start.json`，并创建仅追加的 `<id>.requests.jsonl`。`fetch` 前记录 `request_start`，收到响应状态或传输失败后记录 `request_end`。两条记录用 `requestId` 配对，`callId` 指向格子、角色、轮次、调用及尝试。日志只保存标识、时间、状态码和故障分类。
+
+退出时原子写入 `<id>.process.json`，保存启动记录哈希、退出码、HEAD、结束时间、请求计数和 `acceptance`。`acceptance: null` 表示没有评测结果。捕获 SIGINT 和 SIGTERM 时分别记录 130 和 143。Windows 的 `child.kill('SIGTERM')` 属于直接终止。强杀后收据缺失时，复核报告「未正常收尾」。`requestCount` 计入已记下发送边界的请求，包括传输失败。只有 `request_start` 时，无法确认该请求是否送达。已有评测收据 `<id>.json` 仍保存评测结果。
+
+`node src/cli.mjs --verify-run <id>` 只读这三类进程原件，以及存在时的评测收据。缺原件、字段不完整、请求起止不配对或收据字段矛盾时返回非零并列出缺失项。历史运行没有这些新原件时如实报告缺失，不回填。
+
 ## 评测身份
 
 `manifest.json` 的 `identityId` 对 `{ mode, scenario, identity }` 求哈希。`identity` 包含数据修订、任务原件与部署策略哈希，尺子版本，调用策略及实际额度上限，运行器与 pi 版本，角色路由（离线为 `pi-ai-faux`），以及依赖锁、配置、编排、教师、裁判、离线提供商和各契约 schema 的源码哈希。E2 另记目标维度和其配置源码哈希。只裁判运行另记来源 run、格子及对话哈希。路由中的 `key` 是环境变量名。任务 `taskId`、run ID、写入进程和检查收据由 manifest 单列，复核时也需核对任务与产物归属。

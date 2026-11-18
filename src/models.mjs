@@ -3,6 +3,7 @@ import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
 import { policy, routes } from '../config/e1.mjs';
+import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
 const roleConfig = role => role === 'regrade' ? 'judge' : role;
@@ -34,10 +35,14 @@ export class Models {
   #keys;
   #save;
   #reserve;
+  #recorder;
+  #cell;
 
-  constructor({ mode, responses, save, reserve, roles = Object.keys(routes) }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes) }) {
     this.#save = save;
     this.#reserve = reserve;
+    this.#recorder = mode === 'real' ? recorder : undefined;
+    this.#cell = cell;
     if (mode === 'offline') {
       const faux = fauxProvider();
       this.#pi.setProvider(faux.provider);
@@ -112,6 +117,7 @@ export class Models {
       const signal = AbortSignal.timeout(timeoutMs);
       const options = {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
+        ...(this.#recorder && { fetch: trackedFetch(globalThis.fetch, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) }),
         ...(this.#keys && { apiKey: this.#keys[canonical] }),
         identity: { attribution: null }, temperature: 0, maxTokens: requestLimit, maxRetries: 0,
         reasoning: stream ? agentOptions.reasoning : config.thinking,

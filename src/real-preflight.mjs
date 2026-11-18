@@ -1,15 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { routes } from '../config/e1.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 
 export const checkout = fileURLToPath(new URL('..', import.meta.url));
-export function checkSnapshot(root = checkout) {
-  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }).trim();
-  return { head: git('rev-parse','HEAD'), clean: !git('status','--porcelain','--untracked-files=all') };
+export function checkSnapshot(root = checkout, startupFiles = []) {
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore','pipe','pipe'] });
+  const allowed = new Set(startupFiles.map(file => `?? ${relative(root, file).split(sep).join('/')}`));
+  const changes = git('status','--porcelain','-z','--untracked-files=all').split('\0').filter(Boolean);
+  return { head: git('rev-parse','HEAD').trim(), clean: changes.every(change => allowed.has(change)) };
 }
 const receiptPath = (root, head) => join(root, 'runs', '_receipts', `check-${head}.json`);
 
@@ -23,9 +25,9 @@ export function publishCheckReceipt(head, passed, root = checkout) {
   return true;
 }
 
-export function requireCheckReceipt(root = checkout) {
+export function requireCheckReceipt(root = checkout, startupFiles = []) {
   let current, receipt;
-  try { current = checkSnapshot(root); }
+  try { current = checkSnapshot(root, startupFiles); }
   catch { throw failure('preflight_failed', {}, 'real mode requires a Git checkout'); }
   if (!current.clean) throw failure('preflight_failed', {}, 'real mode requires a clean Git checkout');
   try { receipt = JSON.parse(readFileSync(receiptPath(root,current.head),'utf8')); }

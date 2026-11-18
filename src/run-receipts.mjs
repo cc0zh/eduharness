@@ -1,0 +1,230 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { appendFileSync, closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { checkSnapshot, checkout } from './real-preflight.mjs';
+
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--judge-only', '--max-attempts', '--max-requested-output-tokens']);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2']);
+const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
+const isoNow = () => new Date().toISOString();
+const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+
+function parameterSummary(argv) {
+  const flags = [], values = {};
+  for (let index = 0; index < argv.length; index++) {
+    const [name, inline] = argv[index].split('=', 2);
+    if (!name.startsWith('--')) continue;
+    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost'].includes(name) ? name : '<unknown>');
+    if (!safeOptions.has(name)) continue;
+    const value = inline ?? (argv[index + 1]?.startsWith('--') ? undefined : argv[++index]);
+    if (value === undefined) continue;
+    values[name.slice(2).replaceAll('-', '_')] = (['--mode', '--scenario'].includes(name) && safeValues.has(value)) || (name.startsWith('--max-') && /^\d+$/.test(value)) ? value : '<redacted>';
+  }
+  return { flags: [...new Set(flags)].sort(), values };
+}
+
+function atomicJson(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const fd = openSync(temporary, 'wx');
+  try {
+    writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try { linkSync(temporary, path); }
+  finally { unlinkSync(temporary); }
+}
+
+export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv = process.argv.slice(2) }) {
+  const receiptRoot = resolve(root, '_receipts');
+  const startPath = pathFor(resolve(root), id, 'start');
+  const requestPath = join(receiptRoot, `${id}.requests.jsonl`);
+  const processPath = pathFor(resolve(root), id, 'process');
+  for (const path of [join(resolve(root), id), join(receiptRoot, `${id}.json`), requestPath, processPath]) {
+    if (existsSync(path)) throw Object.assign(new Error(`run ID already in use: ${id}`), { code: 'EEXIST' });
+  }
+  const snapshot = checkSnapshot(checkout);
+  const start = {
+    runId: id,
+    head: snapshot.head,
+    clean: snapshot.clean,
+    mode: ['offline', 'real'].includes(mode) ? mode : 'unknown',
+    parameters: parameterSummary(argv),
+    pid: process.pid,
+    startedAt: isoNow(),
+  };
+  atomicJson(startPath, start);
+  writeFileSync(requestPath, '', { flag: 'wx' });
+  return {
+    start,
+    startPath,
+    requestPath,
+    processPath,
+    append(event) {
+      const fd = openSync(requestPath, 'a');
+      try {
+        appendFileSync(fd, `${JSON.stringify({ ...event, timestamp: isoNow() })}\n`);
+        fsyncSync(fd);
+      } finally { closeSync(fd); }
+    },
+    finish({ exitCode, acceptance = null, error = null }) {
+      const requests = readRequestEvents(requestPath);
+      atomicJson(processPath, {
+        runId: id,
+        head: start.head,
+        pid: start.pid,
+        startHash: digest(start),
+        exitCode,
+        endedAt: isoNow(),
+        requestCount: requests.filter(event => event.type === 'request_start').length,
+        acceptance,
+        ...(error && { error }),
+      });
+    },
+  };
+}
+
+export function installRunReceiptHandlers(recorder, getAcceptance = () => null) {
+  let termination;
+  const onSignal = signal => {
+    termination = signal;
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  const onInt = () => onSignal('SIGINT');
+  const onTerm = () => onSignal('SIGTERM');
+  const onException = error => {
+    console.error(error?.message ?? String(error));
+    termination = 'exception';
+    process.exit(1);
+  };
+  process.once('exit', exitCode => {
+    try { recorder.finish({ exitCode, acceptance: getAcceptance(), error: termination }); }
+    catch (error) {
+      console.error(`process receipt write failed: ${error.message}`);
+      if (exitCode === 0) process.exitCode = 1;
+    }
+  });
+  process.once('SIGINT', onInt);
+  process.once('SIGTERM', onTerm);
+  process.once('uncaughtException', onException);
+  process.once('unhandledRejection', onException);
+}
+
+export function trackedFetch(fetchImpl, recorder, callId) {
+  let sequence = 0;
+  return async (input, init) => {
+    const requestId = `${callId}:${++sequence}`;
+    recorder.append({ type: 'request_start', callId, requestId });
+    let response;
+    try {
+      response = await fetchImpl(input, { ...init, redirect: 'manual' });
+    } catch (error) {
+      recorder.append({ type: 'request_end', callId, requestId, error: 'transport_failure' });
+      throw error;
+    }
+    recorder.append({ type: 'request_end', callId, requestId, status: response.status });
+    return response;
+  };
+}
+
+function readRequestEvents(path) {
+  const text = readFileSync(path, 'utf8');
+  if (!text) return [];
+  if (!text.endsWith('\n')) throw Error('request log is truncated');
+  return text.slice(0, -1).split('\n').map(line => JSON.parse(line));
+}
+
+export function verifyRun(root, id) {
+  root = resolve(root);
+  const missing = [], invalid = [];
+  const load = (path, label) => {
+    if (!existsSync(path)) {
+      missing.push(label);
+      return null;
+    }
+    try {
+      const value = JSON.parse(readFileSync(path, 'utf8'));
+      if (record(value)) return value;
+    } catch {}
+    invalid.push(`${label} is not a JSON object`);
+    return null;
+  };
+  const start = load(pathFor(root, id, 'start'), 'startup record');
+  const receipt = load(pathFor(root, id, 'process'), 'process receipt');
+  const requestPath = join(root, '_receipts', `${id}.requests.jsonl`);
+  let requests = null;
+  if (!existsSync(requestPath)) missing.push('request log');
+  else {
+    try { requests = readRequestEvents(requestPath); }
+    catch { invalid.push('request log is malformed'); }
+  }
+  function validate(label, value, fields) {
+    if (!value) return;
+    for (const [field, valid] of Object.entries(fields)) {
+      if (!Object.hasOwn(value, field)) invalid.push(`${label} missing ${field}`);
+      else if (!valid(value[field])) invalid.push(`${label} invalid ${field}`);
+    }
+  }
+  const shared = { runId: x => x === id, head: x => typeof x === 'string' && /^[a-f0-9]{40,64}$/.test(x), pid: x => Number.isSafeInteger(x) && x > 0 };
+  validate('startup record', start, { ...shared, clean: x => typeof x === 'boolean', mode: x => ['offline', 'real', 'unknown'].includes(x), parameters: record, startedAt: time });
+  validate('process receipt', receipt, { ...shared, exitCode: x => Number.isInteger(x) && x >= 0 && x <= 255, endedAt: time, requestCount: x => Number.isSafeInteger(x) && x >= 0, acceptance: x => [null, true, false].includes(x), startHash: x => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x) });
+  if (start && receipt) {
+    for (const field of ['runId', 'head', 'pid']) if (start[field] !== receipt[field]) invalid.push(`${field} differs between startup record and process receipt`);
+    if (receipt.startHash !== digest(start)) invalid.push('startHash differs from startup record');
+    if (Date.parse(receipt.endedAt) < Date.parse(start.startedAt)) invalid.push('endedAt precedes startedAt');
+  }
+  let observedRequestCount = 0;
+  if (requests) {
+    const pending = new Map(), seen = new Set();
+    for (const [index, event] of requests.entries()) {
+      const label = `request log event ${index + 1}`;
+      if (!record(event)) { invalid.push(`${label} is not an object`); continue; }
+      validate(label, event, {
+        type: x => ['request_start', 'request_end'].includes(x), callId: x => typeof x === 'string' && x.length > 0,
+        requestId: x => typeof x === 'string' && x.length > 0, timestamp: time,
+      });
+      const stamp = Date.parse(event.timestamp);
+      if (stamp < Date.parse(start?.startedAt) || stamp > Date.parse(receipt?.endedAt)) invalid.push(`${label} timestamp is outside the run`);
+      if (event.type === 'request_start') {
+        observedRequestCount++;
+        if (seen.has(event.requestId)) invalid.push(`${label} duplicates requestId`);
+        seen.add(event.requestId);
+        pending.set(event.requestId, event);
+      } else if (event.type === 'request_end') {
+        const begin = pending.get(event.requestId);
+        if (!begin) invalid.push(`${label} has no preceding request_start`);
+        else if (begin.callId !== event.callId || Date.parse(begin.timestamp) > stamp) invalid.push(`${label} contradicts request_start callId or timestamp`);
+        pending.delete(event.requestId);
+        if (Object.hasOwn(event, 'status') === Object.hasOwn(event, 'error') || !(event.error === 'transport_failure' || Number.isInteger(event.status) && event.status >= 100 && event.status <= 599)) invalid.push(`${label} invalid status or error`);
+      }
+    }
+    for (const requestId of pending.keys()) invalid.push(`request ${requestId} missing request_end`);
+    if (receipt && receipt.requestCount !== observedRequestCount) invalid.push('requestCount differs from request log');
+    if (start && start.mode !== 'real' && observedRequestCount) invalid.push('request log contradicts startup mode');
+  }
+  const evaluationReceiptPath = join(root, '_receipts', `${id}.json`);
+  if (receipt && existsSync(evaluationReceiptPath)) {
+    const evaluation = load(evaluationReceiptPath, 'evaluation receipt');
+    if (evaluation) {
+      if (evaluation.acceptance !== receipt.acceptance) invalid.push('acceptance differs between evaluation receipt and process receipt');
+      if (evaluation.id !== id) invalid.push('evaluation receipt id differs from requested ID');
+      if (start && evaluation.mode !== start.mode) invalid.push('mode differs between evaluation receipt and startup record');
+    }
+  }
+  if (receipt && receipt.acceptance === true && receipt.exitCode !== 0) invalid.push('exitCode contradicts acceptance');
+  const verified = missing.length === 0 && invalid.length === 0;
+  return {
+    runId: id,
+    verified,
+    conclusion: verified ? 'complete' : start && missing.includes('process receipt') ? 'unfinished' : 'invalid',
+    missing,
+    invalid,
+    ...(start && { startedAt: start.startedAt, head: start.head, mode: start.mode }),
+    ...(receipt && { exitCode: receipt.exitCode, endedAt: receipt.endedAt, requestCount: receipt.requestCount, acceptance: receipt.acceptance }),
+    ...(requests && { observedRequestCount }),
+  };
+}
