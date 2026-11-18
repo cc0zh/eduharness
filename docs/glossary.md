@@ -15,7 +15,19 @@
 | 学生生成契约故障 `simulator_generation_contract` | 学生输出未通过完整 JSON 和结构检查。 | 不是模拟学生作答错误。 | 末次学生尝试与校验失败分类。 | core / learner |
 | 推理耗尽 `reasoning_exhausted_empty` | 达到输出上限、没有可见正文，且 provider 明确报告所有输出 token 均为推理。 | 不根据长度上限或正文为空猜原因。 | 调用遥测的停止原因、请求上限、`reasoningTokens` 和 `usage.output`。 | core |
 | 尺子 `ruler` | 固定的评分规则、证据校验和计分方法，用于解释 harness 改动。 | 不是教师本身，也不是名次。 | manifest 的 `identity.ruler` 和 judge schema。 | judge |
-| 评测身份 `evaluation identity` | 定义可比较条件的版本化快照，包括数据、尺子、配置、运行源码和 pi 版本。 | 不是 run ID 或单独的模型名。 | `manifest.json` 的 `identity`、`identityId` 和 `mode`。 | artifacts |
+| 评测身份 `evaluation identity` | 定义可比较条件的版本化快照。 | 单独的 run ID 或模型名不足以标识。 | `manifest.json` 的 `identity`、`identityId`、`scenario` 与 `mode`。 | [artifacts](../contracts/artifacts/README.md#评测身份) |
 | 教师 `teacher` | 模型 + harness。harness 负责提示、工具和教学阶段。 | 不是模型单独完成，也不拥有学生画像私有字段。 | manifest 的模型路由和教师源码指纹，结合调用原件与 `teacher-events.json`。 | teacher |
 | 会话目标完成 `goal-complete` | Agent 会话对目标状态的声明。 | 不是验收证据或替代验收。 | 会话控制工具的状态。 | artifacts（仅界定证据边界） |
-| 验收通过 `acceptance` | 证据覆盖对应场景卡的全部要求。 | 不是仅有离线 `acceptance: true` 或 `goal-complete`。 | 本卡要求真实产物、读回证据和离线回归；`result.acceptance` 仅表示当前模式的机器可判定行为通过。 | artifacts（运行字段）；[场景卡](scenarios.md)（验收） |
+| 验收通过 `acceptance` | 证据覆盖对应场景卡的全部要求。 | 单有离线 `acceptance: true` 或 `goal-complete` 不足。 | 逐栏核对对应卡的证据。`result.acceptance` 记录当前模式的机器判断。 | artifacts（运行字段）、[场景卡](scenarios.md)（验收） |
+
+以下条目补记三阶段场景使用的术语。学生变化沿用历史名称。
+
+| 术语 | 定义 | 不是什么 | 判定依据 | 归属 |
+| --- | --- | --- | --- | --- |
+| 原始分档 `score` | 裁判为单个维度给出的档位。 | `null` 未定档不计为 0 分。 | `judge.json` 的维度 `score` 和绑定证据。 | [judge](../contracts/judge/README.md#评分维度) |
+| 观察窗口 `observation window` | 公开视图内可核对某行为发生或缺失的消息范围。 | 有后续发言不必然意味着有教学机会。 | `binding.messageIds`、证据槽及公开消息顺序。 | [judge](../contracts/judge/README.md#证据绑定与观察窗口) |
+| 教学机会 `teaching opportunity` | 公开对话中可合理期待教师执行目标教学动作的时机。 | 单有对应角色发言不足。 | 用机会消息和后续发言核对触发条件。 | [judge](../contracts/judge/README.md#证据绑定与观察窗口) |
+| 学生变化 `learner_change`（历史） | 模拟学生的认知、元认知和非认知变化。 | 不能据此归因给教师，也不计入现行总分。 | 历史学生状态更新、私有小测及按题排除记录。 | [judge](../contracts/judge/README.md#学生变化历史口径)（历史指标）、learner（测量输入） |
+| 不可判定 `inconclusive` | 原件不足以支撑某次教学对照结论。 | 不能当作无变化或尺度命中。 | 核对教学机会、身份差异、必要分档及绑定原件。当前无对应运行枚举。 | [judge](../contracts/judge/README.md#已知问题)（判定）、artifacts（证据） |
+
+评分维度的规范名称、分档和权重统一登记在[裁判契约](../contracts/judge/README.md#评分维度)。
