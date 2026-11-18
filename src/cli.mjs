@@ -1,11 +1,25 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseArgs } from 'node:util';
+import { parseArgs, parseEnv } from 'node:util';
+import { routes } from '../config/e1.mjs';
 import { modes, runId } from '../contracts/artifacts/schema.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 import { budget, runE1 } from './run.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+function loadCredentials() {
+  const missing = [...new Set(Object.values(routes).map(({ key }) => key))].filter(key => process.env[key] === undefined);
+  if (!missing.length) return;
+  let values;
+  try {
+    values = parseEnv(readFileSync('.env', 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw failure('configuration', {}, 'cannot load .env');
+  }
+  for (const key of missing) if (Object.hasOwn(values, key)) process.env[key] = values[key];
+}
 let config, estimate;
 try {
   const { values } = parseArgs({ options: {
@@ -27,11 +41,12 @@ if (config && !process.exitCode) {
   try {
     if (estimate) emit({ scenario: 'E1', ...budget() });
     else {
+      if (config.mode === 'real') loadCredentials();
       const result = await runE1(config);
       emit(result);
       if (!result.acceptance) {
         const problem = result.cells.find(cell => cell.failure)?.failure;
-        console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}` : 'E1 direct-answer check did not separate the two cells');
+        console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : 'E1 direct-answer check did not separate the two cells');
         process.exitCode = 1;
       }
     }

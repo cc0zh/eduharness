@@ -11,4 +11,4 @@ node src/cli.mjs --mode offline --run-root runs --id e1-first
 
 从 stdout 读取结果 JSON，或打开 `runs/e1-first/result.json`。对照每格的 `judge.json` 和 `transcript.json`，用消息 ID 查原文。离线通过只说明运行和证据链可重跑，不代表真实评估通过。再次运行时使用新的 ID。
 
-`npm test` 运行测试；`npm run check` 还检查契约导入边界。真实运行先看 `node src/cli.mjs --estimate-only`，取得费用授权后设置 `DEEPSEEK_API_KEY`、`OPENROUTER_API_KEY`，使用 `--mode real --confirm-cost` 和新的 ID。详见 [运行手册](docs/runbook.md) 和 [E1 场景卡](docs/scenarios.md)。
+`npm test` 运行测试；`npm run check` 还检查契约导入边界。真实运行先看 `node src/cli.mjs --estimate-only`，取得费用授权后设置 `DEEPSEEK_API_KEY`、`OPENROUTER_API_KEY`，使用 `--mode real --confirm-cost` 和新的 ID。CLI 优先用进程环境变量，其次用当前目录 `.env` 中的对应变量，见 [空白模板](.env.example)。详见 [运行手册](docs/runbook.md) 和 [E1 场景卡](docs/scenarios.md)。
