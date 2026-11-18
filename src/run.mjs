@@ -8,7 +8,7 @@ import { directDimension, ruler } from '../contracts/judge/schema.mjs';
 import { learnerFormat, parseLearner } from '../contracts/learner/schema.mjs';
 import { policy, routes, rounds, taskId } from '../config/e1.mjs';
 import { grade } from './judge.mjs';
-import { Models } from './models.mjs';
+import { attemptBudget, Models } from './models.mjs';
 import { offlineResponses } from './offline.mjs';
 import { createTeacher } from './teacher/session.mjs';
 
@@ -24,17 +24,23 @@ export function budget() {
   return { typicalCalls: rounds * cellIds.length + learner + judge, maxCalls: attempts * (teacher + learner + judge), maxOutputTokens: attempts * (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens + judge * policy.judge.maxTokens) };
 }
 
-export async function runE1({ mode, root, id }) {
+export async function runE1({ mode, root, id, limits = { maxAttempts: budget().maxCalls, maxRequestedOutputTokens: budget().maxOutputTokens } }) {
   const taskBytes = source('data/upstream/tasks/stage0_situated_tutoring.json');
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   const operatorPolicy = policyBytes.toString('utf8');
   const task = readTask(JSON.parse(taskBytes), taskId);
   const runDir = join(root, id);
   mkdirSync(root, { recursive: true });
-  mkdirSync(runDir);
+  try { mkdirSync(runDir); }
+  catch (error) {
+    if (error.code === 'EEXIST') throw failure('run_conflict', { runDir }, `run directory already exists: ${runDir}`);
+    throw error;
+  }
+  const writer = { pid: process.pid, startedAt: new Date().toISOString() };
+  const reserve = attemptBudget(limits);
   const pi = Object.fromEntries(Object.entries(pkg.dependencies).filter(([key]) => key.startsWith('@earendil-works/')));
   const identity = { pi, runnerVersion: pkg.version, dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes) }, ruler, policy, routes: mode === 'real' ? routes : 'pi-ai-faux', sources: Object.fromEntries(identityFiles.map(path => [path, hash(source(path))])) };
-  write(join(runDir, filenames.manifest), { scenario: 'E1', taskId, id, mode, identity, identityId: hash({ mode, identity }), budget: budget() });
+  write(join(runDir, filenames.manifest), { scenario: 'E1', taskId, id, mode, identity, identityId: hash({ mode, identity }), budget: budget(), limits, writer });
   const cells = [];
   for (const variant of cellIds) {
     const path = join(runDir, variant);
@@ -46,7 +52,7 @@ export async function runE1({ mode, root, id }) {
     const save = (raw, meter) => {
       const attemptPath = join(variant, filenames.raw, `${raw.role}-${raw.turn}-${raw.call}-${raw.attempt}.json`);
       write(join(runDir, attemptPath), raw);
-      push(filenames.telemetry, telemetry, { ...meter, attemptPath });
+      push(filenames.telemetry, telemetry, { ...meter, attemptPath, pid: writer.pid });
       return attemptPath;
     };
     store(filenames.transcript, messages);
@@ -54,7 +60,7 @@ export async function runE1({ mode, root, id }) {
     store(filenames.telemetry, telemetry);
     let turn = 0, role = 'teacher', call = 0;
     try {
-      const models = new Models({ mode, responses: mode === 'offline' ? offlineResponses(variant) : undefined, save });
+      const models = new Models({ mode, responses: mode === 'offline' ? offlineResponses(variant) : undefined, save, reserve });
       const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event) });
       const { instructions, persona } = task.user_scenario;
       say('learner', 0, instructions.task_instructions);

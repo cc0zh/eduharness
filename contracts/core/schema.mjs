@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const executionSuccess = 'execution_success';
 export const infraFailure = 'infra_failure';
 export const failureKinds = Object.freeze([
-  'invalid_input', 'configuration', 'artifact_io', 'provider_failure', 'output_truncated',
+  'invalid_input', 'configuration', 'artifact_io', 'run_conflict', 'budget_exhausted', 'provider_failure', 'output_truncated',
   'reasoning_exhausted_empty', 'output_limit_empty_unconfirmed', 'empty_unconfirmed',
   'simulator_generation_contract', 'teacher_generation_contract', 'judge_partial_failure',
 ]);

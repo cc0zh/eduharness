@@ -7,6 +7,15 @@ import { policy, routes } from '../config/e1.mjs';
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
 const roleConfig = role => role === 'regrade' ? 'judge' : role;
 
+export function attemptBudget({ maxAttempts, maxRequestedOutputTokens }) {
+  let attempts = 0, requested = 0;
+  return (where, limit) => {
+    if (attempts >= maxAttempts || requested + limit > maxRequestedOutputTokens) throw failure('budget_exhausted', where, 'remaining request budget cannot cover the next attempt');
+    attempts++;
+    requested += limit;
+  };
+}
+
 export function stopFailure(response, text, reasoning, limit, finishReason) {
   if (['error', 'aborted'].includes(response.stopReason) || ['content_filter', 'error'].includes(finishReason)) return 'provider_failure';
   const truncated = response.stopReason === 'length' || finishReason === 'length';
@@ -24,9 +33,11 @@ export class Models {
   #roles;
   #keys;
   #save;
+  #reserve;
 
-  constructor({ mode, responses, save }) {
+  constructor({ mode, responses, save, reserve }) {
     this.#save = save;
+    this.#reserve = reserve;
     if (mode === 'offline') {
       const faux = fauxProvider();
       this.#pi.setProvider(faux.provider);
@@ -83,16 +94,27 @@ export class Models {
     const canonical = roleConfig(role);
     const config = policy[canonical];
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
+    const timeoutMs = config.timeoutMs ?? policy.timeoutMs;
+    let priorValidation;
     for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
-      const raw = { role, turn, call, attempt, context };
+      const coordinates = { role, turn, call, attempt };
+      this.#reserve?.(coordinates, config.maxTokens);
+      const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and return a complete replacement JSON document for the same evidence view.` } : context;
+      const raw = { ...coordinates, context: request };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
-      const signal = AbortSignal.timeout(policy.timeoutMs);
+      const startedAt = new Date().toISOString();
+      const start = performance.now();
+      const signal = AbortSignal.timeout(timeoutMs);
       const options = {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
         ...(this.#keys && { apiKey: this.#keys[canonical] }),
         identity: { attribution: null }, temperature: 0, maxTokens: requestLimit, maxRetries: 0,
         reasoning: stream ? agentOptions.reasoning : config.thinking,
-        onPayload(payload) { requestLimit = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens ?? requestLimit; },
+        onPayload(payload) {
+          const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
+          if (!Number.isInteger(sent) || sent <= 0 || sent > config.maxTokens) throw new Error('provider request output cap invalid');
+          requestLimit = sent;
+        },
         onResponse({ status }) { httpStatus = status; },
         onProviderStreamEvent(chunk) {
           finish_reason = chunk.choices?.[0]?.finish_reason ?? finish_reason;
@@ -101,13 +123,13 @@ export class Models {
       };
       const model = this.model(role);
       let response, failureKind, parsed, detail;
-      const events = [];
+      const events = [], originalOrder = [];
       try {
         if (stream) {
-          const source = this.#pi.streamSimple(model, context, options);
+          const source = this.#pi.streamSimple(model, request, options);
           for await (const event of source) events.push(event);
           response = await source.result();
-        } else response = await this.#pi.completeSimple(model, context, options);
+        } else response = await this.#pi.completeSimple(model, request, options);
       } catch (error) {
         failureKind = 'provider_failure';
         httpStatus = Number.isInteger(error?.status) ? error.status : httpStatus;
@@ -118,21 +140,22 @@ export class Models {
         if (!failureKind) {
           try {
             if (!stream && (response.stopReason !== 'stop' || response.content.some(b => b.type === 'toolCall'))) throw new Error('JSON generation did not terminate normally');
-            parsed = parse(text, response);
+            parsed = parse(text, response, originalOrder);
           }
           catch (error) { failureKind = contractFailure; detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message; }
         }
       }
       if (failureKind === 'provider_failure') {
         httpStatus = Number(response?.errorMessage?.match(/^(?:\w+Error: )?(?:status(?: code)?[ :]+)?([45]\d\d)(?:\b|$)/i)?.[1]) || httpStatus;
-        detail = httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
+        detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
       }
-      const usage = response?.usage ?? null;
-      const coordinates = { role, turn, call, attempt };
+      const usage = failureKind === 'provider_failure' && !response?.usage?.totalTokens ? null : response?.usage ?? null;
       const attemptPath = this.#save({
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
       }, {
         ...coordinates, ...this.identity(role), policyVersion: policy.version, requestLimit, finish_reason, httpStatus,
+        startedAt, elapsedMs: Math.round(performance.now()-start), timeoutMs,
+        normalized: originalOrder.length > 0, originalOrder,
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
         failureKind: failureKind ?? null, detail: detail ?? null,
@@ -145,6 +168,7 @@ export class Models {
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
       if (attempt > policy.retries || agentOptions.signal?.aborted) throw failure(failureKind, { ...coordinates, attemptPath }, detail);
+      priorValidation = canonical === 'judge' && failureKind === contractFailure ? detail : undefined;
     }
   }
 }

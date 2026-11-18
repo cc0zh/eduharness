@@ -25,11 +25,19 @@ try {
   const { values } = parseArgs({ options: {
     mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
     id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
+    'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
   } });
   if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
   if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
   estimate = values['estimate-only'];
   config = { mode: values.mode, root: resolve(values['run-root']), id: runId(values.id ?? randomUUID()) };
+  const ceiling = budget();
+  function limit(flag, maximum) {
+    const value = values[flag] ?? String(maximum);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > maximum) throw new Error(`invalid --${flag}; expected 1 through ${maximum}`);
+    return Number(value);
+  }
+  config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
   if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
 } catch (error) {
   console.error(error.message);
@@ -39,7 +47,7 @@ try {
 
 if (config && !process.exitCode) {
   try {
-    if (estimate) emit({ scenario: 'E1', ...budget() });
+    if (estimate) emit({ scenario: 'E1', typicalCalls: budget().typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens });
     else {
       if (config.mode === 'real') loadCredentials();
       const result = await runE1(config);

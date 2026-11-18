@@ -1,0 +1,6 @@
+{
+  "source": "runs/e1-real-confirmed/normal/calls/judge-4-1-{1,2,3}.json",
+  "attempt1": {"misconception_repair":[[[1,3],[2,4],[5]]],"support_escalation_and_fading":[[[2,4],[5,7],[6,8]]]},
+  "attempt2": {"misconception_repair":[[[1],[2],{"opportunity":[3]}],[[3],[4],[5]]],"support_escalation_and_fading":[[[4],[5],[6]],[[6],[7],[8]]]},
+  "attempt3": {"stopReason":"aborted","elapsedMs":120008,"httpStatus":200,"textBlocks":0,"thinkingChars":68028}
+}
