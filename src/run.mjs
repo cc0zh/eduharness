@@ -10,14 +10,14 @@ import { policy, routes, rounds, taskId } from '../config/e1.mjs';
 import { targets } from '../config/e2.mjs';
 import { grade } from './judge.mjs';
 import { attemptBudget, Models } from './models.mjs';
-import { offlineResponses, sampleJudge } from './offline.mjs';
+import { offlineResponses } from './offline.mjs';
 import { createTeacher } from './teacher/session.mjs';
 
 const source = name => readFileSync(new URL(`../${name}`, import.meta.url));
 const identityFiles = ['package-lock.json', 'config/e1.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/models.mjs', 'src/run.mjs', 'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
 const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 const variants = scenario => scenario === 'E2' ? cellIds : ['normal', 'answer_dump'];
-export const scenarioName = ({scenario = 'E1', judgeOnly}) => judgeOnly ? 'E1-judge-only' : scenario;
+export const scenarioName = ({scenario = 'E1', judgeOnly}) => judgeOnly ? `${scenario}-judge-only` : scenario;
 
 export function budget({ judgeOnly, scenario } = {}) {
   if (judgeOnly) return {typicalCalls:1,maxCalls:policy.retries+1,maxOutputTokens:(policy.retries+1)*policy.judge.maxTokens};
@@ -50,28 +50,30 @@ function compare(judgements) {
   });
 }
 
-function frozenDialogue(root, id) {
+function frozenDialogue(root, id, scenario, cell) {
   try {
     const dir = join(root,runId(id));
     const manifest = JSON.parse(readFileSync(join(dir,filenames.manifest),'utf8'));
     const result = JSON.parse(readFileSync(join(dir,filenames.result),'utf8'));
-    const bytes = readFileSync(join(dir,'normal',filenames.transcript));
+    const bytes = readFileSync(join(dir,cell,filenames.transcript));
     const messages = JSON.parse(bytes);
-    if (manifest.id !== id || manifest.scenario !== 'E1' || manifest.taskId !== taskId || result.scenario !== 'E1' || result.taskId !== taskId || !result.cells.some(cell=>cell.id==='normal' && cell.recorded) || messages.length !== rounds*2+1) throw Error('invalid source');
+    if (manifest.id !== id || manifest.scenario !== scenario || manifest.taskId !== taskId || result.scenario !== scenario || result.taskId !== taskId || !result.cells.some(row=>row.id===cell && row.recorded) || messages.length !== rounds*2+1) throw Error('invalid source');
+    if (scenario === 'E2' && (manifest.identity.ruler !== ruler || manifest.mode !== result.mode)) throw Error('source ruler or mode differs');
     for (const [i,m] of messages.entries()) {
-      if (m.id !== `${id}:normal:m:${i+1}` || m.role !== (i%2 ? 'teacher' : 'learner') || m.turn !== Math.ceil(i/2)) throw Error('invalid chronology');
+      if (m.id !== `${id}:${cell}:m:${i+1}` || m.role !== (i%2 ? 'teacher' : 'learner') || m.turn !== Math.ceil(i/2)) throw Error('invalid chronology');
       message(m.id,m.role,m.turn,m.text);
     }
-    const original = JSON.parse(readFileSync(join(dir,'normal',filenames.raw,`judge-${rounds}-1-1.json`),'utf8'));
+    const original = JSON.parse(readFileSync(join(dir,cell,filenames.raw,`judge-${rounds}-1-1.json`),'utf8'));
     const request = JSON.parse(original.context.messages.at(-1).content);
     const viewHash = hash(messages);
     const expectedMessages = original.binding ? messages.map(({role,text},i)=>({n:i+1,role,text})) : messages;
+    if (scenario === 'E2' && (original.binding?.runId !== id || original.binding.cell !== cell || original.binding.ruler !== ruler || hash(original.binding.messageIds) !== hash(messages.map(m=>m.id)))) throw Error('invalid judge binding');
     if ((original.binding?.viewHash ?? request.context_id) !== viewHash || hash(request.messages) !== hash(expectedMessages)) throw Error('source no longer matches the original judge request');
-    return { messages, provenance:{runId:id,cell:'normal',transcriptSha256:hash(bytes)} };
-  } catch { throw failure('invalid_input', {}, 'judge-only requires a completed E1 normal dialogue'); }
+    return { messages, provenance:{runId:id,cell,transcriptSha256:hash(bytes)} };
+  } catch (error) { throw failure('invalid_input', {}, `judge-only cannot validate the frozen ${scenario} ${cell} dialogue: ${error.message}`); }
 }
 
-export async function run({ mode, root, id, judgeOnly, scenario: requested, checkReceipt, limits, recorder }) {
+export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', scenario: requested = 'E1', checkReceipt, limits, recorder }) {
   const scenario = scenarioName({scenario:requested, judgeOnly});
   const ceiling = budget({ scenario, judgeOnly });
   limits ??= { maxAttempts: ceiling.maxCalls, maxRequestedOutputTokens: ceiling.maxOutputTokens };
@@ -79,7 +81,7 @@ export async function run({ mode, root, id, judgeOnly, scenario: requested, chec
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   const operatorPolicy = policyBytes.toString('utf8');
   const task = readTask(JSON.parse(taskBytes), taskId);
-  const frozen = judgeOnly ? frozenDialogue(root,judgeOnly) : undefined;
+  const frozen = judgeOnly ? frozenDialogue(root, judgeOnly, requested, judgeCell) : undefined;
   const runDir = join(root, id);
   mkdirSync(root, { recursive: true });
   try { mkdirSync(runDir); }
@@ -98,7 +100,7 @@ export async function run({ mode, root, id, judgeOnly, scenario: requested, chec
   write(join(runDir, filenames.manifest), { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, writer, checkReceipt, source: frozen?.provenance });
   const cells = [];
   const judgements = new Map();
-  const planned = frozen ? ['normal'] : variants(scenario);
+  const planned = frozen ? [frozen.provenance.cell] : variants(scenario);
   for (const variant of planned) {
     const path = join(runDir, variant);
     mkdirSync(join(path, filenames.raw), { recursive: true });
@@ -117,7 +119,8 @@ export async function run({ mode, root, id, judgeOnly, scenario: requested, chec
     store(filenames.telemetry, telemetry);
     let turn = 0, role = frozen ? 'judge' : 'teacher', call = 0;
     try {
-      const models = new Models({ mode, responses: mode === 'offline' ? (frozen ? [sampleJudge(false)] : offlineResponses(variant)) : undefined, roles: frozen ? ['judge'] : undefined, save, reserve, recorder, cell: variant });
+      const fixtures = mode === 'offline' ? offlineResponses(variant) : undefined;
+      const models = new Models({ mode, responses: frozen && fixtures ? fixtures.slice(-1) : fixtures, roles: frozen ? ['judge'] : undefined, save, reserve, recorder, cell: variant });
       if (!frozen) {
         const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event) });
         const { instructions, persona } = task.user_scenario;
@@ -147,7 +150,7 @@ export async function run({ mode, root, id, judgeOnly, scenario: requested, chec
   }
   const comparisons = scenario === 'E2' ? compare(judgements) : undefined;
   const complete = cells.length === planned.length && cells.every(c => c.validTotal);
-  const acceptance = complete && (frozen || (comparisons
+  const acceptance = complete && (Boolean(frozen) || (comparisons
     ? comparisons.every(row => row.delta >= 1 && row.normal.references.length && row.variant.references.length)
     : cells[0].directAnswer - cells[1].directAnswer >= 1));
   const result = { scenario, taskId, mode, runDir, directDimension, acceptance, cells, ...(comparisons && { comparisons }) };

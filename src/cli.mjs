@@ -51,14 +51,17 @@ if (option('--verify-run') >= 0) {
       mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
       id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
       'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
-      'judge-only': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
+      'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
     if (!['E1', 'E2'].includes(values.scenario)) throw new Error('scenario must be E1 or E2');
-    if (values.scenario === 'E2' && values['judge-only'] !== undefined) throw new Error('--judge-only is only available for E1');
+    const judgeCell = values['judge-cell'];
+    const hasJudgeSource = values['judge-only'] !== undefined;
+    const e2Replay = values.scenario === 'E2' && hasJudgeSource;
+    if (judgeCell !== (e2Replay ? 'no_teach' : undefined)) throw new Error('--judge-cell no_teach requires E2 judge-only and is required for that mode');
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
     estimate = values['estimate-only'];
-    config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: values['judge-only'] === undefined ? undefined : runId(values['judge-only']), recorder };
+    config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };
     const ceiling = budget(config);
     function limit(flag, maximum) {
       const value = values[flag] ?? String(maximum);

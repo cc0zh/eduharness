@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -73,9 +73,49 @@ test('E2 estimate covers the whole shared run and rejects incompatible input', (
   const estimate = invoke('--scenario', 'E2', '--mode', 'real', '--estimate-only');
   assert.equal(estimate.status, 0, estimate.stderr);
   assert.deepEqual(JSON.parse(estimate.stdout), { scenario: 'E2', typicalCalls: 45, maxCalls: 147, maxOutputTokens: 1610112 });
-  for (const options of [['--scenario', 'bad'], ['--scenario', 'E2', '--judge-only', 'source']]) {
+  for (const options of [['--scenario', 'bad'], ['--scenario', 'E2', '--judge-only', 'source'], ['--judge-cell', 'no_teach'], ['--scenario', 'E2', '--judge-only', 'source', '--judge-cell', 'normal']]) {
     const invalid = invoke(...options, '--estimate-only');
     assert.equal(invalid.status, 2, invalid.stderr);
     assert.equal(JSON.parse(invalid.stdout).failure.kind, 'invalid_input');
   }
+});
+
+test('E2 judge-only verifies the frozen no_teach dialogue and never reruns its teachers or learners', t => {
+  mkdirSync('.tmp/scratch/e2', { recursive: true });
+  const root = mkdtempSync(resolve('.tmp/scratch/e2/regrade-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cli = (...args) => invoke('--scenario', 'E2', '--run-root', root, ...args);
+  const source = cli('--id', 'source');
+  assert.equal(source.status, 0, source.stderr);
+  const transcript = resolve(root, 'source/no_teach/transcript.json');
+  const bytes = readFileSync(transcript, 'utf8');
+  const sourceResultPath = resolve(root, 'source/result.json');
+  const sourceResult = JSON.parse(source.stdout);
+  Object.assign(sourceResult.cells.at(-1), { status: 'infra_failure', scored: false, validTotal: false, total: null, directAnswer: null });
+  writeFileSync(sourceResultPath, JSON.stringify(sourceResult));
+  const sourceJudgePath = resolve(root, 'source/no_teach/judge.json');
+  const sourceGroups = JSON.parse(readFileSync(sourceJudgePath, 'utf8')).groups;
+  rmSync(sourceJudgePath);
+  const options = ['--judge-only', 'source', '--judge-cell', 'no_teach'];
+  const estimate = cli(...options, '--estimate-only');
+  assert.equal(estimate.status, 0, estimate.stderr);
+  assert.deepEqual(JSON.parse(estimate.stdout), { scenario: 'E2-judge-only', typicalCalls: 1, maxCalls: 3, maxOutputTokens: 196608 });
+  const replay = cli(...options, '--id', 'replay');
+  assert.equal(replay.status, 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).acceptance, true);
+  const verification = invoke('--run-root', root, '--verify-run', 'replay');
+  assert.equal(verification.status, 0, verification.stdout);
+  assert.deepEqual(JSON.parse(replay.stdout).cells.map(c => c.id), ['no_teach']);
+  const read = file => JSON.parse(readFileSync(resolve(root, 'replay', file), 'utf8'));
+  assert.deepEqual(read('no_teach/telemetry.json').map(x => x.role), ['judge']);
+  assert.deepEqual(read('no_teach/transcript.json'), JSON.parse(bytes));
+  assert.deepEqual(read('no_teach/judge.json').groups, sourceGroups);
+  assert.equal(read('manifest.json').source.cell, 'no_teach');
+  assert.equal(readFileSync(transcript, 'utf8'), bytes);
+  const changed = JSON.parse(bytes);
+  changed[1].text += ' edited';
+  writeFileSync(transcript, JSON.stringify(changed));
+  const rejected = cli(...options, '--id', 'tampered');
+  assert.equal(rejected.status, 1, rejected.stderr);
+  assert.equal(JSON.parse(rejected.stdout).failure.kind, 'invalid_input');
 });

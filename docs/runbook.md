@@ -12,6 +12,8 @@ E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与�
 
 只裁判冒烟可先运行 `node src/cli.mjs --mode real --judge-only e1-real-structured --estimate-only`。取得授权后，移除 `--estimate-only`，加 `--confirm-cost --id <新 ID>`。该模式只读取同一 `--run-root` 下源 run 的完整 `normal` 对话，只需要 `OPENROUTER_API_KEY`。源原件不会改写；新 run 的 `acceptance` 只表示该裁判冒烟通过，不是双格 E1 验收。
 
+E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --judge-cell no_teach`。运行器把冻结对话与源裁判请求的消息和绑定核对，即使源裁判未产出分数也可复核。新 run 单列裁判结果，完整 E2 验收仍按场景卡核对。
+
 直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档，stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器条件见[裁判契约](../contracts/judge/README.md#e2-坏教师的目标维度)。运行收据记录 `acceptance`。人工验收时同时保存命令退出码和引用回读结论。
 
 用 `node src/cli.mjs --verify-run <id>` 核对 `runs/_receipts/` 中的进程原件。自定义运行根时传入原 `--run-root`。[运行收据契约](../contracts/artifacts/README.md#运行收据)
