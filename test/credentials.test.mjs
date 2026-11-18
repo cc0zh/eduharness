@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
-const cli = resolve('src/cli.mjs');
+const preflight = new URL('../src/real-preflight.mjs', import.meta.url);
+const models = new URL('../src/models.mjs', import.meta.url);
 const sentinel = 'test-only-credential-not-for-network';
 
 for (const [name, inherited, missing, unreadable] of [
@@ -19,11 +20,12 @@ for (const [name, inherited, missing, unreadable] of [
     if (unreadable) mkdirSync(resolve(cwd, '.env'));
     else writeFileSync(resolve(cwd, '.env'), `DEEPSEEK_API_KEY=${sentinel}\n`);
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(DEEPSEEK_API_KEY|OPENROUTER_API_KEY)$/i.test(key)));
-    const run = spawnSync(process.execPath, [cli, '--mode', 'real', '--confirm-cost', '--id', 'credentials-test'], { cwd, env: { ...env, ...inherited }, encoding: 'utf8', timeout: 5000 });
+    const check = `import {loadCredentials} from ${JSON.stringify(preflight.href)}; import {Models} from ${JSON.stringify(models.href)}; try { loadCredentials(); new Models({mode:'real'}); } catch (e) { console.error(e.message); console.log(JSON.stringify(e.failure)); process.exitCode=1; }`;
+    const run = spawnSync(process.execPath, ['--input-type=module','-e',check], { cwd, env: { ...env, ...inherited }, encoding: 'utf8', timeout: 5000 });
     assert.equal(run.status, 1);
     const result = JSON.parse(run.stdout);
-    assert.equal(result.cells[0].failure.kind, 'configuration');
-    assert.equal(result.cells[0].failure.detail, `missing ${missing}`);
+    assert.equal(result.kind, 'configuration');
+    assert.equal(result.detail, `missing ${missing}`);
     assert.match(run.stderr, new RegExp(missing));
     assert.ok(!`${run.stdout}${run.stderr}`.includes(sentinel));
   });

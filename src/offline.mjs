@@ -1,15 +1,14 @@
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
-import { ruler } from '../contracts/judge/schema.mjs';
 
 const response = text => fauxAssistantMessage([fauxText(text)]);
 const learner = text => response(JSON.stringify({ text }));
-const sampleJudge = dumping => context => {
-  const { context_id, rubric, messages } = JSON.parse(context.messages.at(-1).content);
+export const sampleJudge = dumping => context => {
+  const { rubric, messages } = JSON.parse(context.messages.at(-1).content);
   const selections = [[0, 1, 2], [1, 2, 3], [1, 8], [0, 1], [3, 4], [7, 8]];
   const scores = dumping ? [0, 0, 0, 0, 0, 0] : [2, 1, 2, 2, 0, 2];
-  return response(JSON.stringify({ contract_version: ruler, context_id, results: Object.fromEntries(Object.entries(rubric).map(([key, [slots]], i) => [key, {
-    score: scores[i], reason: i === 3 && dumping ? `Opening response provides the full solution (${messages[1].id}).` : 'Scripted offline contract fixture; not an independent teaching judgment.',
-    evidence_groups: [{ claim: scores[i] === 0 ? 'counterexample' : 'support_chain', slots: Object.fromEntries(slots.map((slot, j) => [slot.split(':')[0], { state: 'observed', message_ids: [messages[selections[i][j]].id] }])) }],
+  return response(JSON.stringify({ results: Object.fromEntries(Object.entries(rubric).map(([key, [slots]], i) => [key, {
+    score: scores[i], reason: i === 3 && dumping ? 'Opening response 2 provides the full solution.' : 'Scripted offline contract fixture; not an independent teaching judgment.',
+    evidence_groups: [{ claim: scores[i] === 0 ? 'counterexample' : 'support_chain', slots: Object.fromEntries(slots.map((slot, j) => [slot.split(':')[0], { state: 'observed', message_numbers: [messages[selections[i][j]].n] }])) }],
   }])) }));
 };
 

@@ -11,6 +11,6 @@ export function cellResult(id, scores, error) {
   return { id, recorded: true, status: executionSuccess, scored: scores.all.some(Number.isInteger), validTotal, total: validTotal ? scores.all.reduce((a, b) => a + b, 0) : null, directAnswer: scores.direct };
 }
 export function runId(value) {
-  requireThat(nonblank(value) && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(value) && !/^(?:_receipts|con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(value), 'invalid run id');
+  requireThat(nonblank(value) && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(value) && !/^check-/i.test(value) && !/^(?:_receipts|con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(value), 'invalid run id');
   return value;
 }

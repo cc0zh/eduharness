@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
+
+test('paid preflight requires a clean checkout and a passing receipt for this HEAD', async t => {
+  mkdirSync('.tmp/scratch/e1', { recursive: true });
+  const root = mkdtempSync(resolve('.tmp/scratch/e1/preflight-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q');
+  writeFileSync(join(root, '.gitignore'), '/runs/\n');
+  git('add', '.gitignore');
+  git('-c','user.name=test','-c','user.email=test@example.invalid','commit','-qm','fixture');
+  const { requireCheckReceipt, publishCheckReceipt } = await import('../src/real-preflight.mjs');
+  const denied = error => error.failure.kind === 'preflight_failed';
+  assert.throws(() => requireCheckReceipt(root), denied);
+  const head = git('rev-parse', 'HEAD');
+  publishCheckReceipt(head, 3, root);
+  assert.equal(requireCheckReceipt(root).passed, 3);
+  writeFileSync(join(root,'dirty'), 'untracked');
+  assert.throws(() => requireCheckReceipt(root), denied);
+  assert.equal(publishCheckReceipt(head, 4, root), false);
+  git('add','dirty');
+  git('-c','user.name=test','-c','user.email=test@example.invalid','commit','-qm','new HEAD');
+  assert.throws(() => requireCheckReceipt(root), denied);
+});

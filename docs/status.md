@@ -2,6 +2,8 @@
 
 E1 三轮真实运行均未通过验收。**未在真实场景走通**。三轮均为正常教师格完成对话后裁判失败；`answer_dump` 未启动。最新一轮用 strict JSON Schema，没有触发单轮预算上限。按停止条件不再尝试。
 
+已补真实启动门禁：干净当前 HEAD 必须有 `npm run check` 通过收据，才加载凭据。原子目录独占用并发测试覆盖。当前裁判协议只使用窗口证据序号；run、格子、视图与调用坐标由本地绑定。`--judge-only` 可重评冻结的 `normal` 对话，预估通常 1 次调用、最多 3 次尝试及 196,608 请求输出 token。该模式未发起真实请求。
+
 最新命令 `node src/cli.mjs --mode real --confirm-cost --run-root runs --id e1-real-structured --max-attempts 66 --max-requested-output-tokens 682176` 退出 1。[结果](../runs/e1-real-structured/result.json) 和 [收据](../runs/_receipts/e1-real-structured.json) 均为 `acceptance: false`。正常教师格为 `infra_failure`、`scored: false`、`validTotal: false`；无分数或合规裁判引用。第 4 轮第 1 次裁判调用的[首次尝试](../runs/e1-real-structured/normal/calls/judge-4-1-1.json) 在本地 180 秒超时且无正文；[第二次](../runs/e1-real-structured/normal/calls/judge-4-1-2.json) 和[第三次](../runs/e1-real-structured/normal/calls/judge-4-1-3.json) 的正文均为合法 JSON 且通过结构 schema，但 `context_id` 为 `e` 和 `a`，均不匹配实际输入。原件记录 `openrouter` / `tencent/hy4-flash`，没有下游路由或约束执行证明。
 
 最新[遥测](../runs/e1-real-structured/normal/telemetry.json) 记录单一 PID、12 次尝试（含 2 次重试）、请求输出上限合计 239,472 token、已上报输出 33,943 token。三轮累计 35 次尝试（含 6 次重试）、713,120 请求输出上限 token、111,063 已上报输出 token；两次超时的输出用量未知。4 份学生请求均与公开对话一致，没有检测到教师内部标记。

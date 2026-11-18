@@ -10,6 +10,8 @@
 | 执行成功 `execution_success` | 格子的对话和评分流程无最终故障。 | 不等于场景验收通过。 | 格子 `status`，结合 `failure` 和 run `acceptance`。 | core / artifacts |
 | 基础设施故障 `infra_failure` | 运行未能产出合规证据或结果的技术故障。 | 不是教学差或零分。 | `failure.status`、`kind`，模型调用保存 `role`、`turn`、`call`、`attempt`、`attemptPath`。 | core |
 | 裁判部分失败 `judge_partial_failure` | 裁判无法交付所有必需的合规维度。 | 不是裁判有证据给出合法低分。 | 末次裁判原件缺失合规维度或不满足证据绑定。 | core / judge |
+| 证据序号 `message number` | `e1-numbered-evidence-v2` 下当前可见窗口中从 1 开始的整数引用。 | 不是跨窗口稳定的消息 ID。 | 裁判 `message_numbers` 或 `opportunity_numbers`，通过 `binding.messageIds[n-1]` 映射。 | judge |
+| 消息 ID `message ID` | 一条公开消息在原始对话中的完整标识。 | 不是裁判输出的证据序号。 | `transcript.json` 的 `id`；落盘裁判引用以该 ID 回读。 | core / judge |
 | 学生生成契约故障 `simulator_generation_contract` | 学生输出未通过完整 JSON 和结构检查。 | 不是模拟学生作答错误。 | 末次学生尝试与校验失败分类。 | core / learner |
 | 推理耗尽 `reasoning_exhausted_empty` | 达到输出上限、没有可见正文，且 provider 明确报告所有输出 token 均为推理。 | 不根据长度上限或正文为空猜原因。 | 调用遥测的停止原因、请求上限、`reasoningTokens` 和 `usage.output`。 | core |
 | 尺子 `ruler` | 固定的评分规则、证据校验和计分方法，用于解释 harness 改动。 | 不是教师本身，也不是名次。 | manifest 的 `identity.ruler` 和 judge schema。 | judge |

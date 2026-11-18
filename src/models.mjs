@@ -35,7 +35,7 @@ export class Models {
   #save;
   #reserve;
 
-  constructor({ mode, responses, save, reserve }) {
+  constructor({ mode, responses, save, reserve, roles = Object.keys(routes) }) {
     this.#save = save;
     this.#reserve = reserve;
     if (mode === 'offline') {
@@ -45,7 +45,8 @@ export class Models {
       this.#roles = Object.fromEntries(Object.keys(routes).map(role => [role, faux.getModel()]));
       return;
     }
-    this.#keys = Object.fromEntries(Object.entries(routes).map(([role, route]) => {
+    const selected = roles.map(role=>[role,routes[role]]);
+    this.#keys = Object.fromEntries(selected.map(([role, route]) => {
       const key = process.env[route.key]?.trim();
       if (!key) throw failure('configuration', { role, turn: 0, call: 0 }, `missing ${route.key}`);
       return [role, key];
@@ -53,7 +54,7 @@ export class Models {
     const router = openrouterProvider();
     this.#pi.setProvider(deepseekProvider());
     this.#pi.setProvider(router);
-    this.#roles = Object.fromEntries(Object.entries(routes).map(([role, route]) => {
+    this.#roles = Object.fromEntries(selected.map(([role, route]) => {
       const model = this.#pi.getModel(route.provider, route.id) ?? (role === 'judge' ? {
         id: route.id, name: 'HY4 Flash', api: 'openai-completions', provider: route.provider,
         baseUrl: 'https://openrouter.ai/api/v1', reasoning: true, input: ['text'],
@@ -104,7 +105,7 @@ export class Models {
       const coordinates = { role, turn, call, attempt };
       this.#reserve?.(coordinates, config.maxTokens);
       const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
-      const raw = { ...coordinates, context: request };
+      const raw = { ...coordinates, context: request, ...(scope.binding && { binding:scope.binding }) };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
       const startedAt = new Date().toISOString();
       const start = performance.now();
@@ -166,6 +167,7 @@ export class Models {
         startedAt, elapsedMs: Math.round(performance.now()-start), timeoutMs,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
+        ...(scope.binding && { binding:scope.binding }),
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
         failureKind: failureKind ?? null, detail: detail ?? null,

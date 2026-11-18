@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fixtures from './fixtures/judge-real-replay.json' with { type: 'json' };
-import { bind, judgementSchema } from '../contracts/judge/schema.mjs';
+import { bind, judgementSchema, parseNumberedJudgement, replayLegacyJudgement } from '../contracts/judge/schema.mjs';
+import { Value } from '@sinclair/typebox/value';
+import contextFailures from './fixtures/judge-context-replay.json' with { type: 'json' };
 import { grade } from '../src/judge.mjs';
 import { Models } from '../src/models.mjs';
 
@@ -40,7 +42,7 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   const sse = data => `data: ${JSON.stringify(data)}\n\n`;
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     payloads.push(JSON.parse(options.body));
-    return new Response(sse({ id:'fake', choices:[{index:0,delta:{content:text},finish_reason:'stop'}] }) + 'data: [DONE]\n\n', { headers: { 'content-type':'text/event-stream' } });
+    return new Response(sse({ id:'fake', choices:[{index:0,delta:{content:JSON.stringify(numbered(text,messages))},finish_reason:'stop'}] }) + 'data: [DONE]\n\n', { headers: { 'content-type':'text/event-stream' } });
   });
   const rows = [];
   const models = new Models({ mode: 'real', save: (raw, row) => rows.push({ raw, row }) });
@@ -52,7 +54,7 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   assert.equal(payload.provider?.require_parameters, true);
   assert.equal(payload.response_format?.type, 'json_schema');
   assert.equal(payload.response_format.json_schema.strict, true);
-  assert.deepEqual(payload.response_format.json_schema.schema, JSON.parse(JSON.stringify(judgementSchema)));
+  assert.deepEqual(payload.response_format.json_schema.schema, JSON.parse(JSON.stringify(judgementSchema(bind(messages)))));
   function checkClosed(node) {
     if (node.type === 'object') {
       assert.equal(node.additionalProperties, false);
@@ -65,5 +67,43 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   checkClosed(payload.response_format.json_schema.schema);
   assert.equal(payload.tools, undefined);
   assert.match(payload.messages[0].content, /on that message or later/);
+  assert.doesNotMatch(JSON.stringify(payload.messages), /context_id/);
+  assert.ok(messages.every(m=>!JSON.stringify(payload.messages).includes(m.id)));
+  assert.deepEqual(JSON.parse(payload.messages.at(-1).content).messages.map(m=>m.n),messages.map((_,i)=>i+1));
   assert.equal(rows[0].row.judgementMode, 'json_schema');
+});
+
+function numbered(text,messages) {
+  const {results} = JSON.parse(text);
+  for (const row of Object.values(results)) for (const group of row.evidence_groups) for (const slot of Object.values(group.slots)) {
+    if (slot.message_ids) { slot.message_numbers = slot.message_ids.map(id=>messages.findIndex(m=>m.id===id)+1); delete slot.message_ids; }
+    if (slot.opportunity_message_ids) { slot.opportunity_numbers = slot.opportunity_message_ids.map(id=>messages.findIndex(m=>m.id===id)+1); delete slot.opportunity_message_ids; }
+    delete slot.checked_view_id;
+  }
+  return {results};
+}
+
+test('old e/a context echoes do not participate in replay; unknown evidence still rejects', () => {
+  for (const [i, {text,messages}] of contextFailures.entries()) {
+    const view = bind(messages);
+    const value = JSON.parse(text);
+    assert.equal(value.context_id, ['e','a'][i]);
+    assert.throws(()=>replayLegacyJudgement(text,view), /unknown message ID/);
+  }
+});
+
+test('numbered wire schema enforces bounds and maps references back to full IDs', () => {
+  const {text,messages}=fixtures[3];
+  const view=bind(messages);
+  const good=numbered(text,messages);
+  const schema=judgementSchema(view);
+  assert.equal('context_id' in schema.properties,false);
+  assert.equal(Value.Check(schema,good),true);
+  assert.deepEqual(parseNumberedJudgement(JSON.stringify(good),view).productive_struggle.evidence,messages.slice(0,8).map(m=>m.id));
+  const slot=good.results.productive_struggle.evidence_groups[0].slots.student_stuck_or_error;
+  for(const n of [0,messages.length+1,1.5]){
+    slot.message_numbers=[n];
+    assert.equal(Value.Check(schema,good),false);
+    assert.throws(()=>parseNumberedJudgement(JSON.stringify(good),view),/structure/);
+  }
 });

@@ -4,6 +4,10 @@
     {"id":"example:m:2","role":"teacher","turn":1,"text":"Here is the full derivation and answer."},
     {"id":"example:m:3","role":"learner","turn":1,"text":"Okay."}
   ],
+  "numberedResponse": {
+    "results":{"productive_struggle":{"score":0,"reason":"Response 2 opened with the full solution.","evidence_groups":[{"claim":"counterexample","slots":{"student_stuck_or_error":{"state":"observed","message_numbers":[1]},"tutor_delay_of_gratification":{"state":"observed","message_numbers":[2]}}}]}}
+  },
+  "numberedMapping": {"1":"example:m:1","2":"example:m:2","3":"example:m:3"},
   "response": {
     "contract_version":"e1-v6-message-evidence-v1",
     "context_id":"replaced in test by the transcript hash",
