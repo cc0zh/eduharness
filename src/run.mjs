@@ -7,6 +7,7 @@ import { readTask, revision } from '../contracts/dataset/schema.mjs';
 import { directDimension, ruler } from '../contracts/judge/schema.mjs';
 import { learnerFormat, parseLearner } from '../contracts/learner/schema.mjs';
 import { policy, routes, rounds, taskId } from '../config/e1.mjs';
+import { targets } from '../config/e2.mjs';
 import { grade } from './judge.mjs';
 import { attemptBudget, Models } from './models.mjs';
 import { offlineResponses, sampleJudge } from './offline.mjs';
@@ -15,14 +16,38 @@ import { createTeacher } from './teacher/session.mjs';
 const source = name => readFileSync(new URL(`../${name}`, import.meta.url));
 const identityFiles = ['package-lock.json', 'config/e1.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/models.mjs', 'src/run.mjs', 'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
 const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+const variants = scenario => scenario === 'E2' ? cellIds : ['normal', 'answer_dump'];
+export const scenarioName = ({scenario = 'E1', judgeOnly}) => judgeOnly ? 'E1-judge-only' : scenario;
 
-export function budget(judgeOnly) {
+export function budget({ judgeOnly, scenario } = {}) {
   if (judgeOnly) return {typicalCalls:1,maxCalls:policy.retries+1,maxOutputTokens:(policy.retries+1)*policy.judge.maxTokens};
-  const teacher = rounds * (policy.teacher.requestsPerTurn + 1);
-  const learner = rounds * cellIds.length;
-  const judge = cellIds.length;
+  const judge = variants(scenario).length;
+  const teacher = rounds * (policy.teacher.requestsPerTurn + judge - 1);
+  const learner = rounds * judge;
   const attempts = policy.retries + 1;
-  return { typicalCalls: rounds * cellIds.length + learner + judge, maxCalls: attempts * (teacher + learner + judge), maxOutputTokens: attempts * (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens + judge * policy.judge.maxTokens) };
+  return { typicalCalls: 2 * learner + judge, maxCalls: attempts * (teacher + learner + judge), maxOutputTokens: attempts * (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens + judge * policy.judge.maxTokens) };
+}
+
+function compare(judgements) {
+  function readSide(cell, dimension) {
+    const judged = judgements.get(cell);
+    if (!judged) return null;
+    const { groups, binding, messages } = judged;
+    const row = groups.teaching[dimension] ?? groups.consolidation[dimension];
+    return {
+      score: row.score,
+      references: row.evidence.map(id => {
+        const index = binding.messageIds.indexOf(id);
+        const { turn, role } = messages[index];
+        return { id, number: index + 1, turn, role };
+      }),
+    };
+  }
+  return Object.entries(targets).map(([cell, dimension]) => {
+    const normal = readSide('normal', dimension);
+    const variant = readSide(cell, dimension);
+    return { cell, dimension, normal, variant, delta: normal && variant ? normal.score - variant.score : null };
+  });
 }
 
 function frozenDialogue(root, id) {
@@ -46,13 +71,15 @@ function frozenDialogue(root, id) {
   } catch { throw failure('invalid_input', {}, 'judge-only requires a completed E1 normal dialogue'); }
 }
 
-export async function runE1({ mode, root, id, judgeOnly, checkReceipt, limits = { maxAttempts: budget(judgeOnly).maxCalls, maxRequestedOutputTokens: budget(judgeOnly).maxOutputTokens } }) {
+export async function run({ mode, root, id, judgeOnly, scenario: requested, checkReceipt, limits }) {
+  const scenario = scenarioName({scenario:requested, judgeOnly});
+  const ceiling = budget({ scenario, judgeOnly });
+  limits ??= { maxAttempts: ceiling.maxCalls, maxRequestedOutputTokens: ceiling.maxOutputTokens };
   const taskBytes = source('data/upstream/tasks/stage0_situated_tutoring.json');
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   const operatorPolicy = policyBytes.toString('utf8');
   const task = readTask(JSON.parse(taskBytes), taskId);
   const frozen = judgeOnly ? frozenDialogue(root,judgeOnly) : undefined;
-  const scenario = frozen ? 'E1-judge-only' : 'E1';
   const runDir = join(root, id);
   mkdirSync(root, { recursive: true });
   try { mkdirSync(runDir); }
@@ -64,9 +91,15 @@ export async function runE1({ mode, root, id, judgeOnly, checkReceipt, limits = 
   const reserve = attemptBudget(limits);
   const pi = Object.fromEntries(Object.entries(pkg.dependencies).filter(([key]) => key.startsWith('@earendil-works/')));
   const identity = { pi, runnerVersion: pkg.version, dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes) }, ruler, policy, limits, dialogueSource: frozen?.provenance, routes: mode === 'real' ? routes : 'pi-ai-faux', sources: Object.fromEntries(identityFiles.map(path => [path, hash(source(path))])) };
-  write(join(runDir, filenames.manifest), { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: budget(judgeOnly), limits, writer, checkReceipt, source: frozen?.provenance });
+  if (scenario === 'E2') {
+    identity.targets = targets;
+    identity.sources['config/e2.mjs'] = hash(source('config/e2.mjs'));
+  }
+  write(join(runDir, filenames.manifest), { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, writer, checkReceipt, source: frozen?.provenance });
   const cells = [];
-  for (const variant of frozen ? ['normal'] : cellIds) {
+  const judgements = new Map();
+  const planned = frozen ? ['normal'] : variants(scenario);
+  for (const variant of planned) {
     const path = join(runDir, variant);
     mkdirSync(join(path, filenames.raw), { recursive: true });
     const messages = frozen?.messages ?? [], events = [], telemetry = [];
@@ -105,14 +138,19 @@ export async function runE1({ mode, root, id, judgeOnly, checkReceipt, limits = 
       const { groups, scores, binding } = await grade(models, messages, { turn, runId:id, cell:variant });
       store(filenames.judge, {binding,groups});
       cells.push(cellResult(variant, scores));
+      if (scenario === 'E2') judgements.set(variant, { groups, binding, messages });
     } catch (error) {
       const classified = error.failure ?? failure('artifact_io', { role, turn, call }, error.message).failure;
       cells.push(cellResult(variant, null, classified));
       break;
     }
   }
-  const acceptance = frozen ? cells[0]?.validTotal === true : cells.length === cellIds.length && cells.every(c => c.validTotal) && cells[0].directAnswer - cells[1].directAnswer >= 1;
-  const result = { scenario, taskId, mode, runDir, directDimension, acceptance, cells };
+  const comparisons = scenario === 'E2' ? compare(judgements) : undefined;
+  const complete = cells.length === planned.length && cells.every(c => c.validTotal);
+  const acceptance = complete && (frozen || (comparisons
+    ? comparisons.every(row => row.delta >= 1 && row.normal.references.length && row.variant.references.length)
+    : cells[0].directAnswer - cells[1].directAnswer >= 1));
+  const result = { scenario, taskId, mode, runDir, directDimension, acceptance, cells, ...(comparisons && { comparisons }) };
   write(join(runDir, filenames.result), result);
   mkdirSync(join(root, '_receipts'), { recursive: true });
   write(join(root, '_receipts', `${id}.json`), { id, scenario, mode, runDir, result: filenames.result, acceptance });

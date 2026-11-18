@@ -1,7 +1,7 @@
 import { executionSuccess, infraFailure, nonblank, requireThat } from '../core/schema.mjs';
 
 export const modes = ['offline', 'real'];
-export const cellIds = ['normal', 'answer_dump'];
+export const cellIds = ['normal', 'answer_dump', 'lecture', 'sycophant_close', 'no_teach'];
 export const filenames = Object.freeze({ manifest: 'manifest.json', result: 'result.json', transcript: 'transcript.json', telemetry: 'telemetry.json', events: 'teacher-events.json', judge: 'judge.json', raw: 'calls' });
 export function cellResult(id, scores, error) {
   requireThat(cellIds.includes(id), 'unknown cell');

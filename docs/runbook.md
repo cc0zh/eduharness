@@ -2,13 +2,15 @@
 
 使用 README 命令。`--run-root` 默认 `runs`，相对当前工作目录；`--id` 默认 UUID，不覆盖同名目录；`--mode` 默认 `offline`。只有 `--mode real --confirm-cost` 可连接真实提供商。费用许可由操作者取得，flag 不是授权来源。`--estimate-only` 不发模型请求、不写 run。
 
-重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 传入剩余额度。两格共享这一上限，每次尝试在发送前预留额度；预算不足报 `budget_exhausted`。已有目录报 `run_conflict`，不会写入。manifest 的 `writer.pid` 对应每条调用遥测的 `pid`。
+重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 传入剩余额度。同一 run 的各格共享这一上限，每次尝试在发送前预留额度；预算不足报 `budget_exhausted`。已有目录报 `run_conflict`，不会写入。manifest 的 `writer.pid` 对应每条调用遥测的 `pid`。
+
+E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与真实运行命令](plans/e2.md)。在 `result.json` 的 `comparisons` 对照每个目标维度的原始分档、证据序号和轮次。用同格 `judge.json` 查证据分组与机会窗口，再用 `transcript.json` 回读消息 ID。任一格发生基础设施故障时，保留已有比较并停止后续格子。缺少任一侧的分档时，该比较的差异值为 `null`。
 
 真实模式（包括 `--judge-only`）在加载凭据前检查 Git 工作区和当前 HEAD 的 `runs/_receipts/check-<sha>.json`。干净工作区运行 `npm run check` 会生成含通过数的收据；有未提交变更或切换 HEAD 后不能沿用旧收据。`--estimate-only` 可以在没有收据时使用，不发请求。
 
 只裁判冒烟可先运行 `node src/cli.mjs --mode real --judge-only e1-real-structured --estimate-only`。取得授权后，移除 `--estimate-only`，加 `--confirm-cost --id <新 ID>`。该模式只读取同一 `--run-root` 下源 run 的完整 `normal` 对话，只需要 `OPENROUTER_API_KEY`。源原件不会改写；新 run 的 `acceptance` 只表示该裁判冒烟通过，不是双格 E1 验收。
 
-直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档；stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。
+直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档；stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器检查要求四个目标维度各低至少 1 档且两侧有引用。场景验收还需回读引用，确认分差与预登记的行为对应。
 
 | 原件 | 用途 |
 | --- | --- |
