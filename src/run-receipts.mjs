@@ -1,13 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
 import { checkSnapshot, checkout } from './real-preflight.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--judge-only', '--max-attempts', '--max-requested-output-tokens']);
-const safeValues = new Set(['offline', 'real', 'E1', 'E2']);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--judge-only', '--max-attempts', '--max-requested-output-tokens']);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test']);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const digestBytes = bytes => createHash('sha256').update(bytes).digest('hex');
+const sha256 = x => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
 
@@ -16,11 +19,11 @@ function parameterSummary(argv) {
   for (let index = 0; index < argv.length; index++) {
     const [name, inline] = argv[index].split('=', 2);
     if (!name.startsWith('--')) continue;
-    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost'].includes(name) ? name : '<unknown>');
+    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost', '--generate-only'].includes(name) ? name : '<unknown>');
     if (!safeOptions.has(name)) continue;
     const value = inline ?? (argv[index + 1]?.startsWith('--') ? undefined : argv[++index]);
     if (value === undefined) continue;
-    values[name.slice(2).replaceAll('-', '_')] = (['--mode', '--scenario'].includes(name) && safeValues.has(value)) || (name.startsWith('--max-') && /^\d+$/.test(value)) ? value : '<redacted>';
+    values[name.slice(2).replaceAll('-', '_')] = (['--mode', '--scenario', '--phase'].includes(name) && safeValues.has(value)) || (name.startsWith('--max-') && /^\d+$/.test(value)) ? value : '<redacted>';
   }
   return { flags: [...new Set(flags)].sort(), values };
 }
@@ -28,15 +31,17 @@ function parameterSummary(argv) {
 function atomicJson(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
   const fd = openSync(temporary, 'wx');
   try {
-    writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`);
+    writeFileSync(fd, bytes);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
   try { linkSync(temporary, path); }
   finally { unlinkSync(temporary); }
+  return digestBytes(bytes);
 }
 
 export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv = process.argv.slice(2) }) {
@@ -59,11 +64,15 @@ export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv =
   };
   atomicJson(startPath, start);
   writeFileSync(requestPath, '', { flag: 'wx' });
+  let evaluationSha256;
   return {
     start,
     startPath,
     requestPath,
     processPath,
+    publishEvaluation(evaluation) {
+      evaluationSha256 = atomicJson(join(receiptRoot, `${id}.json`), evaluation);
+    },
     append(event) {
       const fd = openSync(requestPath, 'a');
       try {
@@ -82,6 +91,7 @@ export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv =
         endedAt: isoNow(),
         requestCount: requests.filter(event => event.type === 'request_start').length,
         acceptance,
+        ...(evaluationSha256 && { evaluationSha256 }),
         ...(error && { error }),
       });
     },
@@ -141,13 +151,15 @@ function readRequestEvents(path) {
 export function verifyRun(root, id) {
   root = resolve(root);
   const missing = [], invalid = [];
-  const load = (path, label) => {
+  const load = (path, label, expectedHash) => {
     if (!existsSync(path)) {
       missing.push(label);
       return null;
     }
     try {
-      const value = JSON.parse(readFileSync(path, 'utf8'));
+      const bytes = readFileSync(path);
+      const value = JSON.parse(bytes);
+      if (expectedHash && digestBytes(bytes) !== expectedHash) invalid.push(`${label} digest differs from receipt`);
       if (record(value)) return value;
     } catch {}
     invalid.push(`${label} is not a JSON object`);
@@ -171,7 +183,7 @@ export function verifyRun(root, id) {
   }
   const shared = { runId: x => x === id, head: x => typeof x === 'string' && /^[a-f0-9]{40,64}$/.test(x), pid: x => Number.isSafeInteger(x) && x > 0 };
   validate('startup record', start, { ...shared, clean: x => typeof x === 'boolean', mode: x => ['offline', 'real', 'unknown'].includes(x), parameters: record, startedAt: time });
-  validate('process receipt', receipt, { ...shared, exitCode: x => Number.isInteger(x) && x >= 0 && x <= 255, endedAt: time, requestCount: x => Number.isSafeInteger(x) && x >= 0, acceptance: x => [null, true, false].includes(x), startHash: x => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x) });
+  validate('process receipt', receipt, { ...shared, exitCode: x => Number.isInteger(x) && x >= 0 && x <= 255, endedAt: time, requestCount: x => Number.isSafeInteger(x) && x >= 0, acceptance: x => [null, true, false].includes(x), startHash: sha256 });
   if (start && receipt) {
     for (const field of ['runId', 'head', 'pid']) if (start[field] !== receipt[field]) invalid.push(`${field} differs between startup record and process receipt`);
     if (receipt.startHash !== digest(start)) invalid.push('startHash differs from startup record');
@@ -207,12 +219,35 @@ export function verifyRun(root, id) {
     if (start && start.mode !== 'real' && observedRequestCount) invalid.push('request log contradicts startup mode');
   }
   const evaluationReceiptPath = join(root, '_receipts', `${id}.json`);
-  if (receipt && existsSync(evaluationReceiptPath)) {
-    const evaluation = load(evaluationReceiptPath, 'evaluation receipt');
+  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || start?.parameters?.values?.scenario === 'ruler-expand' && typeof receipt.acceptance === 'boolean');
+  if (requiresAnchor && !sha256(receipt.evaluationSha256)) invalid.push('process receipt missing valid evaluationSha256');
+  if (receipt && (requiresAnchor || existsSync(evaluationReceiptPath))) {
+    const evaluation = load(evaluationReceiptPath, 'evaluation receipt', receipt.evaluationSha256);
     if (evaluation) {
       if (evaluation.acceptance !== receipt.acceptance) invalid.push('acceptance differs between evaluation receipt and process receipt');
       if (evaluation.id !== id) invalid.push('evaluation receipt id differs from requested ID');
       if (start && evaluation.mode !== start.mode) invalid.push('mode differs between evaluation receipt and startup record');
+      if (start?.parameters?.values?.scenario === 'ruler-expand' || ['ruler-expand', 'ruler-expand-judge-only'].includes(evaluation.scenario)) {
+        const checkArtifact = (path, expected) => {
+          if (!sha256(expected)) { invalid.push(`${path} missing valid digest`); return; }
+          try {
+            if (digestBytes(readFileSync(join(root, id, path))) !== expected) invalid.push(`${path} digest differs from evaluation receipt`);
+          } catch (error) {
+            if (error.code === 'ENOENT') missing.push(path);
+            else invalid.push(`${path} could not be read`);
+          }
+        };
+        checkArtifact(filenames.manifest, evaluation.manifestSha256);
+        checkArtifact(filenames.result, evaluation.resultSha256);
+        const judgeOnly = evaluation.scenario === 'ruler-expand-judge-only';
+        const artifacts = judgeOnly ? evaluation.graded : evaluation.frozen;
+        if (!Array.isArray(artifacts)) invalid.push('evaluation receipt does not list frozen artifacts');
+        else for (const artifact of artifacts) {
+          const { taskId, condition, path } = artifact ?? {};
+          if (typeof taskId !== 'string' || !/^S0-\d+$/.test(taskId) || !cellIds.includes(condition) || path !== `${taskId}/${condition}/${judgeOnly ? filenames.judge : filenames.transcript}`) invalid.push('invalid frozen artifact coordinate');
+          else checkArtifact(path, judgeOnly ? artifact.sha256 : artifact.transcriptSha256);
+        }
+      }
     }
   }
   if (receipt && receipt.acceptance === true && receipt.exitCode !== 0) invalid.push('exitCode contradicts acceptance');

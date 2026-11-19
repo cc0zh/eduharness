@@ -16,6 +16,15 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 
 使用 `--scenario E2 --judge-only <源 run ID> --judge-cell all` 可用当前尺子补评冻结五格。真实模式要求真实源 run。新 manifest 保存源评测身份、源 manifest 哈希和每格对话哈希，结果对照使用本次裁判给出的分档。OpenRouter 结构化裁判的调用原件保存脱敏 `outbound` 请求字段。将 `reasoning.max_tokens` 与遥测的 `reasoningTokens` 核对。超限时记录「路由未执行上限」，用量缺失时记录未知。
 
+补尺子训练使用 `--scenario ruler-expand --phase train`。用 `--generate-only` 生成锁定训练清单的对话。用 `--judge-only <生成 run ID>` 评分。评分前会核对源进程和评测收据及每段对话的字节哈希与消息顺序。测试入口在尺子冻结前拒绝请求。每次先以新 ID 加 `--estimate-only` 预检，再登记实际使用的 run ID。
+
+| 阶段 | 常规请求 | 请求硬上限 | 请求输出 token 硬上限 |
+| --- | ---: | ---: | ---: |
+| 生成 15 条训练对话 | 120 | 396 | 1,881,216 |
+| 训练初评 | 15 | 45 | 2,949,120 |
+
+生成完成后用 `--verify-run <生成 run ID>` 核对收据，再串行运行初评。每题产物在 `<run>/<题号>/<教师条件>/`。达到第四题失败或剩余额度不足时停止。核对两个真实 run 后用 `node scripts/ruler-labels.mjs <生成 run ID> <初评 run ID>` 导出盲标材料。盲标文件在系统临时目录的 `teacharena/ruler-expand/labeling/`。映射和机器分数保存在初评 run 下。
+
 直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档，stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器条件见[裁判契约](../contracts/judge/README.md#e2-坏教师的目标维度)。运行收据记录 `acceptance`。人工验收时同时保存命令退出码和引用回读结论。
 
 用 `node src/cli.mjs --verify-run <id>` 核对 `runs/_receipts/` 中的进程原件。自定义运行根时传入原 `--run-root`。[运行收据契约](../contracts/artifacts/README.md#运行收据)

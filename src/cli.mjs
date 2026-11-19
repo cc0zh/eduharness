@@ -45,16 +45,17 @@ if (option('--verify-run') >= 0) {
   installRunReceiptHandlers(recorder, () => acceptance);
   const { budget, run, scenarioName } = await import('./run.mjs');
 
-  let config, estimate;
+  let config, estimate, rulerRunner, ceiling;
   try {
     const { values } = parseArgs({ options: {
       mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
       id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
       'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
+      phase: { type: 'string' }, 'generate-only': { type: 'boolean' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
-    if (!['E1', 'E2'].includes(values.scenario)) throw new Error('scenario must be E1 or E2');
+    if (!['E1', 'E2', 'ruler-expand'].includes(values.scenario)) throw new Error('scenario must be E1, E2 or ruler-expand');
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
@@ -62,7 +63,16 @@ if (option('--verify-run') >= 0) {
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
     estimate = values['estimate-only'];
     config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };
-    const ceiling = budget(config);
+    if (values.scenario === 'ruler-expand') {
+      if (Boolean(values['generate-only']) === hasJudgeSource) throw new Error('ruler-expand needs exactly one of --generate-only or --judge-only <id>');
+      rulerRunner = await import('./ruler-run.mjs');
+      config.phase = values.phase;
+      config.admission = rulerRunner.admitRulerRun(config.phase);
+      ceiling = rulerRunner.rulerBudget(config.admission.planned, config.judgeOnly);
+    } else {
+      if (values.phase !== undefined || values['generate-only']) throw new Error('--phase and --generate-only require --scenario ruler-expand');
+      ceiling = budget(config);
+    }
     function limit(flag, maximum) {
       const value = values[flag] ?? String(maximum);
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > maximum) throw new Error(`invalid --${flag}; expected 1 through ${maximum}`);
@@ -79,19 +89,21 @@ if (option('--verify-run') >= 0) {
   if (config && !process.exitCode) {
     try {
       if (conflict) throw failure('run_conflict', {}, `run ID ${id} already has a startup record; this launch was recorded as ${recorder.start.runId}`);
-      if (estimate) emit({ scenario: scenarioName(config), typicalCalls: budget(config).typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens });
+      if (estimate) emit({ scenario: scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens });
       else {
+        const prepared = rulerRunner?.prepareRulerRun(config);
         if (config.mode === 'real') {
           config.checkReceipt = requireCheckReceipt(checkout, [recorder.startPath, recorder.requestPath]);
           if (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head) throw failure('preflight_failed', {}, 'checkout changed after startup');
-          loadCredentials(config.judgeOnly ? ['judge'] : undefined);
+          loadCredentials(config.judgeOnly ? ['judge'] : rulerRunner ? ['teacher', 'learner'] : undefined);
         }
-        const result = await run(config);
+        const result = rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
         acceptance = result.acceptance;
-        emit(result);
+        emit(rulerRunner ? rulerRunner.publicRulerResult(result) : result);
         if (!result.acceptance) {
           const problem = result.cells.find(cell => cell.failure)?.failure;
-          console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);
+          if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
+          else console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);
           process.exitCode = 1;
         }
       }
