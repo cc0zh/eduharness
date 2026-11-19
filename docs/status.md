@@ -13,6 +13,21 @@
 
 E1 真实结果为两格均有有效总分，`productive_struggle` 为正常格 2 分、`answer_dump` 格 0 分。23 / 14 条引用均可回读，8 份学生请求未检出教师内部标记。正常格首份裁判响应因分数与证据冲突被拒绝，重试通过。历史执行与排查记录保留在 `cd0de52` 的状态文档。裁判结构化输出故障另见[诊断与复核](judge-structured-output.md)。
 
+## 补尺子：训练初评完成，待人工盲标
+
+只纳入原件初筛通过的 40 道题，锁定 15 道训练和 25 道测试。20 道待校正、5 道暂缓、28 道旧封存均保持原状。名单、种子、复算规则和 SHA256 见[数据契约](../contracts/dataset/README.md#补尺子划分)。本轮未生成或评测试题。尺子仍是 `e1-numbered-evidence-v3 / judge-output-v2 / evaluation-identity-v2`，尚未完成校准和冻结。
+
+干净 HEAD `5e56667` 的 [检查收据](../runs/_receipts/check-5e5666738fd1d096e3caabde4b20b567ea5ffb77.json)记录 68 项通过。真实生成和初评串行执行。15 道训练题均 `execution_success`，初评全部 `scored: true`、`validTotal: true`。两个 run 的进程及 `--verify-run` 均退出 0；[生成复核](../.tmp/scratch/ruler-expand/ruler-train-gen-v1.verify.json)和[初评复核](../.tmp/scratch/ruler-expand/ruler-train-score-v1.verify.json)均为 `verified: true`、`acceptance: true`。全部遥测 PID 与对应启动收据一致，生成 `61792`、初评 `18516`。
+
+| 阶段 | 收据 | 请求数 / 上限 | 请求输出 token / 上限 | 实报输入 / 缓存读 / 输出 / 合计 |
+| --- | --- | ---: | ---: | ---: |
+| 生成 | [start](../runs/_receipts/ruler-train-gen-v1.start.json)、[requests](../runs/_receipts/ruler-train-gen-v1.requests.jsonl)、[process](../runs/_receipts/ruler-train-gen-v1.process.json) | 120 / 396 | 563,520 / 1,881,216 | 84,689 / 129,280 / 61,894 / 275,863 |
+| 初评 | [start](../runs/_receipts/ruler-train-score-v1.start.json)、[requests](../runs/_receipts/ruler-train-score-v1.requests.jsonl)、[process](../runs/_receipts/ruler-train-score-v1.process.json) | 15 / 45 | 983,040 / 2,949,120 | 48,063 / 1,024 / 185,526 / 234,613 |
+
+重试和用量缺报均为 0。两阶段合计实报 510,476 token。原 20 条最省档估算来自本机 `%TEMP%/teacharena/ruler-expand/plan.md` 第 6 节（SHA256 `59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22`），生成 295,800、初评 379,000，合计约 674,800 token。按 15 条线性折算，生成约 221,850 token，实报高 24.3%；初评约 284,250 token，实报低 17.5%。实际请求输出额度均低于预检上限。15 次裁判请求未观察到推理 token 超出请求推理上限。
+
+盲标在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。`blind.md` 含 15 条完整编号对话，`labels.csv` 含 90 个空白评分项，`README.md` 为填写说明。机器分数和匿名映射在初评 run 下，标注时无需打开。五份文件摘要见本机 `.tmp/scratch/ruler-expand/verify-delivery.log`。标完后交回填写的 CSV，后续在生成 run 下保存 `labels-locked.csv` 并锁定 SHA256，再揭分。本轮不锁定未填写的表，不计算一致率，不改尺子，不启动测试。测试阶段保留 `no_teach` 首 4 题至少 3 题评分有效的继续条件。
+
 ## E2 真实运行
 
 | 场景卡 | 结果 |
