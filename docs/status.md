@@ -1,14 +1,14 @@
 # 当前状态
 
-项目处于 [S1 稳定的环境](scenarios.md#s1-稳定的环境)。
+已验收 [S1 稳定的环境](scenarios.md#s1-稳定的环境)。本次验收原件为 `e2-real-20261119-06`。
 
 文档重组待独立审查。提交前审查服务连接超时，审查由后续会话接手。
 
 | 场景 | 状态 | 证据入口 |
 | --- | --- | --- |
 | E1 S0-06 真实双格 | 已验收 | `git show cd0de52:docs/status.md`。运行和检查收据见 [E1 卡](scenarios.md#e1-s0-06-真实双格)。 |
-| E2 四个坏教师自检 | 真实验收未通过 | v3 使用 `judge-output-v2` 的冻结补评取得五格有效分数，`lecture` 低一档，`sycophant_close` 同档。下一次完整五格按 S1 卡核对四项目标。 |
-| S2 独立的改进环境 | 待 S1 通过 | [S2 卡](scenarios.md#s2-独立的改进环境)列出隔离验收所需原件。 |
+| E2 四个坏教师自检 | 已验收 | `e2-real-20261119-06` 同次五格在四个预登记维度上全部区分。见下方原件与人工回读。 |
+| S2 独立的改进环境 | 待实现和验收 | [S2 卡](scenarios.md#s2-独立的改进环境)列出隔离验收所需原件。 |
 | S3 改进循环 | 待 S2 通过 | [S3 卡](scenarios.md#s3-改进循环)及其 E5 单轮对照。 |
 
 E1 真实结果为两格均有有效总分，`productive_struggle` 为正常格 2 分、`answer_dump` 格 0 分。23 / 14 条引用均可回读，8 份学生请求未检出教师内部标记。正常格首份裁判响应因分数与证据冲突被拒绝，重试通过。历史执行与排查记录保留在 `cd0de52` 的状态文档。裁判结构化输出故障另见[诊断与复核](judge-structured-output.md)。
@@ -111,13 +111,50 @@ node src/cli.mjs --verify-run s1-v3-frozen-real-20261119-01
 
 预检上限为 15 次尝试、983,040 请求输出 token。实际 5 次、0 次重试、327,680 请求输出 token。供应商实报输入 13,005、输出 61,050，合计 74,055。每次出站均为 `max_tokens=65536`、`reasoning.max_tokens=16384`。按上述格序，实报推理为 10,601 / 9,305 / 12,258 / 11,055 / 10,706，均在上限内。
 
+### v3 完整真实五格
+
+`e2-real-20261119-06` 在干净 HEAD `20c7056` 执行，检查收据记录 54 项通过。五格同用 S0-06、学生画像、四轮编排、`e1-numbered-evidence-v3`、`judge-output-v2`、`evaluation-identity-v2` 和 `e1-call-policy-v4`。[manifest](../runs/e2-real-20261119-06/manifest.json) · [检查收据](../runs/_receipts/check-20c70569330406372024ef9e57a735e351195475.json)
+
+```sh
+node src/cli.mjs --scenario E2 --mode real --estimate-only --id s1-v3-output-v2-full-estimate-20261119-01
+node src/cli.mjs --scenario E2 --mode real --confirm-cost --id e2-real-20261119-06 --max-attempts 147 --max-requested-output-tokens 1610112
+node src/cli.mjs --verify-run e2-real-20261119-06
+```
+
+预检、完整运行和复核均退出 0，`verified: true`、`acceptance: true`。全部 46 条遥测与启动、进程收据和 manifest 一致，PID 为 `74648`。五份发布的裁判正文重放一致，四项目标分档均有可回读引用。[启动收据](../runs/_receipts/e2-real-20261119-06.start.json) · [进程收据](../runs/_receipts/e2-real-20261119-06.process.json) · [评测收据](../runs/_receipts/e2-real-20261119-06.json) · [结果](../runs/e2-real-20261119-06/result.json) · [人工回读](../runs/e2-real-20261119-06/review.md)
+
+五格均为 `execution_success`、`scored: true`、`validTotal: true`。六维顺序与冻结表相同。下表的消息号对应 `e2-real-20261119-06:<格子>:m:<序号>`。
+
+| 格子 | 六维 / 总分 | 目标维度 | 正常 → 本格 / 分差 | 裁判引用回读 |
+| --- | --- | --- | --- | --- |
+| `normal` | 2 / 2 / 1 / 2 / 2 / 1，合计 10 | 四项对照基准 | 正常对照 | #7 学生列出 BE 方程并问 “Can we just subtract them to get x quickly?” |
+| `answer_dump` | 1 / 1 / 0 / 0 / 1 / 0，合计 3 | `productive_struggle` | 2 → 0 / 2 | #2 教师首答推到 `25/13`。正常 #2 先追问垂线的方向和落点。 |
+| `lecture` | 1 / 1 / 0 / 0 / 0 / 0，合计 2 | `agency_handoff` | 1 → 0 / 1 | #9 学生复述 #8 的公式和答案，说 “I’m still not totally seeing why it works”。 |
+| `sycophant_close` | 0 / 0 / 0 / 0 / 0 / 0，合计 0 | `verification_or_transfer` | 1 → 0 / 1 | #8 教师说 “You’ve completed it”。正常 #4 问哪个坐标表示垂距及其原因，#5 学生给出 x 但仍不确定。 |
+| `no_teach` | 0 / 0 / 1 / 0 / 0 / 0，合计 1 | `misconception_repair` | 2 → 0 / 2 | #7 学生仍问 AE 与垂距的区别，#8 教师只说 “Keep going—you can do this!”。正常 #2、#6 解释区别，#9 学生用求出的 x 检验原猜测。 |
+
+预检上限为 147 次尝试和 1,610,112 请求输出 token。实际 46 次请求，含 1 次重试，请求输出额度 581,056。已报输入 29,843、缓存读入 38,016、输出 100,846，合计 168,705 token。另有一次用量未知。[请求日志](../runs/_receipts/e2-real-20261119-06.requests.jsonl)
+
+六次裁判请求的脱敏出站均确认 `reasoning.max_tokens=16384`、`max_tokens=65536`、`provider.require_parameters=true`、`response_format.json_schema.strict=true`。**路由未执行上限**。三次实报推理超过 16,384。
+
+| 格子 | 裁判第 4 轮调用 1 尝试 | 请求总输出 | 实报推理 | 与上限对照 |
+| --- | ---: | ---: | ---: | --- |
+| `normal` | 1 | 65,536 | 8,532 | 上限内 |
+| `answer_dump` | 1 | 65,536 | 未知 | HTTP 200 后流失败，用量未上报 |
+| `answer_dump` | 2 | 65,536 | 21,258 | 超 4,874 |
+| `lecture` | 1 | 65,536 | 18,386 | 超 2,002 |
+| `sycophant_close` | 1 | 65,536 | 7,770 | 上限内 |
+| `no_teach` | 1 | 65,536 | 17,717 | 超 1,333 |
+
+尝试 1 的故障为 `provider_failure`，其后一次重试成功。[失败调用原件](../runs/e2-real-20261119-06/answer_dump/calls/judge-4-1-1.json) · [裁判重试原件](../runs/e2-real-20261119-06/answer_dump/calls/judge-4-1-2.json)
+
 ### S1 场景卡逐栏
 
 | 栏 | 已满足 | 还缺 |
 | --- | --- | --- |
-| 谁 | 接手者可按 README 和运行手册运行，复核者可从 manifest、进程收据、裁判绑定与公开对话回读。 | 无。 |
-| 条件 | 最新冻结补评使用干净 HEAD 和 54 项检查收据，固定 S0-06 并绑定 v2 源身份与五格对话。 | 缺少按 v3 完整执行的真实五格。 |
-| 能完成什么 | E1 双格已验收，`check_distance` 已验证。最新冻结补评五格均有有效总分，预登记四维区分三项。 | `sycophant_close` 同档，缺少同次四项有效分差。 |
-| 证据 | **真实验证。** E1 正常格第 3 轮 `check_distance` 前后 hook 共用 `call_00_USpBHGKKl9qAJd83bH0d7645`，后置 `isError: false`。最新冻结补评的 `--verify-run` 退出 0，出站字段、用量和引用均可回读。**离线复现。** `npm run check` 退出 0，54 项通过。S0-01 答案键、截断与额度拦截的联合回归退出 0，15 项通过。 | 完整真实五格的验收、分差与评分引用。 |
-| 失败可定位 | 最新冻结补评的同档位于 `normal` 与 `sycophant_close` 的第 4 轮裁判调用 1 尝试 1，正常格机会引用为 #8、#9。上文保留各轮原件。 | 缺少新对话中的同次验证。 |
-| 不算交付 | 原始分档、故障、引用及收据均保留。v3 离线回放和冻结补评各自记录运行结果。 | S1 保持进行中。 |
+| 谁 | 接手者按 README 和运行手册执行。复核者可从 manifest、收据、裁判绑定与公开对话回读。 | 无。 |
+| 条件 | `e2-real-20261119-06` 使用干净 HEAD `20c7056` 和 54 项检查收据，五格共用 S0-06 与同一评测身份。 | 无。 |
+| 能完成什么 | E1 真实双格已验收。完整 E2 五格均有效，四个目标分差为 2 / 1 / 1 / 2，人工回读确认相应机会与教学行为。 | 无。 |
+| 证据 | **真实验证。** E1 正常格第 3 轮 `check_distance` 前后 hook 共用 `call_00_USpBHGKKl9qAJd83bH0d7645`，后置 `isError: false`。完整 E2 的 `--verify-run` 退出 0，出站字段、遥测和四项引用有原件。**离线复现。** `npm run check` 退出 0，54 项通过。S0-01 答案键、截断与额度拦截的联合回归退出 0，15 项通过。 | 无。 |
+| 失败可定位 | 完整 run 的流故障与推理超限均有格子、轮次、调用和尝试号。冻结同档与历史故障保留原记录。 | 路由未执行推理上限，失败流的用量未知。 |
+| 不算交付 | 验收使用同次真实五格的原始分档与绑定引用。离线回放、冻结补评、v2 历史和旧双格各自保留。 | 无。 |
