@@ -8,6 +8,8 @@ const read = path => readFileSync(new URL(`../../${path}`, import.meta.url));
 const seed = 'teacharena-ruler-expand-v1';
 const trainCount = 15;
 const candidateCount = 40;
+const candidateSetSha256 = '6ef99aa536586f08b0925a4d0c691aa5d382483c91304bc6c930454e4146f748';
+const legacyHoldoutSha256 = '30535bd42c89fe186313f7011d8d3e955d888301f738990bbbf8bdcfde5b5d10';
 const pinned = ['S0-01', 'S0-06'];
 const subjects = ['B', 'C', 'F', 'G', 'I', 'M', 'P'];
 const conditions = ['normal', 'answer_dump', 'lecture', 'sycophant_close', 'no_teach'];
@@ -45,7 +47,8 @@ export function validateRulerSplit(split, sourceBytes, legacy) {
   requireThat(split?.seed === seed && record(split.items), 'invalid ruler split or seed');
   requireThat(hash(sourceBytes) === split.sourceSha256, 'ruler split source hash mismatch');
   const ids = Object.keys(split.items).sort();
-  requireThat(ids.length === candidateCount && pinned.every(id => ids.includes(id)), 'invalid ruler split candidate count or pinned tasks');
+  requireThat(listHash(ids) === candidateSetSha256, 'ruler split does not contain exactly the approved candidates');
+  requireThat(Array.isArray(legacy.holdout) && listHash([...legacy.holdout].sort()) === legacyHoldoutSha256, 'legacy holdout membership changed');
   const excluded = new Set([...legacy.holdout, ...legacy.excludedInvalid, 'S0-16', 'S0-17', 'S0-24', 'S0-28', 'S0-67']);
   for (const id of ids) {
     const { subject, family } = split.items[id];
@@ -53,9 +56,10 @@ export function validateRulerSplit(split, sourceBytes, legacy) {
     requireThat(Object.hasOwn(split.items, family) && family <= id && split.items[family].family === family && split.items[family].subject === subject, `invalid family for ${id}`);
   }
   const { train, test } = split;
+  requireThat(Array.isArray(train) && train.length === trainCount, 'invalid train list');
+  requireThat(Array.isArray(test) && test.length === candidateCount - trainCount, 'invalid test list');
   const trainIds = new Set(train), testIds = new Set(test);
-  requireThat(Array.isArray(train) && trainIds.size === trainCount && train.length === trainCount, 'invalid train list');
-  requireThat(Array.isArray(test) && testIds.size === candidateCount - trainCount && test.length === testIds.size, 'invalid test list');
+  requireThat(trainIds.size === train.length && testIds.size === test.length, 'duplicate split membership');
   for (const id of ids) {
     requireThat(trainIds.has(id) !== testIds.has(id), `invalid split membership for ${id}`);
     requireThat(trainIds.has(id) === trainIds.has(split.items[id].family), `family crosses the train/test split at ${id}`);

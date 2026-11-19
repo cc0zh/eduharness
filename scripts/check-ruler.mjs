@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runId } from '../contracts/artifacts/schema.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
-import { loadRulerSplit } from '../contracts/dataset/ruler-expand.mjs';
+import { loadRulerSplit, trainingPlan } from '../contracts/dataset/ruler-expand.mjs';
 import { ruler } from '../contracts/judge/schema.mjs';
 import { verifyRun } from '../src/run-receipts.mjs';
 
@@ -22,16 +22,20 @@ export function checkRulerChange({ current = { ruler, fingerprint: fingerprint()
   requireThat(reference.ruler === current.ruler && reference.fingerprint === current.fingerprint, 'training reference does not match the changed ruler');
   const sourceId = runId(reference.trainingRunId);
   const verification = verifyRun(root, sourceId);
-  requireThat(verification.verified && verification.mode === 'real' && verification.acceptance === true, 'ruler change requires a verified real training run');
-  const receiptBytes = readFileSync(join(root, '_receipts', `${sourceId}.json`));
+  const receiptPath = join(root, '_receipts', `${sourceId}.json`);
+  requireThat(verification.verified && verification.mode === 'real' && verification.requestCount > 0 && verification.acceptance === true && existsSync(receiptPath), 'ruler change requires a verified real training run');
+  const receiptBytes = readFileSync(receiptPath);
   requireThat(hash(receiptBytes) === reference.trainingReceiptSha256, 'training receipt hash mismatch');
+  const process = JSON.parse(readFileSync(join(root, '_receipts', `${sourceId}.process.json`)));
+  requireThat(process.evaluationSha256 === hash(receiptBytes), 'training receipt does not match the process receipt');
   const receipt = JSON.parse(receiptBytes);
   const split = loadRulerSplit();
   const dir = join(root, sourceId);
   const manifestBytes = readFileSync(join(dir, 'manifest.json'));
   const manifest = JSON.parse(manifestBytes);
   requireThat(receipt.manifestSha256 === hash(manifestBytes) && receipt.identityId === manifest.identityId && manifest.id === sourceId && manifest.mode === 'real' && manifest.scenario === 'ruler-expand' && manifest.phase === 'train' && manifest.identity.ruler === baseline.ruler && manifest.identity.dataset.trainSha256 === split.trainSha256, 'invalid training reference identity or split');
-  requireThat(hash(receipt.frozen?.map(record => record.taskId) ?? []) === hash(split.train), 'training reference must cover the locked training dialogues');
+  const planned = trainingPlan('train', split);
+  requireThat(hash(receipt.frozen?.map(({ taskId, condition }) => ({ taskId, condition })) ?? []) === hash(planned) && hash(manifest.planned ?? []) === hash(planned), 'training reference must cover the locked training dialogues and conditions');
   for (const { taskId, condition, path, transcriptSha256 } of receipt.frozen) {
     requireThat(/^(normal|answer_dump|lecture|sycophant_close|no_teach)$/.test(condition) && path === `${taskId}/${condition}/transcript.json` && transcriptSha256 === hash(readFileSync(join(dir, path))), `training reference transcript hash mismatch for ${taskId}`);
   }

@@ -43,3 +43,17 @@ test('edited ordered lists, source bytes, and a split family fail validation', a
   adjusted.items[adjusted.test[0]].family = adjusted.train[0];
   assert.throws(() => validateRulerSplit(adjusted, source(), legacy), /family/);
 });
+
+test('the approved candidates and legacy holdout cannot be silently redefined', async () => {
+  const { validateRulerSplit, loadRulerSplit } = await contract();
+  const split = loadRulerSplit();
+  const legacy = JSON.parse(read('data/s0-v1.json'));
+  const replacement = structuredClone(split);
+  const oldId = 'S0-20';
+  replacement.items['S0-19'] = { ...replacement.items[oldId], family: 'S0-19' };
+  delete replacement.items[oldId];
+  assert.throws(() => validateRulerSplit(replacement, source(), legacy), /approved candidates/);
+  const changed = { ...legacy, holdout: legacy.holdout.slice(1) };
+  assert.throws(() => validateRulerSplit(split, source(), changed), /legacy holdout/);
+  assert.throws(() => validateRulerSplit({ ...split, train: {} }, source(), legacy), /invalid train list/);
+});
