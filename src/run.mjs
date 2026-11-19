@@ -4,7 +4,7 @@ import pkg from '../package.json' with { type: 'json' };
 import { cellIds, cellResult, filenames, runId } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, message } from '../contracts/core/schema.mjs';
 import { readTask, revision } from '../contracts/dataset/schema.mjs';
-import { directDimension, previousRuler, ruler } from '../contracts/judge/schema.mjs';
+import { directDimension, outputContract, previousRuler, ruler } from '../contracts/judge/schema.mjs';
 import { learnerFormat, parseLearner } from '../contracts/learner/schema.mjs';
 import { policy, routes, rounds, taskId } from '../config/e1.mjs';
 import { targets } from '../config/e2.mjs';
@@ -108,7 +108,7 @@ export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', sce
   const writer = { pid: process.pid, startedAt: new Date().toISOString() };
   const reserve = attemptBudget(limits);
   const pi = Object.fromEntries(Object.entries(pkg.dependencies).filter(([key]) => key.startsWith('@earendil-works/')));
-  const identity = { version: 'evaluation-identity-v2', pi, runnerVersion: pkg.version, dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes) }, ruler, policy, limits, dialogueSource: provenance, routes: mode === 'real' ? routes : 'pi-ai-faux', sources: Object.fromEntries(identityFiles.map(path => [path, hash(source(path))])) };
+  const identity = { version: 'evaluation-identity-v2', pi, runnerVersion: pkg.version, dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes) }, ruler, judgeOutputContract: outputContract, policy, limits, dialogueSource: provenance, routes: mode === 'real' ? routes : 'pi-ai-faux', sources: Object.fromEntries(identityFiles.map(path => [path, hash(source(path))])) };
   if (paired) {
     identity.targets = targets;
     identity.sources['config/e2.mjs'] = hash(source('config/e2.mjs'));

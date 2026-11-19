@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import test from 'node:test';
 import fixtures from './fixtures/judge-real-replay.json' with { type: 'json' };
+import failedFrozen from './fixtures/judge-v3-numeric-reasons.json' with { type: 'json' };
 import { bind, judgementSchema, parseNumberedJudgement, replayLegacyJudgement } from '../contracts/judge/schema.mjs';
 import { Value } from '@sinclair/typebox/value';
 import contextFailures from './fixtures/judge-context-replay.json' with { type: 'json' };
@@ -75,6 +76,10 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   assert.equal(payload.response_format?.type, 'json_schema');
   assert.equal(payload.response_format.json_schema.strict, true);
   assert.deepEqual(payload.response_format.json_schema.schema, JSON.parse(JSON.stringify(judgementSchema(bind(messages)))));
+  const { properties, required } = payload.response_format.json_schema.schema.properties.results.properties.agency_handoff;
+  assert.ok(required.includes('evidence'));
+  assert.deepEqual(properties.evidence.items, { minimum: 1, maximum: messages.length, type: 'integer' });
+  assert.match(properties.reason.description, /one or two sentences.*#N.*evidence/i);
   function checkClosed(node) {
     if (node.type === 'object') {
       assert.equal(node.additionalProperties, false);
@@ -105,6 +110,7 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
 
 function numbered(text,messages) {
   const {results} = JSON.parse(text);
+  for (const row of Object.values(results)) row.evidence = [1];
   for (const row of Object.values(results)) for (const group of row.evidence_groups) for (const slot of Object.values(group.slots)) {
     if (slot.message_ids) { slot.message_numbers = slot.message_ids.map(id=>messages.findIndex(m=>m.id===id)+1); delete slot.message_ids; }
     if (slot.opportunity_message_ids) { slot.opportunity_numbers = slot.opportunity_message_ids.map(id=>messages.findIndex(m=>m.id===id)+1); delete slot.opportunity_message_ids; }
@@ -131,6 +137,11 @@ test('numbered wire schema enforces bounds and maps references back to full IDs'
   assert.equal('context_id' in schema.properties,false);
   assert.equal(Value.Check(schema,good),true);
   assert.deepEqual(parseNumberedJudgement(JSON.stringify(good),view).productive_struggle.evidence,messages.slice(0,8).map(m=>m.id));
+  for (const evidence of [[], [0], [messages.length+1], [1.5]]) {
+    const invalid = structuredClone(good);
+    invalid.results.agency_handoff.evidence = evidence;
+    assert.throws(() => parseNumberedJudgement(JSON.stringify(invalid),view), /results\/agency_handoff\/evidence/);
+  }
   const slot=good.results.productive_struggle.evidence_groups[0].slots.student_stuck_or_error;
   for(const n of [0,messages.length+1,1.5]){
     slot.message_numbers=[n];
@@ -145,8 +156,20 @@ test('current numbered judgments require an in-window message citation and expla
   const good=numbered(text,messages);
   for (const row of Object.values(good.results)) row.reason = '#1 anchors this test judgment.';
   assert.equal(parseNumberedJudgement(JSON.stringify(good),view).agency_handoff.reason, good.results.agency_handoff.reason);
-  for (const reason of [' ', 'T', `#${messages.length+1} is outside the window.`, '#1', 'The score is 1.']) {
+  for (const reason of [' ', 'T', `#${messages.length+1} is outside the window.`, '#1', 'The score is 1.', '#2 is outside the declared evidence.', '#1 ok']) {
     good.results.agency_handoff.reason = reason;
     assert.throws(() => parseNumberedJudgement(JSON.stringify(good),view), /structure|agency_handoff.*reason/);
   }
 });
+
+for (const {file, text} of failedFrozen.attempts) {
+  test(`frozen v3 ${failedFrozen.cell}/${file}: rejects numeric reasons at the wire contract`, () => {
+    const view = bind(failedFrozen.messages);
+    const original = JSON.parse(text);
+    assert.ok(Object.values(original.results).every(row => row.reason === String(row.score)));
+    assert.equal(Value.Check(judgementSchema(view), original), false);
+    assert.throws(() => parseNumberedJudgement(text, view), /results\/\w+\/evidence/);
+    for (const row of Object.values(original.results)) row.evidence = [1];
+    assert.throws(() => parseNumberedJudgement(JSON.stringify(original), view), /agency_handoff.*reason/);
+  });
+}

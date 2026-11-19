@@ -30,6 +30,7 @@ test('offline E2 records four preregistered raw comparisons against one normal d
   assert.equal(manifest.mode, 'offline');
   assert.equal(manifest.taskId, 'S0-06');
   assert.equal(manifest.identity.ruler, 'e1-numbered-evidence-v3');
+  assert.equal(manifest.identity.judgeOutputContract, 'judge-output-v2');
   assert.deepEqual(manifest.identity.targets, targets);
   assert.deepEqual(result.cells.map(cell => cell.id).sort(), ['normal', ...Object.keys(targets)].sort());
   assert.ok(result.cells.every(cell => cell.status === 'execution_success' && cell.validTotal));

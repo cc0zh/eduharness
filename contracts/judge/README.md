@@ -2,7 +2,7 @@
 
 当前 E1 和 E2 使用 `e1-numbered-evidence-v3` 对完整公开对话评分。裁判评的是教师如何教学，学生的陈述和行动是证据。新版明确交还主动权的分档边界，为六维补充通用示例，并校验理由引用。预登记维度保持原样。历史 `e1-numbered-evidence-v2` 的结果与新版分档不可直接比较。机器规则和示例见 [schema](schema.mjs)。
 
-本版使用评测身份 `evaluation-identity-v2` 和调用策略 `e1-call-policy-v4`。OpenRouter 裁判请求包含独立的 `reasoning.max_tokens`，总输出 `max_tokens` 同时覆盖推理和可见 JSON。出站字段和路由上报用量的回读步骤见[运行手册](../../docs/runbook.md)。
+本版使用评测身份 `evaluation-identity-v2` 和调用策略 `e1-call-policy-v4`。新版输出契约在评测身份中记录为 `judgeOutputContract: judge-output-v2`，沿用 v3 的分档、计分和证据组语义。OpenRouter 裁判请求包含独立的 `reasoning.max_tokens`，总输出 `max_tokens` 同时覆盖推理和可见 JSON。出站字段和路由上报用量的回读步骤见[运行手册](../../docs/runbook.md)。
 
 ## 评分维度
 
@@ -22,7 +22,8 @@
 ## 证据绑定与观察窗口
 
 - 现行视图是该格完整的公开对话。对话按原序编号，消息只给 `n`、`role` 和 `text`。学生画像、工具及私有状态不在视图内。旧 v6 的逐轮窗口设置不适用于这里。
-- 裁判只返回含六个维度的 `results`。用当前视图的整数 `message_numbers` 或 `opportunity_numbers` 引用原件。本地用 `binding.messageIds[n-1]` 映射并校验哈希、范围、角色、顺序和重叠。每维理由解释分档，至少引用一个窗口内序号，格式为 `#N`。本地检查理由格式和序号范围，分档理由的语义仍由人回读核实。`judge.json` 的 `binding` 记录 run、格子、尺子、视图哈希、消息 ID 顺序和调用坐标，`groups` 保存映射后的结果。对应 `calls/`、遥测和 `transcript.json` 可回读原件。
+- 裁判只返回含六个维度的 `results`。每维返回 `score`、理由引用的 `evidence`、解释分档的 `reason` 和评分证据组 `evidence_groups`。Schema 要求 `evidence` 是非空的窗口内整数序号数组。本地要求 `reason` 去掉首尾空白后至少 12 字符，至少引用一个 `#N`，所有引用都须包含在该维 `evidence` 中。分档理由的语义仍由人回读核实。`minLength` 的强化约束和引用规则在本地执行，因为当前模型路由的 strict 文档未确认这些字符串约束的执行范围。
+- 评分证据组仍用窗口内的 `message_numbers` 或 `opportunity_numbers`。本地用 `binding.messageIds[n-1]` 映射并校验哈希、范围、角色、顺序和重叠。`judge.json` 的 `binding` 记录 run、格子、尺子、视图哈希、消息 ID 顺序和调用坐标，`groups` 保存映射后的结果。`groups` 中的 `evidence` 仍是从评分证据组提取的完整消息 ID。裁判响应里的理由引用序号保留在 `calls/` 原件里。
 - 每个教学周期单列一组，标为 `support_chain` 或 `counterexample`。同组已观察槽按角色和时间严格递增，同一维度各组跨度不得重叠，机会引用也参与跨度计算。可审计的无损重排仅限槽内引用和互不重叠的整组。2 分至少需要一条所有槽为 `observed` 的支持链。交还主动权的末段证据还须位于零基下标 `floor(消息数 × 2/3)` 起的末三分之一。
 - `observed` 引用发生的行为。`not_observed` 引用具体机会，且机会消息本身或之后必须能看到该槽预期角色发言。回读时还要核对该发言是否真有机会表现该行为。`not_applicable` 仅允许用于 `representation_pivot` 无机会，按现行口径仍为 0 分。`insufficient_information` 说明未定档原因。本地校验允许带这个槽的 0 分同时具有观测或机会引用，需靠回读确认该证据确实支持低档。历史文本引用走兼容回归，不能根据近似文本补造绑定。
 
