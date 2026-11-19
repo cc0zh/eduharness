@@ -7,7 +7,7 @@
 | 场景 | 状态 | 证据入口 |
 | --- | --- | --- |
 | E1 S0-06 真实双格 | 已验收 | `git show cd0de52:docs/status.md`。运行和检查收据见 [E1 卡](scenarios.md#e1-s0-06-真实双格)。 |
-| E2 四个坏教师自检 | 真实验收未通过 | `answer_dump` 与 `sycophant_close` 在五格运行中区分成功。`no_teach` 冻结对话补评为 0 分，正常格为 2 分。`lecture` 仍同档。 |
+| E2 四个坏教师自检 | 真实验收未通过 | v2 五格运行中 `lecture` 同档，`no_teach` 超时。v3 冻结补评在正常格耗尽裁判重试，完整五格未启动。见下方记录。 |
 | S2 独立的改进环境 | 待 S1 通过 | [S2 卡](scenarios.md#s2-独立的改进环境)列出隔离验收所需原件。 |
 | S3 改进循环 | 待 S2 通过 | [S3 卡](scenarios.md#s3-改进循环)及其 E5 单轮对照。 |
 
@@ -60,13 +60,46 @@ node src/cli.mjs --verify-run e2-no-teach-real-20261119-01
 
 正常格 #6 交还列式，学生 #7 自行消元。第 4 轮 #8 又由教师给出线性方程，学生 #9 只完成求解。讲授格 #2 已给两套完整解，#9 学生能复述 `25/13`，仍要求解释为何 AG 等于垂距。这道题提供了交还步骤的机会。正常教师交还有限，裁判也未解释为何将讲授格的复述及自我监控同样判为 1 分。一次同档无法确定两者谁是主因。`productive_struggle` 捕捉了提前揭底，`verification_or_transfer` 也反映了缺少概念核验，两项均为正常 2、讲授 0。逐条证据和备选方向见本地 [.tmp/scratch/e2-real/lecture-analysis.md](../.tmp/scratch/e2-real/lecture-analysis.md)。
 
+### v3 冻结补评
+
+冻结补评 `s1-v3-frozen-real-20261119-01` 使用 `e1-numbered-evidence-v3`、`evaluation-identity-v2` 和 `e1-call-policy-v4`。干净 HEAD `2fbefc7` 的 `npm run check` 通过 51 项。补评 manifest 绑定 `e2-real-20261119-05` 的源身份、manifest 哈希和五格对话哈希。补评按 v3 口径读取；与 v2 分档不可直接比较。[补评 manifest](../runs/s1-v3-frozen-real-20261119-01/manifest.json) · [检查收据](../runs/_receipts/check-2fbefc73afa6573c5f3eee92b195c66dc0586b91.json)
+
+```sh
+node src/cli.mjs --scenario E2 --mode real --judge-only e2-real-20261119-05 --judge-cell all --estimate-only --id s1-v3-frozen-estimate-20261119-01
+node src/cli.mjs --scenario E2 --mode real --judge-only e2-real-20261119-05 --judge-cell all --confirm-cost --id s1-v3-frozen-real-20261119-01 --max-attempts 15 --max-requested-output-tokens 983040
+node src/cli.mjs --verify-run s1-v3-frozen-real-20261119-01
+```
+
+预检退出 0。冻结补评退出 1，`acceptance: false`。`--verify-run` 退出 0，`verified: true`、`conclusion: complete`，进程收据与请求日志均记录 3 次请求。正常格第 4 轮裁判调用 1 连续三次收到 HTTP 200 和正常停止的 JSON。三次响应的六维 `reason` 都只有数字，`agency_handoff.reason` 均为 `"1"`。本地校验拒绝三份响应，未发布分数。两次重试耗尽后停止，`lecture` 无分差可判定，完整真实五格未启动。[结果](../runs/s1-v3-frozen-real-20261119-01/result.json) · [进程收据](../runs/_receipts/s1-v3-frozen-real-20261119-01.process.json) · [末次原件](../runs/s1-v3-frozen-real-20261119-01/normal/calls/judge-4-1-3.json)
+
+| 格子 | `status` | `scored` / `validTotal` | 六维 / 总分 | 目标维度 / 分差 | 源对话回读 |
+| --- | --- | --- | --- | --- | --- |
+| `normal` | `infra_failure` | `false` / `false` | 无 / `null` | 正常对照 / 缺分 | #7 学生列出 “(x − 13)² + y² = 144” 后消元。 |
+| `answer_dump` | 未执行 | 无记录 | 无 / 无 | `productive_struggle` / `null` | #2 教师首答给出坐标推导和最终答案 `25/13`。 |
+| `lecture` | 未执行 | 无记录 | 无 / 无 | `agency_handoff` / `null` | #9 学生说 “I still honestly don’t see why AG is the distance to AD.” |
+| `sycophant_close` | 未执行 | 无记录 | 无 / 无 | `verification_or_transfer` / `null` | #2 教师附和 “the distance from E to side AD is 5 units”，随后收尾。 |
+| `no_teach` | 未执行 | 无记录 | 无 / 无 | `misconception_repair` / `null` | #2 教师说 “Thanks for giving this problem a try” 并继续鼓励。 |
+
+摘录来自 `e2-real-20261119-05:<格子>:m:<序号>`。v3 没有发布可用的裁判绑定引用。[冻结源原件](../runs/e2-real-20261119-05/)
+
+三次调用的脱敏出站字段均为 `reasoning.max_tokens=16384`、`max_tokens=65536`、`provider.require_parameters=true` 和 `response_format.type=json_schema`，其中 `json_schema.strict=true`。总输出预算扣除请求推理上限后余 49,152 token。三次实报推理均低于 16,384，未观察到超限。[调用原件](../runs/s1-v3-frozen-real-20261119-01/normal/calls/) · [遥测](../runs/s1-v3-frozen-real-20261119-01/normal/telemetry.json)
+
+| `normal` 第 4 轮调用 1 | 请求输出额度 | 实报输入 | 缓存读入 | 实报输出 | 推理 | 可见输出 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 尝试 1 | 65,536 | 2,034 | 0 | 8,889 | 7,890 | 999 |
+| 尝试 2 | 65,536 | 2,071 | 0 | 10,412 | 9,527 | 885 |
+| 尝试 3 | 65,536 | 23 | 2,048 | 10,847 | 9,726 | 1,121 |
+| 合计 | 196,608 | 4,128 | 2,048 | 30,148 | 27,143 | 3,005 |
+
+实报 token 合计 36,324，含 2,048 个缓存读入 token。三次用量均已上报。
+
 ### S1 场景卡逐栏
 
 | 栏 | 已满足 | 还缺 |
 | --- | --- | --- |
 | 谁 | 接手者可按 README 和运行手册运行，复核者可从 manifest、进程收据、裁判绑定与公开对话回读。 | 无。 |
-| 条件 | E2 五格固定 S0-06、学生画像、尺子及评测身份。补评使用原格冻结对话，并绑定源裁判视图。 | 原五格中的 `no_teach` 没有有效分档。补评分档来自单列运行。 |
-| 能完成什么 | E1 双格已验收，`check_distance` 已验证。E2 同次区分 `answer_dump` 和 `sycophant_close`，补评得到 `no_teach` 的目标维度差值。 | `lecture` 的 `agency_handoff` 仍为 1 对 1。E2 缺少满足全部条件的同次五格结果。 |
-| 证据 | **真实验证。** E1 正常格第 3 轮 `check_distance` 前后 hook 的 `toolCallId` 均为 `call_00_USpBHGKKl9qAJd83bH0d7645`，后置 `isError: false`。E2 和补评的 `--verify-run` 均退出 0。**离线复现。** S0-01 答案键、截断与额度拦截的联合回归退出 0，15 项通过。`npm run check` 退出 0，50 项通过。 | 同次五格的真实验收证据及 `lecture` 目标分差。 |
-| 失败可定位 | 原 `no_teach` 超时已定位到第 4 轮裁判调用 1 的三次尝试。`lecture` 同档已定位到正常 #2、#4、#6、#7、#9 和讲授 #2、#9。 | 供应商延迟根因和讲授同档的主因仍待确定。 |
-| 不算交付 | 保留各轮原始分档、故障、引用及收据。旁证使用原始维度和消息。 | 按场景卡仍需同次四项目标对照成立，S1 保持进行中。 |
+| 条件 | v3 冻结补评使用干净 HEAD 和 51 项检查收据，固定 S0-06 并绑定 v2 源身份与五格对话。 | 缺少按 v3 完整执行的真实五格。 |
+| 能完成什么 | E1 双格已验收，`check_distance` 已验证。v2 真实对照和单格补评保留在上文。 | v3 冻结正常格无有效分数，`lecture` 门槛不可判定。缺少同次四项有效分差。 |
+| 证据 | **真实验证。** E1 正常格第 3 轮 `check_distance` 前后 hook 共用 `call_00_USpBHGKKl9qAJd83bH0d7645`，后置 `isError: false`。v3 补评的 `--verify-run` 退出 0，实发推理上限和用量可回读。**离线复现。** `npm run check` 退出 0，51 项通过。S0-01 答案键、截断与额度拦截的联合回归退出 0，15 项通过。 | 同次五格的验收结果、四项分差及评分引用。 |
+| 失败可定位 | v3 正常格第 4 轮裁判调用 1 的尝试 1 至 3 因理由缺消息引用被拒绝。上文保留 v2 的定位与原件链接。 | 无法从 v3 结果判断 `lecture` 是否低于正常格。 |
+| 不算交付 | 原始分档、故障、引用及收据均保留。v3 离线回放和冻结补评各自记录运行结果。 | S1 保持进行中。 |
