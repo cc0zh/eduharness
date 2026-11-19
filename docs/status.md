@@ -7,7 +7,7 @@
 | 场景 | 状态 | 证据入口 |
 | --- | --- | --- |
 | E1 S0-06 真实双格 | 已验收 | `git show cd0de52:docs/status.md`。运行和检查收据见 [E1 卡](scenarios.md#e1-s0-06-真实双格)。 |
-| E2 四个坏教师自检 | 真实验收未通过 | v2 五格运行中 `lecture` 同档，`no_teach` 超时。v3 冻结补评在正常格耗尽裁判重试，完整五格未启动。见下方记录。 |
+| E2 四个坏教师自检 | 真实验收未通过 | v3 使用 `judge-output-v2` 的冻结补评取得五格有效分数，`lecture` 低一档，`sycophant_close` 同档。下一次完整五格按 S1 卡核对四项目标。 |
 | S2 独立的改进环境 | 待 S1 通过 | [S2 卡](scenarios.md#s2-独立的改进环境)列出隔离验收所需原件。 |
 | S3 改进循环 | 待 S2 通过 | [S3 卡](scenarios.md#s3-改进循环)及其 E5 单轮对照。 |
 
@@ -93,13 +93,31 @@ node src/cli.mjs --verify-run s1-v3-frozen-real-20261119-01
 
 实报 token 合计 36,324，含 2,048 个缓存读入 token。三次用量均已上报。
 
+### v3 输出契约修复后的冻结补评
+
+`s1-v3-output-v2-frozen-real-20261119-01` 使用干净 HEAD `10654a7`，检查收据记录 54 项通过。评测身份记录 `judgeOutputContract: judge-output-v2`，沿用 v3 分档和四个预登记维度。五格对话与 `e2-real-20261119-05` 的原件逐字一致，五份裁判正文均可重放到相同的分档、理由和绑定引用。五格都在第 4 轮裁判调用 1 的首次尝试成功。`--verify-run` 退出 0，`verified: true`，本次补评退出 1，`acceptance: false`。[manifest](../runs/s1-v3-output-v2-frozen-real-20261119-01/manifest.json) · [结果](../runs/s1-v3-output-v2-frozen-real-20261119-01/result.json) · [进程收据](../runs/_receipts/s1-v3-output-v2-frozen-real-20261119-01.process.json) · [检查收据](../runs/_receipts/check-10654a73ba751ffd40dc6686d5d0ad8f2b2060ab.json)
+
+六维依次为 `misconception_repair`、`support_escalation_and_fading`、`agency_handoff`、`productive_struggle`、`representation_pivot`、`verification_or_transfer`。五格均为 `execution_success`、`scored: true`、`validTotal: true`。消息 ID 为 `e2-real-20261119-05:<格子>:m:<序号>`。
+
+| 格子 | 六维 / 总分 | 目标维度 | 正常 → 本格 / 分差 | 裁判引用回读 |
+| --- | --- | --- | --- | --- |
+| `normal` | 2 / 1 / 1 / 1 / 2 / 0，合计 7 | 四项对照基准 | 正常对照 | #7 学生自行列出 “(x − 13)² + y² = 144” 并消元。 |
+| `answer_dump` | 1 / 1 / 0 / 0 / 2 / 0，合计 4 | `productive_struggle` | 1 → 0 / 1 | #2 教师首答给出完整坐标推导和答案 `25/13`。 |
+| `lecture` | 1 / 0 / 0 / 0 / 1 / 0，合计 2 | `agency_handoff` | 1 → 0 / 1 | #9 学生复述答案并问 “I still honestly don’t see why AG is the distance to AD.” |
+| `sycophant_close` | 0 / 0 / 2 / 0 / 0 / 0，合计 2 | `verification_or_transfer` | 0 → 0 / 0 | #2 教师附和 “the distance from E to side AD is 5 units” 并收尾。 |
+| `no_teach` | 0 / 0 / 0 / 0 / 0 / 0，合计 0 | `misconception_repair` | 2 → 0 / 2 | #2 教师只做鼓励，#3 学生仍问 “So AE = 5 means the distance to side AD is just 5, right?” |
+
+`lecture` 达到预登记的冻结主动权门槛。整体验收未通过的差值是 `sycophant_close` 的 `verification_or_transfer`。正常格 #8 已把 x 和所求距离等同，只问 “What does x come out to?”，#9 学生求出 x，未解释距离关系。该次裁判把它判为 0 分。完整五格使用新对话，对照同一次运行的正常格。[正常格裁判](../runs/s1-v3-output-v2-frozen-real-20261119-01/normal/judge.json) · [附和格裁判](../runs/s1-v3-output-v2-frozen-real-20261119-01/sycophant_close/judge.json)
+
+预检上限为 15 次尝试、983,040 请求输出 token。实际 5 次、0 次重试、327,680 请求输出 token。供应商实报输入 13,005、输出 61,050，合计 74,055。每次出站均为 `max_tokens=65536`、`reasoning.max_tokens=16384`。按上述格序，实报推理为 10,601 / 9,305 / 12,258 / 11,055 / 10,706，均在上限内。
+
 ### S1 场景卡逐栏
 
 | 栏 | 已满足 | 还缺 |
 | --- | --- | --- |
 | 谁 | 接手者可按 README 和运行手册运行，复核者可从 manifest、进程收据、裁判绑定与公开对话回读。 | 无。 |
-| 条件 | v3 冻结补评使用干净 HEAD 和 51 项检查收据，固定 S0-06 并绑定 v2 源身份与五格对话。 | 缺少按 v3 完整执行的真实五格。 |
-| 能完成什么 | E1 双格已验收，`check_distance` 已验证。v2 真实对照和单格补评保留在上文。 | v3 冻结正常格无有效分数，`lecture` 门槛不可判定。缺少同次四项有效分差。 |
-| 证据 | **真实验证。** E1 正常格第 3 轮 `check_distance` 前后 hook 共用 `call_00_USpBHGKKl9qAJd83bH0d7645`，后置 `isError: false`。v3 补评的 `--verify-run` 退出 0，实发推理上限和用量可回读。**离线复现。** `npm run check` 退出 0，51 项通过。S0-01 答案键、截断与额度拦截的联合回归退出 0，15 项通过。 | 同次五格的验收结果、四项分差及评分引用。 |
-| 失败可定位 | v3 正常格第 4 轮裁判调用 1 的尝试 1 至 3 因理由缺消息引用被拒绝。上文保留 v2 的定位与原件链接。 | 无法从 v3 结果判断 `lecture` 是否低于正常格。 |
+| 条件 | 最新冻结补评使用干净 HEAD 和 54 项检查收据，固定 S0-06 并绑定 v2 源身份与五格对话。 | 缺少按 v3 完整执行的真实五格。 |
+| 能完成什么 | E1 双格已验收，`check_distance` 已验证。最新冻结补评五格均有有效总分，预登记四维区分三项。 | `sycophant_close` 同档，缺少同次四项有效分差。 |
+| 证据 | **真实验证。** E1 正常格第 3 轮 `check_distance` 前后 hook 共用 `call_00_USpBHGKKl9qAJd83bH0d7645`，后置 `isError: false`。最新冻结补评的 `--verify-run` 退出 0，出站字段、用量和引用均可回读。**离线复现。** `npm run check` 退出 0，54 项通过。S0-01 答案键、截断与额度拦截的联合回归退出 0，15 项通过。 | 完整真实五格的验收、分差与评分引用。 |
+| 失败可定位 | 最新冻结补评的同档位于 `normal` 与 `sycophant_close` 的第 4 轮裁判调用 1 尝试 1，正常格机会引用为 #8、#9。上文保留各轮原件。 | 缺少新对话中的同次验证。 |
 | 不算交付 | 原始分档、故障、引用及收据均保留。v3 离线回放和冻结补评各自记录运行结果。 | S1 保持进行中。 |
