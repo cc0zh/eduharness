@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import test from 'node:test';
 import fixtures from './fixtures/judge-real-replay.json' with { type: 'json' };
 import { bind, judgementSchema, parseNumberedJudgement, replayLegacyJudgement } from '../contracts/judge/schema.mjs';
@@ -6,6 +7,7 @@ import { Value } from '@sinclair/typebox/value';
 import contextFailures from './fixtures/judge-context-replay.json' with { type: 'json' };
 import { grade } from '../src/judge.mjs';
 import { Models } from '../src/models.mjs';
+import { policy } from '../config/e1.mjs';
 
 const expected = [/slot order/, /group order/, /no JSON object/, null, SyntaxError, SyntaxError];
 for (const [i, fixture] of fixtures.entries()) {
@@ -39,19 +41,37 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
     process.env[key] = 'unit-test-credential';
   }
   const payloads = [];
+  const reply = numbered(text,messages);
+  for (const row of Object.values(reply.results)) row.reason = '#1 anchors this test judgment.';
   const sse = data => `data: ${JSON.stringify(data)}\n\n`;
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     payloads.push(JSON.parse(options.body));
-    return new Response(sse({ id:'fake', choices:[{index:0,delta:{content:JSON.stringify(numbered(text,messages))},finish_reason:'stop'}] }) + 'data: [DONE]\n\n', { headers: { 'content-type':'text/event-stream' } });
+    return new Response(sse({ id:'fake', choices:[{index:0,delta:{content:JSON.stringify(reply)},finish_reason:'stop'}], usage:{prompt_tokens:50,completion_tokens:400,total_tokens:450,completion_tokens_details:{reasoning_tokens:200}} }) + 'data: [DONE]\n\n', { headers: { 'content-type':'text/event-stream' } });
   });
+  mkdirSync('.tmp/scratch/s1-ruler-v2', { recursive: true });
+  const root = mkdtempSync('.tmp/scratch/s1-ruler-v2/wire-');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const saved = `${root}/outbound.json`;
   const rows = [];
-  const models = new Models({ mode: 'real', save: (raw, row) => rows.push({ raw, row }) });
+  const models = new Models({ mode: 'real', save: (raw, row) => {
+    writeFileSync(saved, JSON.stringify(raw.outbound ?? null));
+    return rows.push(row);
+  } });
   const graded = await grade(models, messages, { turn: 4 });
   assert.equal(graded.scores.direct, 2);
   assert.equal(payloads.length, 1);
   const [payload] = payloads;
   assert.equal(payload.model, 'tencent/hy4-flash');
   assert.equal(payload.provider?.require_parameters, true);
+  assert.deepEqual(payload.reasoning, { max_tokens: 16384 });
+  assert.equal(payload.max_tokens, 65536);
+  const outbound = JSON.parse(readFileSync(saved, 'utf8'));
+  assert.deepEqual(outbound.reasoning, payload.reasoning);
+  assert.equal(outbound.max_tokens, payload.max_tokens);
+  assert.equal(outbound.messages, '[redacted]');
+  assert.doesNotMatch(JSON.stringify(outbound), /unit-test-credential/);
+  assert.equal(rows[0].reasoningLimit, 16384);
+  assert.equal(rows[0].reasoningTokens, 200);
   assert.equal(payload.response_format?.type, 'json_schema');
   assert.equal(payload.response_format.json_schema.strict, true);
   assert.deepEqual(payload.response_format.json_schema.schema, JSON.parse(JSON.stringify(judgementSchema(bind(messages)))));
@@ -70,7 +90,17 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   assert.doesNotMatch(JSON.stringify(payload.messages), /context_id/);
   assert.ok(messages.every(m=>!JSON.stringify(payload.messages).includes(m.id)));
   assert.deepEqual(JSON.parse(payload.messages.at(-1).content).messages.map(m=>m.n),messages.map((_,i)=>i+1));
-  assert.equal(rows[0].row.judgementMode, 'json_schema');
+  assert.equal(rows[0].judgementMode, 'json_schema');
+
+  const margin = policy.judge.minVisibleTokens;
+  policy.judge.minVisibleTokens = policy.judge.maxTokens;
+  try {
+    await assert.rejects(grade(models, messages, { turn: 4 }), /outbound judge budget or schema mismatch/);
+    assert.equal(payloads.length, 1);
+    assert.match(rows.at(-1).detail, /outbound judge budget or schema mismatch/);
+  } finally {
+    policy.judge.minVisibleTokens = margin;
+  }
 });
 
 function numbered(text,messages) {
@@ -96,6 +126,7 @@ test('numbered wire schema enforces bounds and maps references back to full IDs'
   const {text,messages}=fixtures[3];
   const view=bind(messages);
   const good=numbered(text,messages);
+  for (const row of Object.values(good.results)) row.reason = '#1 anchors this test judgment.';
   const schema=judgementSchema(view);
   assert.equal('context_id' in schema.properties,false);
   assert.equal(Value.Check(schema,good),true);
@@ -105,5 +136,17 @@ test('numbered wire schema enforces bounds and maps references back to full IDs'
     slot.message_numbers=[n];
     assert.equal(Value.Check(schema,good),false);
     assert.throws(()=>parseNumberedJudgement(JSON.stringify(good),view),/structure/);
+  }
+});
+
+test('current numbered judgments require an in-window message citation and explanation in every reason', () => {
+  const {text,messages}=fixtures[3];
+  const view=bind(messages);
+  const good=numbered(text,messages);
+  for (const row of Object.values(good.results)) row.reason = '#1 anchors this test judgment.';
+  assert.equal(parseNumberedJudgement(JSON.stringify(good),view).agency_handoff.reason, good.results.agency_handoff.reason);
+  for (const reason of [' ', 'T', `#${messages.length+1} is outside the window.`, '#1', 'The score is 1.']) {
+    good.results.agency_handoff.reason = reason;
+    assert.throws(() => parseNumberedJudgement(JSON.stringify(good),view), /structure|agency_handoff.*reason/);
   }
 });

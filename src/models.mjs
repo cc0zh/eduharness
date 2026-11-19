@@ -115,9 +115,28 @@ export class Models {
       const startedAt = new Date().toISOString();
       const start = performance.now();
       const signal = AbortSignal.timeout(timeoutMs);
+      const send = this.#recorder ? trackedFetch(globalThis.fetch, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : globalThis.fetch;
+      let outboundRejection;
+      const fetch = schema ? (input, init) => {
+        const body = JSON.parse(init.body);
+        const cap = body.max_tokens ?? body.max_completion_tokens;
+        if (body.reasoning?.max_tokens !== config.reasoningMaxTokens || !Number.isInteger(cap) || cap - config.reasoningMaxTokens < config.minVisibleTokens || cap > config.maxTokens || body.provider?.require_parameters !== true || body.response_format?.json_schema?.strict !== true) {
+          outboundRejection = 'outbound judge budget or schema mismatch';
+          throw new Error(outboundRejection);
+        }
+        raw.outbound = {
+          model: routes.judge.id,
+          ...(body.max_tokens === undefined ? {max_completion_tokens:cap} : {max_tokens:cap}),
+          reasoning: { max_tokens: body.reasoning.max_tokens },
+          provider: { require_parameters: true },
+          response_format: { type: body.response_format.type, json_schema: { strict: true, schema: '[redacted]' } },
+          messages: '[redacted]',
+        };
+        return send(input, init);
+      } : this.#recorder ? send : undefined;
       const options = {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
-        ...(this.#recorder && { fetch: trackedFetch(globalThis.fetch, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) }),
+        ...(fetch && { fetch }),
         ...(this.#keys && { apiKey: this.#keys[canonical] }),
         identity: { attribution: null }, temperature: 0, maxTokens: requestLimit, maxRetries: 0,
         reasoning: stream ? agentOptions.reasoning : config.thinking,
@@ -127,6 +146,7 @@ export class Models {
           requestLimit = sent;
           if (schema) return {
             ...payload,
+            reasoning: { max_tokens: config.reasoningMaxTokens },
             provider: { ...payload.provider, require_parameters: true },
             response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
           };
@@ -161,7 +181,10 @@ export class Models {
           catch (error) { failureKind = contractFailure; detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message; }
         }
       }
-      if (failureKind === 'provider_failure') {
+      if (outboundRejection) {
+        failureKind = 'configuration';
+        detail = outboundRejection;
+      } else if (failureKind === 'provider_failure') {
         httpStatus = Number(response?.errorMessage?.match(/^(?:\w+Error: )?(?:status(?: code)?[ :]+)?([45]\d\d)(?:\b|$)/i)?.[1]) || httpStatus;
         detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
       }
@@ -173,6 +196,7 @@ export class Models {
         startedAt, elapsedMs: Math.round(performance.now()-start), timeoutMs,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
+        ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens }),
         ...(scope.binding && { binding:scope.binding }),
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,

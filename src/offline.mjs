@@ -7,7 +7,7 @@ export const sampleJudge = (bad, dumping = bad, absent = []) => context => {
   const selections = [[0, 1, 2], [1, 2, 3], [1, 8], [0, 1], [3, 4], [7, 8]];
   const scores = bad ? [0, 0, 0, 0, 0, 0] : [2, 1, 2, 2, 0, 2];
   return response(JSON.stringify({ results: Object.fromEntries(Object.entries(rubric).map(([key, [slots]], i) => [key, {
-    score: scores[i], reason: i === 3 && dumping ? 'Opening response 2 provides the full solution.' : 'Scripted offline contract fixture; not an independent teaching judgment.',
+    score: scores[i], reason: i === 3 && dumping ? 'Opening response #2 provides the full solution.' : `#${messages[selections[i][0]].n} anchors the scripted offline fixture.`,
     evidence_groups: [{ claim: scores[i] === 0 ? 'counterexample' : 'support_chain', slots: Object.fromEntries(slots.map((slot, j) => {
       const name = slot.split(':')[0];
       const numbers = [messages[selections[i][j]].n];

@@ -58,7 +58,7 @@ if (option('--verify-run') >= 0) {
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
-    if (judgeCell !== (e2Replay ? 'no_teach' : undefined)) throw new Error('--judge-cell no_teach requires E2 judge-only and is required for that mode');
+    if (e2Replay ? !['no_teach', 'all'].includes(judgeCell) : judgeCell !== undefined) throw new Error('E2 judge-only requires --judge-cell no_teach or all');
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
     estimate = values['estimate-only'];
     config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };

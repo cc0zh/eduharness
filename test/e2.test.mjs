@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { run } from '../src/run.mjs';
 
 const targets = {
   answer_dump: 'productive_struggle',
@@ -27,7 +29,7 @@ test('offline E2 records four preregistered raw comparisons against one normal d
   assert.equal(manifest.scenario, 'E2');
   assert.equal(manifest.mode, 'offline');
   assert.equal(manifest.taskId, 'S0-06');
-  assert.equal(manifest.identity.ruler, 'e1-numbered-evidence-v2');
+  assert.equal(manifest.identity.ruler, 'e1-numbered-evidence-v3');
   assert.deepEqual(manifest.identity.targets, targets);
   assert.deepEqual(result.cells.map(cell => cell.id).sort(), ['normal', ...Object.keys(targets)].sort());
   assert.ok(result.cells.every(cell => cell.status === 'execution_success' && cell.validTotal));
@@ -80,7 +82,7 @@ test('E2 estimate covers the whole shared run and rejects incompatible input', (
   }
 });
 
-test('E2 judge-only verifies the frozen no_teach dialogue and never reruns its teachers or learners', t => {
+test('E2 judge-only verifies frozen sources and never reruns their teachers or learners', async t => {
   mkdirSync('.tmp/scratch/e2', { recursive: true });
   const root = mkdtempSync(resolve('.tmp/scratch/e2/regrade-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -112,10 +114,32 @@ test('E2 judge-only verifies the frozen no_teach dialogue and never reruns its t
   assert.deepEqual(read('no_teach/judge.json').groups, sourceGroups);
   assert.equal(read('manifest.json').source.cell, 'no_teach');
   assert.equal(readFileSync(transcript, 'utf8'), bytes);
+  const allOptions = ['--judge-only', 'source', '--judge-cell', 'all'];
+  await assert.rejects(run({ mode: 'real', root, id: 'offline-source', scenario: 'E2', judgeOnly: 'source', judgeCell: 'all' }), /real frozen source/);
+  const allEstimate = cli(...allOptions, '--estimate-only');
+  assert.equal(allEstimate.status, 0, allEstimate.stderr);
+  assert.deepEqual(JSON.parse(allEstimate.stdout), { scenario: 'E2-judge-only', typicalCalls: 5, maxCalls: 15, maxOutputTokens: 983040 });
+  const all = cli(...allOptions, '--id', 'replay-all');
+  assert.equal(all.status, 0, all.stderr);
+  const allResult = JSON.parse(all.stdout);
+  assert.equal(allResult.comparisons.length, 4);
+  assert.deepEqual(allResult.cells.map(x=>x.id), sourceResult.cells.map(x=>x.id));
+  const originalManifest = readFileSync(resolve(root, 'source', 'manifest.json'));
+  const frozen = JSON.parse(readFileSync(resolve(root, 'replay-all', 'manifest.json'))).source;
+  assert.equal(frozen.identityId, JSON.parse(originalManifest).identityId);
+  assert.equal(frozen.ruler, JSON.parse(originalManifest).identity.ruler);
+  assert.equal(frozen.manifestSha256, createHash('sha256').update(originalManifest).digest('hex'));
+  for (const {id} of allResult.cells) {
+    const readCell = file => JSON.parse(readFileSync(resolve(root, 'replay-all', id, file), 'utf8'));
+    assert.deepEqual(readCell('telemetry.json').map(x=>x.role), ['judge']);
+    assert.deepEqual(readCell('transcript.json'), JSON.parse(readFileSync(resolve(root, 'source', id, 'transcript.json'))));
+    assert.equal(readCell('judge.json').binding.sourceRunId, 'source');
+  }
   const changed = JSON.parse(bytes);
   changed[1].text += ' edited';
   writeFileSync(transcript, JSON.stringify(changed));
   const rejected = cli(...options, '--id', 'tampered');
   assert.equal(rejected.status, 1, rejected.stderr);
   assert.equal(JSON.parse(rejected.stdout).failure.kind, 'invalid_input');
+  assert.equal(cli(...allOptions, '--id', 'tampered-all').status, 1);
 });

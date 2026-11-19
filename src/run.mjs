@@ -4,7 +4,7 @@ import pkg from '../package.json' with { type: 'json' };
 import { cellIds, cellResult, filenames, runId } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, message } from '../contracts/core/schema.mjs';
 import { readTask, revision } from '../contracts/dataset/schema.mjs';
-import { directDimension, ruler } from '../contracts/judge/schema.mjs';
+import { directDimension, previousRuler, ruler } from '../contracts/judge/schema.mjs';
 import { learnerFormat, parseLearner } from '../contracts/learner/schema.mjs';
 import { policy, routes, rounds, taskId } from '../config/e1.mjs';
 import { targets } from '../config/e2.mjs';
@@ -19,8 +19,12 @@ const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null
 const variants = scenario => scenario === 'E2' ? cellIds : ['normal', 'answer_dump'];
 export const scenarioName = ({scenario = 'E1', judgeOnly}) => judgeOnly ? `${scenario}-judge-only` : scenario;
 
-export function budget({ judgeOnly, scenario } = {}) {
-  if (judgeOnly) return {typicalCalls:1,maxCalls:policy.retries+1,maxOutputTokens:(policy.retries+1)*policy.judge.maxTokens};
+export function budget({ judgeOnly, judgeCell, scenario } = {}) {
+  if (judgeOnly) {
+    const typicalCalls = judgeCell === 'all' ? cellIds.length : 1;
+    const maxCalls = typicalCalls * (policy.retries + 1);
+    return { typicalCalls, maxCalls, maxOutputTokens: maxCalls * policy.judge.maxTokens };
+  }
   const judge = variants(scenario).length;
   const teacher = rounds * (policy.teacher.requestsPerTurn + judge - 1);
   const learner = rounds * judge;
@@ -50,15 +54,17 @@ function compare(judgements) {
   });
 }
 
-function frozenDialogue(root, id, scenario, cell) {
+function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
   try {
     const dir = join(root,runId(id));
-    const manifest = JSON.parse(readFileSync(join(dir,filenames.manifest),'utf8'));
+    const manifestBytes = readFileSync(join(dir,filenames.manifest));
+    const manifest = JSON.parse(manifestBytes);
     const result = JSON.parse(readFileSync(join(dir,filenames.result),'utf8'));
     const bytes = readFileSync(join(dir,cell,filenames.transcript));
     const messages = JSON.parse(bytes);
     if (manifest.id !== id || manifest.scenario !== scenario || manifest.taskId !== taskId || result.scenario !== scenario || result.taskId !== taskId || !result.cells.some(row=>row.id===cell && row.recorded) || messages.length !== rounds*2+1) throw Error('invalid source');
-    if (scenario === 'E2' && (manifest.identity.ruler !== ruler || manifest.mode !== result.mode)) throw Error('source ruler or mode differs');
+    if (scenario === 'E2' && (![previousRuler, ruler].includes(manifest.identity.ruler) || manifest.mode !== result.mode)) throw Error('unsupported source ruler or inconsistent mode');
+    if (realSourceRequired && manifest.mode !== 'real') throw Error('real five-cell judge-only requires a real frozen source');
     for (const [i,m] of messages.entries()) {
       if (m.id !== `${id}:${cell}:m:${i+1}` || m.role !== (i%2 ? 'teacher' : 'learner') || m.turn !== Math.ceil(i/2)) throw Error('invalid chronology');
       message(m.id,m.role,m.turn,m.text);
@@ -67,21 +73,31 @@ function frozenDialogue(root, id, scenario, cell) {
     const request = JSON.parse(original.context.messages.at(-1).content);
     const viewHash = hash(messages);
     const expectedMessages = original.binding ? messages.map(({role,text},i)=>({n:i+1,role,text})) : messages;
-    if (scenario === 'E2' && (original.binding?.runId !== id || original.binding.cell !== cell || original.binding.ruler !== ruler || hash(original.binding.messageIds) !== hash(messages.map(m=>m.id)))) throw Error('invalid judge binding');
+    if (scenario === 'E2' && (original.binding?.runId !== id || original.binding.cell !== cell || original.binding.ruler !== manifest.identity.ruler || hash(original.binding.messageIds) !== hash(messages.map(m=>m.id)))) throw Error('invalid judge binding');
     if ((original.binding?.viewHash ?? request.context_id) !== viewHash || hash(request.messages) !== hash(expectedMessages)) throw Error('source no longer matches the original judge request');
-    return { messages, provenance:{runId:id,cell,transcriptSha256:hash(bytes)} };
+    return {
+      messages,
+      provenance: { runId: id, cell, transcriptSha256: hash(bytes) },
+      sourceIdentity: { identityId: manifest.identityId, ruler: manifest.identity?.ruler, manifestSha256: hash(manifestBytes) },
+    };
   } catch (error) { throw failure('invalid_input', {}, `judge-only cannot validate the frozen ${scenario} ${cell} dialogue: ${error.message}`); }
 }
 
 export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', scenario: requested = 'E1', checkReceipt, limits, recorder }) {
   const scenario = scenarioName({scenario:requested, judgeOnly});
-  const ceiling = budget({ scenario, judgeOnly });
+  const ceiling = budget({ scenario:requested, judgeOnly, judgeCell });
   limits ??= { maxAttempts: ceiling.maxCalls, maxRequestedOutputTokens: ceiling.maxOutputTokens };
   const taskBytes = source('data/upstream/tasks/stage0_situated_tutoring.json');
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   const operatorPolicy = policyBytes.toString('utf8');
   const task = readTask(JSON.parse(taskBytes), taskId);
-  const frozen = judgeOnly ? frozenDialogue(root, judgeOnly, requested, judgeCell) : undefined;
+  const planned = judgeOnly && judgeCell !== 'all' ? [judgeCell] : variants(requested);
+  const realSourceRequired = mode === 'real' && judgeCell === 'all';
+  const frozen = judgeOnly ? new Map(planned.map(cell => [cell, frozenDialogue(root, judgeOnly, requested, cell, realSourceRequired)])) : undefined;
+  const provenance = frozen && (judgeCell === 'all'
+    ? { runId: judgeOnly, ...frozen.get('normal').sourceIdentity, cells: [...frozen.values()].map(entry => entry.provenance) }
+    : frozen.get(judgeCell).provenance);
+  const paired = requested === 'E2' && (!judgeOnly || judgeCell === 'all');
   const runDir = join(root, id);
   mkdirSync(root, { recursive: true });
   try { mkdirSync(runDir); }
@@ -92,19 +108,18 @@ export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', sce
   const writer = { pid: process.pid, startedAt: new Date().toISOString() };
   const reserve = attemptBudget(limits);
   const pi = Object.fromEntries(Object.entries(pkg.dependencies).filter(([key]) => key.startsWith('@earendil-works/')));
-  const identity = { pi, runnerVersion: pkg.version, dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes) }, ruler, policy, limits, dialogueSource: frozen?.provenance, routes: mode === 'real' ? routes : 'pi-ai-faux', sources: Object.fromEntries(identityFiles.map(path => [path, hash(source(path))])) };
-  if (scenario === 'E2') {
+  const identity = { version: 'evaluation-identity-v2', pi, runnerVersion: pkg.version, dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes) }, ruler, policy, limits, dialogueSource: provenance, routes: mode === 'real' ? routes : 'pi-ai-faux', sources: Object.fromEntries(identityFiles.map(path => [path, hash(source(path))])) };
+  if (paired) {
     identity.targets = targets;
     identity.sources['config/e2.mjs'] = hash(source('config/e2.mjs'));
   }
-  write(join(runDir, filenames.manifest), { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, writer, checkReceipt, source: frozen?.provenance });
+  write(join(runDir, filenames.manifest), { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, writer, checkReceipt, source: provenance });
   const cells = [];
   const judgements = new Map();
-  const planned = frozen ? [frozen.provenance.cell] : variants(scenario);
   for (const variant of planned) {
     const path = join(runDir, variant);
     mkdirSync(join(path, filenames.raw), { recursive: true });
-    const messages = frozen?.messages ?? [], events = [], telemetry = [];
+    const messages = frozen?.get(variant).messages ?? [], events = [], telemetry = [];
     const store = (file, value) => write(join(path, file), value);
     const push = (file, list, item) => { list.push(item); store(file, list); };
     const say = (role, turn, text) => push(filenames.transcript, messages, message(`${id}:${variant}:m:${messages.length + 1}`, role, turn, text));
@@ -138,21 +153,21 @@ export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', sce
         }
       }
       role = 'judge'; turn = rounds; call = 1;
-      const { groups, scores, binding } = await grade(models, messages, { turn, runId:id, cell:variant });
+      const { groups, scores, binding } = await grade(models, messages, { turn, runId:id, cell:variant, sourceRunId:judgeOnly });
       store(filenames.judge, {binding,groups});
       cells.push(cellResult(variant, scores));
-      if (scenario === 'E2') judgements.set(variant, { groups, binding, messages });
+      if (paired) judgements.set(variant, { groups, binding, messages });
     } catch (error) {
       const classified = error.failure ?? failure('artifact_io', { role, turn, call }, error.message).failure;
       cells.push(cellResult(variant, null, classified));
       break;
     }
   }
-  const comparisons = scenario === 'E2' ? compare(judgements) : undefined;
+  const comparisons = paired ? compare(judgements) : undefined;
   const complete = cells.length === planned.length && cells.every(c => c.validTotal);
-  const acceptance = complete && (Boolean(frozen) || (comparisons
+  const acceptance = complete && (comparisons
     ? comparisons.every(row => row.delta >= 1 && row.normal.references.length && row.variant.references.length)
-    : cells[0].directAnswer - cells[1].directAnswer >= 1));
+    : Boolean(frozen) || cells[0].directAnswer - cells[1].directAnswer >= 1);
   const result = { scenario, taskId, mode, runDir, directDimension, acceptance, cells, ...(comparisons && { comparisons }) };
   write(join(runDir, filenames.result), result);
   mkdirSync(join(root, '_receipts'), { recursive: true });

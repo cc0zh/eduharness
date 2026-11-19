@@ -12,8 +12,8 @@
 | 消息 ID `message ID` | 一条公开消息在原始对话中的完整标识。 | 不是裁判输出的证据序号。 | `transcript.json` 的 `id`；落盘裁判引用以该 ID 回读。 | core / judge |
 | 学生生成契约故障 `simulator_generation_contract` | 学生输出未通过完整 JSON 和结构检查。 | 不是模拟学生作答错误。 | 末次学生尝试与校验失败分类。 | core / learner |
 | 推理耗尽 `reasoning_exhausted_empty` | 达到输出上限、没有可见正文，且 provider 明确报告所有输出 token 均为推理。 | 不根据长度上限或正文为空猜原因。 | 调用遥测的停止原因、请求上限、`reasoningTokens` 和 `usage.output`。 | core |
-| 尺子 `ruler` | 固定的评分规则、证据校验和计分方法，用于解释 harness 改动。 | 不是教师本身，也不是名次。 | manifest 的 `identity.ruler` 和 judge schema。 | judge |
-| 评测身份 `evaluation identity` | 定义可比较条件的版本化快照。 | 单独的 run ID 或模型名不足以标识。 | `manifest.json` 的 `identity`、`identityId`、`scenario` 与 `mode`。 | [artifacts](../contracts/artifacts/README.md#评测身份) |
+| 尺子 `ruler` | 固定的评分规则、证据校验和计分方法，用于解释 harness 改动。 | 不是教师本身，也不是名次。 | `identity.ruler`。从 `e1-numbered-evidence-v3` 起使用明确的主动权分档边界和理由引用。旧版与新版分档不可直接比较。 | [judge](../contracts/judge/README.md) |
+| 评测身份 `evaluation identity` | 定义可比较条件的版本化快照。 | 单独的 run ID 或模型名不足以标识。 | `manifest.json` 的 `identity`、`identityId`、`scenario` 与 `mode`。本次启用 `identity.version: evaluation-identity-v2`，纳入新版尺子和调用策略。 | [artifacts](../contracts/artifacts/README.md#评测身份) |
 | 教师 `teacher` | 模型 + harness。harness 负责提示、工具和教学阶段。 | 不是模型单独完成，也不拥有学生画像私有字段。 | manifest 的模型路由和教师源码指纹，结合调用原件与 `teacher-events.json`。 | teacher |
 | 会话目标完成 `goal-complete` | Agent 会话对目标状态的声明。 | 不是验收证据或替代验收。 | 会话控制工具的状态。 | artifacts（仅界定证据边界） |
 | 验收通过 `acceptance` | 证据覆盖对应场景卡的全部要求。 | 单有离线 `acceptance: true` 或 `goal-complete` 不足。 | 逐栏核对对应卡的证据。`result.acceptance` 记录当前模式的机器判断。 | artifacts（运行字段）、[场景卡](scenarios.md)（验收） |
