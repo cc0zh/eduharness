@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { checkout, checkSnapshot, publishCheckReceipt } from '../src/real-preflight.mjs';
+import { checkRulerChange } from './check-ruler.mjs';
 
 function snapshot() { try { return checkSnapshot(); } catch { return null; } }
 const before = snapshot();
+checkRulerChange();
 const boundary = spawnSync(process.execPath,['scripts/check-boundaries.mjs'],{cwd:checkout,stdio:'inherit'});
 if (boundary.status !== 0) process.exit(1);
 const result = spawnSync(process.execPath,['--test','--test-reporter=tap'],{cwd:checkout,encoding:'utf8',maxBuffer:8*1024*1024});
