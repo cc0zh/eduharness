@@ -1,19 +1,19 @@
 # 当前状态
 
-**第 2 步：训练初评未通过。准备一次训练复评，尺子尚未冻结。**
+**第 2 步已收尾。训练一致性未通过，按用户的一轮处置规则冻结 `e1-numbered-evidence-v4`。**
 
 | 步骤 | 状态 | 证据入口 |
 | --- | --- | --- |
 | 第 1 步 区分坏教师 | 已完成 | `0302396` 记录用户签收 S1。`e2-real-20261119-06` 同次五格区分了四种坏教师，但原预登记的三次完整稳定性重复未达成。[签收与回读证据](#s1-场景卡逐栏) |
-| 第 2 步 训练一致性核对 | v3 初评未通过；v4 复评未启动 | 71/90 同档，线性加权 κ 0.741。[训练初评和复评](#补尺子训练初评和复评) |
-| 第 3 步 未见题验证 | 未开始 | 尺子尚未冻结，测试集继续封存。测试运行的版本要求见[冻结记录约定](#冻结记录约定)。 |
+| 第 2 步 训练一致性核对 | 未通过；v4 已冻结 | v3 初评 71/90 同档、κ 0.741；v4 复评 67/90 同档、κ 0.686。[训练初评和复评](#补尺子训练初评和复评) |
+| 第 3 步 未见题验证 | 未开始 | 测试集仍封存。后续运行须引用[冻结记录](#冻结记录)，当前 CLI 仍拦截测试阶段。 |
 | 第 4 步 手写变体 A/B | 未开始 | [第 4 步场景卡](scenarios.md#第-4-步-手写-harness-变体-ab)。 |
 
 ## 补尺子：训练初评和复评
 
 **v3 训练初评未通过。** 标签由 `gpt-6.2-sol` 预标后交用户逐格复核，改动率 0/90。锁定 CSV 的 SHA256 为 `3498764b4c9844ff8dae9ee9ba8033affacdf0500239f67e63b7644b13f4e841`。结论是经用户认可的跨模型一致性，不是人工独立校准；用户在 `20261119` 改为预标加复核，没有按原方案单人盲标和隔天重标 4 条。`plan.md:92` 的通过线不变。`support_escalation_and_fading` 缺标签 2 档，`productive_struggle` 缺标签 1 档，`verification_or_transfer` 为 κ 0.478、7/15 同档，`misconception_repair` 的一个同档证据未确认。见本机[初评报告](../runs/ruler-train-score-v1/calibration-report.md)、[标签锁定收据](../runs/ruler-train-score-v1/label-lock.json)、[计算结果](../runs/ruler-train-score-v1/calibration-results.json)及[复算脚本](../scripts/ruler-calibration.mjs)。
 
-按用户新增的处置规则，只从以下方案选一次最小修订。原预登记不是新冻结授权；仍按原线报告通过或未通过。复评只用原 15 条训练对话，不动测试集。
+按用户新增的处置规则，只选一次最小修订。冻结是本轮用户决定，通过线仍以原预登记为准。复评只用原 15 条训练对话，不动测试集。
 
 | 方案 | 预计成本 | 处置 |
 | --- | --- | --- |
@@ -21,11 +21,26 @@
 | 给训练题补逐题检查项，再复评 | 约 1–2 人时整理和复核；若用于裁判，须另登记输入变化和复评额度 | 不实施。 |
 | 请未见预标与分数的人独立盲标 15 条并隔天重标 4 条 | 约 3–3.5 人时，依据原标注说明；只对现有原件做标注时无模型请求 | 不实施。 |
 
-唯一复评 run ID 为 `ruler-train-rescore-v4-20261120-01`，源为 `ruler-train-gen-v1`。使用 `ruler-expand / train / judge-only`，单进程，不重生成。新版本仍用 `judge-output-v2`、`evaluation-identity-v2`、`e1-call-policy-v4` 和原裁判路由。额度预检使用单独的 run ID，真实调用前需按仓库规则登记并获额度授权。
+**v4 训练复评未通过。** 15/15 条有有效总分；`--verify-run` 退出 0，运行收据的 `acceptance: true` 只表示拿齐分数。按 `plan.md:92`，仅 `representation_pivot` 通过。`agency_handoff` 同档 10/15（66.7%），`verification_or_transfer` 仍为 7/15（46.7%）、κ 0.444。其余未达线项仍有缺档或同档证据未确认。存疑格 18/39、非存疑格 49/51 同档。见本机[复评报告](../runs/ruler-train-rescore-v4-20261120-01/calibration-report.md)、[计算结果](../runs/ruler-train-rescore-v4-20261120-01/calibration-results.json)。不做第二轮修订或复评。
 
-### 冻结记录约定
+唯一复评 run `ruler-train-rescore-v4-20261120-01` 已按授权用 `ruler-expand / train / judge-only` 完成，原 `ruler-train-gen-v1` 对话逐字节不变。所有遥测均为裁判进程 `17084`。请求 18/45 次（3 次重试），请求输出额度 1,179,648/2,949,120 token；供应商已报 258,895 token，2 次因超时缺报。一次实报推理 16,819 高于该次请求的 16,384 推理上限。[请求日志](../runs/_receipts/ruler-train-rescore-v4-20261120-01.requests.jsonl) · [进程收据](../runs/_receipts/ruler-train-rescore-v4-20261120-01.process.json) · [评测收据](../runs/_receipts/ruler-train-rescore-v4-20261120-01.json)。
 
-冻结与统计过线分开记。完成这一次复评后，按 `plan.md:92` 报读数，并按本轮用户指示冻结复评版本，不做第二轮改动；未达线不能记为通过。冻结记录须写尺子版本、该版本提交 SHA、复评 run/收据和标签哈希。第 3 步 manifest 必须引用该冻结记录及其 `identity.ruler`、`identity.judgeOutputContract`、`identity.version`，并核对 `identity.policy.version`、`identity.routes.judge`、尺子相关 `identity.sources` 与冻结提交。题目、条件及来源对话改变时保留各自的 `identityId`，不复用训练 run 的身份。第 3 步另按 `plan.md:95–98` 执行，本次不启动；现行 CLI 继续拦截测试阶段。
+### 冻结记录
+
+冻结的是复评所用尺子，提交 SHA 为 `3bd3b178a47f8d7e0d2c522a1d86f4b71238de38`。该提交的[干净 HEAD 检查收据](../runs/_receipts/check-3bd3b178a47f8d7e0d2c522a1d86f4b71238de38.json)为 72 项通过。复评评测收据 SHA256 为 `b3236742eff612659136e96b8c53e18bad43fbc7bd6c9fe1fb5967e0cad65b3c`，沿用上方锁定标签 SHA256。冻结不表示训练一致性过线。
+
+第 3 步的 manifest 必须引用本冻结记录和尺子提交，并核对这些字段，值以[复评 manifest](../runs/ruler-train-rescore-v4-20261120-01/manifest.json)为准：
+
+| manifest 字段 | 冻结值 |
+| --- | --- |
+| `identity.ruler` | `e1-numbered-evidence-v4` |
+| `identity.judgeOutputContract` | `judge-output-v2` |
+| `identity.version` | `evaluation-identity-v2` |
+| `identity.policy.version` | `e1-call-policy-v4` |
+| `identity.routes.judge` | `openrouter / tencent/hy4-flash`，`responseFormat: json_schema` |
+| `identity.sources` | 逐项核对尺子相关源码哈希，包括 `contracts/judge/schema.mjs`、`src/judge.mjs`、`config/e1.mjs` |
+
+复评 manifest SHA256 为 `0cc5a3ab85cb432d8bf5fd162c180c272fec2c7ccf91a8d422e1cfb78b17f562`。第 3 步沿用 `plan.md:95–98` 的方向判定与证据核验口径，登记独立的测试 `identityId`、任务、条件、预算和来源。`plan.md:96` 的格数和哨兵题基于旧划分，其中 S0-82 已在本次训练清单内。第 3 步登记时须先按锁定的 25 题核对配对分母和 `no_teach` 哨兵。本次测试集仍封存，现行 CLI 仍拦截测试阶段。
 
 ### 历史训练运行
 
