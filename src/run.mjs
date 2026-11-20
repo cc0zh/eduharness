@@ -4,7 +4,7 @@ import pkg from '../package.json' with { type: 'json' };
 import { cellIds, cellResult, filenames, runId } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, message } from '../contracts/core/schema.mjs';
 import { readTask, revision } from '../contracts/dataset/schema.mjs';
-import { directDimension, numberedRulers, outputContract, ruler } from '../contracts/judge/schema.mjs';
+import { directDimension, outputContract, previousRuler, ruler } from '../contracts/judge/schema.mjs';
 import { learnerFormat, parseLearner } from '../contracts/learner/schema.mjs';
 import { policy, routes, rounds, taskId } from '../config/e1.mjs';
 import { targets } from '../config/e2.mjs';
@@ -17,6 +17,7 @@ export const source = name => readFileSync(new URL(`../${name}`, import.meta.url
 const identityFiles = ['package-lock.json', 'config/e1.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/models.mjs', 'src/run.mjs', 'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
 export const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 const variants = scenario => scenario === 'E2' ? cellIds : ['normal', 'answer_dump'];
+const frozenE2Rulers = [previousRuler, ruler, 'e1-numbered-evidence-v4'];
 export const scenarioName = ({scenario = 'E1', judgeOnly}) => judgeOnly ? `${scenario}-judge-only` : scenario;
 
 export function evaluationIdentity({ mode, taskBytes, policyBytes, limits, provenance, dataset, sources = [] }) {
@@ -74,7 +75,7 @@ function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
     const bytes = readFileSync(join(dir,cell,filenames.transcript));
     const messages = JSON.parse(bytes);
     if (manifest.id !== id || manifest.scenario !== scenario || manifest.taskId !== taskId || result.scenario !== scenario || result.taskId !== taskId || !result.cells.some(row=>row.id===cell && row.recorded) || messages.length !== rounds*2+1) throw Error('invalid source');
-    if (scenario === 'E2' && (!numberedRulers.includes(manifest.identity.ruler) || manifest.mode !== result.mode)) throw Error('unsupported source ruler or inconsistent mode');
+    if (scenario === 'E2' && (!frozenE2Rulers.includes(manifest.identity.ruler) || manifest.mode !== result.mode)) throw Error('unsupported source ruler or inconsistent mode');
     if (realSourceRequired && manifest.mode !== 'real') throw Error('real five-cell judge-only requires a real frozen source');
     for (const [i,m] of messages.entries()) {
       if (m.id !== `${id}:${cell}:m:${i+1}` || m.role !== (i%2 ? 'teacher' : 'learner') || m.turn !== Math.ceil(i/2)) throw Error('invalid chronology');

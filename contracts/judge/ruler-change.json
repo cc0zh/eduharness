@@ -1,7 +1,0 @@
-{
-  "ruler": "e1-numbered-evidence-v4",
-  "fingerprint": "db5579d3bec38da8f353ab44ac0b14cee01228856c0e39d827676d7315c540a1",
-  "trainingRunId": "ruler-train-gen-v1",
-  "trainingReceiptSha256": "b396b74b34eaee38bccb45c201c3289a80d593719ec5fae37aaab997fbf2528c",
-  "labelsSha256": "3498764b4c9844ff8dae9ee9ba8033affacdf0500239f67e63b7644b13f4e841"
-}

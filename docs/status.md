@@ -1,13 +1,13 @@
 # 当前状态
 
-**第 2 步已收尾。训练一致性未通过，按用户的一轮处置规则冻结 `e1-numbered-evidence-v4`。**
+**第 2 步已收尾。训练一致性未通过，按第 4 步的两个目标维度改冻 `e1-numbered-evidence-v3`。**
 
 | 步骤 | 状态 | 证据入口 |
 | --- | --- | --- |
 | 第 1 步 区分坏教师 | 已完成 | `0302396` 记录用户签收 S1。`e2-real-20261119-06` 同次五格区分了四种坏教师，但原预登记的三次完整稳定性重复未达成。[签收与回读证据](#s1-场景卡逐栏) |
-| 第 2 步 训练一致性核对 | 未通过；v4 已冻结 | v3 初评 71/90 同档、κ 0.741；v4 复评 67/90 同档、κ 0.686。[训练初评和复评](#补尺子训练初评和复评) |
+| 第 2 步 训练一致性核对 | 未通过；v3 已冻结 | 两个目标维上 v3 同档 19/30，v4 同档 17/30。[择版对比](#目标维度对比) |
 | 第 3 步 未见题验证 | 未开始 | 测试集仍封存。后续运行须引用[冻结记录](#冻结记录)，当前 CLI 仍拦截测试阶段。 |
-| 第 4 步 手写变体 A/B | 未开始 | [第 4 步场景卡](scenarios.md#第-4-步-手写-harness-变体-ab)。 |
+| 第 4 步 手写变体 A/B | 未开始 | 验证或迁移以[对话行为证据](#目标维度对比)为准，分数只作参考。[第 4 步场景卡](scenarios.md#第-4-步-手写-harness-变体-ab)。 |
 
 ## 补尺子：训练初评和复评
 
@@ -25,22 +25,45 @@
 
 唯一复评 run `ruler-train-rescore-v4-20261120-01` 已按授权用 `ruler-expand / train / judge-only` 完成，原 `ruler-train-gen-v1` 对话逐字节不变。所有遥测均为裁判进程 `17084`。请求 18/45 次（3 次重试），请求输出额度 1,179,648/2,949,120 token；供应商已报 258,895 token，2 次因超时缺报。一次实报推理 16,819 高于该次请求的 16,384 推理上限。[请求日志](../runs/_receipts/ruler-train-rescore-v4-20261120-01.requests.jsonl) · [进程收据](../runs/_receipts/ruler-train-rescore-v4-20261120-01.process.json) · [评测收据](../runs/_receipts/ruler-train-rescore-v4-20261120-01.json)。
 
+### 目标维度对比
+
+本次择版先固定规则。只比较 `agency_handoff` 与 `verification_or_transfer`，先比两维与锁定标签的精确同档格数之和，多者胜。相同时比两维线性加权 κ 的均值，高者胜。再相同保留 v4，避免回退代码。总分、六维合并结果不参与选择；训练一致性仍按 `plan.md:92` 判定。
+
+复用 `ruler-train-score-v1` 的 v3 初评和 `ruler-train-rescore-v4-20261120-01` 的 v4 复评。两版使用同一份锁定标签、匿名映射和 15 条冻结训练对话。逐维有效配对均为 15/15。κ 的 95% CI 按题族整簇重抽 2,000 次。v3 的 `productive_struggle` 有 16 次重抽未定义，未代填；其余表内读数未见未定义重抽。复算没有新发评测请求。标签是 AI 预标加用户复核，不是人工独立判断；每版只观察一次，区间不能证明版本差异或未见题效果。
+
+| 版本 | 维度 | 线性加权 κ（95% CI） | 精确同档率 | 两档差 | `plan.md:92` |
+| --- | --- | ---: | ---: | ---: | --- |
+| v3 | `misconception_repair` | 0.815 [0.494, 1.000] | 13/15（86.7%） | 0 | 未通过，S0-55 同档证据未确认 |
+| v3 | `support_escalation_and_fading` | 0.706 [0.444, 1.000] | 12/15（80.0%） | 0 | 未通过，标签缺 2 档 |
+| v3 | `agency_handoff` | 0.783 [0.512, 1.000] | 12/15（80.0%） | 0 | 通过 |
+| v3 | `productive_struggle` | 0.672 [0.000, 1.000] | 13/15（86.7%） | 1 | 未通过，标签缺 1 档，S0-84 同档证据未确认 |
+| v3 | `representation_pivot` | 0.928 [0.767, 1.000] | 14/15（93.3%） | 0 | 通过 |
+| v3 | `verification_or_transfer` | 0.478 [0.187, 0.727] | 7/15（46.7%） | 0 | 未通过，κ 与同档率未达线 |
+| v4 | `agency_handoff` | 0.638 [0.294, 0.862] | 10/15（66.7%） | 0 | 未通过，同档率未达线 |
+| v4 | `verification_or_transfer` | 0.444 [0.135, 0.717] | 7/15（46.7%） | 0 | 未通过，κ 与同档率未达线 |
+
+**选 v3。** 两维同档数 v3 为 19/30，v4 为 17/30。差距是交还主动权多 2 格，验证或迁移持平。两维平均 κ 分别为 0.630、0.541，无需启用平手规则。v3 只能在已锁定的训练对话上按这条规则优先，整体仍未通过。v4 的历史报告与评分保留。复用初评报告中的离线命令；核对 v4 时，在命令末尾加 `--rescore ruler-train-rescore-v4-20261120-01 --rescore-ruler e1-numbered-evidence-v4`。
+
+两版的 `verification_or_transfer` κ 都低于 0.60。第 4 步该维以原对话行为为准，分数只作参考。记录教师是否发起概念检查或迁移，以及学生是否独立解释或应用，并附消息引用；不能用分差代替这些证据。
+
 ### 冻结记录
 
-冻结的是复评所用尺子，提交 SHA 为 `3bd3b178a47f8d7e0d2c522a1d86f4b71238de38`。该提交的[干净 HEAD 检查收据](../runs/_receipts/check-3bd3b178a47f8d7e0d2c522a1d86f4b71238de38.json)为 72 项通过。复评评测收据 SHA256 为 `b3236742eff612659136e96b8c53e18bad43fbc7bd6c9fe1fb5967e0cad65b3c`，沿用上方锁定标签 SHA256。冻结不表示训练一致性过线。
+冻结 `e1-numbered-evidence-v3`。裁判规范、提示和调用配置按 `889fc4bad254f5fcfb813f705643f36bf376ec0e` 回读，已在当前代码恢复。尺子指纹为 `7af16380ef04a8a1af5892859d3bfc8d74cd4477b939e7d614dd79f7b134e6c4`。冻结依据是两个目标维的同档数，不是训练一致性过线。此前 v4 复评对应提交 `3bd3b178a47f8d7e0d2c522a1d86f4b71238de38`，保留为历史。
 
-第 3 步的 manifest 必须引用本冻结记录和尺子提交，并核对这些字段，值以[复评 manifest](../runs/ruler-train-rescore-v4-20261120-01/manifest.json)为准：
+第 3 步的 manifest 必须引用本冻结记录与 v3 尺子来源提交，并核对下列字段。值见 [v3 初评 manifest](../runs/ruler-train-score-v1/manifest.json)：
 
 | manifest 字段 | 冻结值 |
 | --- | --- |
-| `identity.ruler` | `e1-numbered-evidence-v4` |
+| `identity.ruler` | `e1-numbered-evidence-v3` |
 | `identity.judgeOutputContract` | `judge-output-v2` |
 | `identity.version` | `evaluation-identity-v2` |
 | `identity.policy.version` | `e1-call-policy-v4` |
 | `identity.routes.judge` | `openrouter / tencent/hy4-flash`，`responseFormat: json_schema` |
-| `identity.sources` | 逐项核对尺子相关源码哈希，包括 `contracts/judge/schema.mjs`、`src/judge.mjs`、`config/e1.mjs` |
+| `identity.sources` | 对照初评 manifest 中 `contracts/judge/schema.mjs`、`src/judge.mjs`、`config/e1.mjs` 的哈希；其余源码以测试运行检出为准 |
 
-复评 manifest SHA256 为 `0cc5a3ab85cb432d8bf5fd162c180c272fec2c7ccf91a8d422e1cfb78b17f562`。第 3 步沿用 `plan.md:95–98` 的方向判定与证据核验口径，登记独立的测试 `identityId`、任务、条件、预算和来源。`plan.md:96` 的格数和哨兵题基于旧划分，其中 S0-82 已在本次训练清单内。第 3 步登记时须先按锁定的 25 题核对配对分母和 `no_teach` 哨兵。本次测试集仍封存，现行 CLI 仍拦截测试阶段。
+v3 初评 manifest SHA256 为 `a8a68385fc5b6aa9e92dd043492fcb924bd4cc9844a2c9cf7e0d3c7061f1662f`。[初评评测收据](../runs/_receipts/ruler-train-score-v1.json) SHA256 为 `bb54307490c3019b559d10b31be76b4bd658c6d424de372766626179e99de564`，沿用上方锁定标签 SHA256。
+
+第 3 步沿用 `plan.md:95–98` 的方向判定与证据核验口径。登记测试的 `identityId`、任务、条件、预算和来源，不复用训练 `identityId`。`plan.md:96` 的格数和哨兵题基于旧划分，其中 S0-82 已在训练清单内。登记第 3 步时先按锁定的 25 题核对配对分母和 `no_teach` 哨兵。本次测试集仍封存，现行 CLI 仍拦截测试阶段。
 
 ### 历史训练运行
 
@@ -57,7 +80,7 @@
 
 重试和用量缺报均为 0。两阶段合计实报 510,476 token。原 20 条最省档估算来自本机 `%TEMP%/teacharena/ruler-expand/plan.md` 第 6 节（SHA256 `59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22`），生成 295,800、初评 379,000，合计约 674,800 token。按 15 条线性折算，生成约 221,850 token，实报高 24.3%；初评约 284,250 token，实报低 17.5%。实际请求输出额度均低于预检上限。15 次裁判请求未观察到推理 token 超出请求推理上限。
 
-复核材料在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。用于 `npm run check` 的 [尺子变更引用](../contracts/judge/ruler-change.json)指向原生成 run 的收据和同 SHA256 的 `labels-locked.csv`。第 3 步尚未开始，保留 `no_teach` 首 4 题至少 3 题评分有效的继续条件。
+复核材料在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。v4 的变更引用保留在 `git show 3bd3b17:contracts/judge/ruler-change.json`，绑定原生成 run 和同 SHA256 的 `labels-locked.csv`。切回 v3 后 `npm run check` 仍校验原 v3 指纹，任何新尺子变更仍须提供训练引用。第 3 步尚未开始，保留 `no_teach` 首 4 题至少 3 题评分有效的继续条件。
 
 ## E1 S0-06 真实双格
 

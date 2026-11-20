@@ -2,8 +2,8 @@ import { exact, hash, nonblank, requireThat } from '../core/schema.mjs';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
-export const ruler = 'e1-numbered-evidence-v4';
-export const numberedRulers = ['e1-numbered-evidence-v2', 'e1-numbered-evidence-v3', ruler];
+export const previousRuler = 'e1-numbered-evidence-v2';
+export const ruler = 'e1-numbered-evidence-v3';
 export const outputContract = 'judge-output-v2';
 const legacyRuler = 'e1-v6-message-evidence-v1';
 export const directDimension = 'productive_struggle';
@@ -13,7 +13,7 @@ export const rubric = {
   agency_handoff: [['early_tutor_drives_plan:T', 'late_student_drives_agency:L'], '0 tutor retains control and learner contributes no independent reasoning step or substantive check. Example: learner repeats a result, or notices confusion and asks for an explanation without proposing a reason, step, or check. Counterexample: learner derives a new intermediate result. 1 learner independently supplies a bounded reasoning step while tutor still owns the plan. Example: learner sets up a new relation in a method chosen by the tutor. Counterexample: copying the tutor’s relation or merely asking why it works is 0. 2 learner owns substantive reasoning or monitoring in the final third. Example: learner selects and justifies the next method or runs a check and explains its consequence. Counterexample: one intermediate calculation on a path dictated by the tutor is 1.'],
   productive_struggle: [['student_stuck_or_error:L', 'tutor_delay_of_gratification:T'], '0 if first substantive response gives the complete solution or answer (e.g. works the entire problem before an attempt), regardless of later restraint. 1 mixed support or later premature rescue (e.g. invites a first attempt then takes over at the next obstacle). 2 guides productive attempts across struggle moments without premature full solution (e.g. provides a targeted hint and lets the learner use it). For opening rescue cite the first substantive tutor message number in reason.'],
   representation_pivot: [['tutor_pivot:T', 'student_response_to_pivot:L'], '0 no opportunity, no change or surface rephrasing (e.g. repeats the same formula in prose). 1 changed frame without demonstrated uptake (e.g. uses a diagram after confusion but learner still cannot use it). 2 detects failed frame and changes representation with learner uptake (e.g. learner uses the new diagram to explain the relation). Re-explaining an initial full solution is not a pivot.'],
-  verification_or_transfer: [['tutor_consolidation_or_transfer_prompt:T', 'student_consolidated_understanding:L'], '0 no conceptual check or only confirmation (e.g. asks if everything is clear, solves the check and only asks for confirmation, or the learner checks alone and the tutor only confirms). 1 attempts check with weak learner evidence (e.g. asks the learner to explain before giving the reasoning, but the learner only echoes an earlier explanation). 2 learner explains the concept independently or transfers it (e.g. justifies the same rule in a changed example).'],
+  verification_or_transfer: [['tutor_consolidation_or_transfer_prompt:T', 'student_consolidated_understanding:L'], '0 no conceptual check or only confirmation (e.g. asks if everything is clear). 1 attempts check with weak learner evidence (e.g. asks why, learner echoes the explanation). 2 learner explains the concept independently or transfers it (e.g. justifies the same rule in a changed example).'],
 };
 export const dimensions = Object.keys(rubric);
 export const bind = messages => ({ id: hash(messages), messages, lateStart: Math.floor(messages.length * 2 / 3) });
@@ -28,7 +28,7 @@ const slotSchema = Type.Union([
   object({ state: Type.Literal('not_applicable'), checked_view_id: nonempty, reason: nonempty }),
   object({ state: Type.Literal('insufficient_information'), reason: nonempty }),
 ]);
-function envelope(keys, slots = slotSchema, headers = { contract_version: Type.Union([legacyRuler, ...numberedRulers].map(version => Type.Literal(version))), context_id: nonempty }, explanation = { reason: nonempty }) {
+function envelope(keys, slots = slotSchema, headers = { contract_version: Type.Union([Type.Literal(legacyRuler), Type.Literal(previousRuler), Type.Literal(ruler)]), context_id: nonempty }, explanation = { reason: nonempty }) {
   return object({
     ...headers,
     results: object(Object.fromEntries(keys.map(key => [key, object({

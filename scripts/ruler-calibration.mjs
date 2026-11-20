@@ -111,14 +111,15 @@ function bootstrap(rows, seed) {
   }));
 }
 
-function readRescore(root, id, initial, planned) {
+function readRescore(root, id, initial, planned, expectedRuler) {
   const verification = verifyRun(root, runId(id));
   requireThat(id !== initial.id && verification.verified && typeof verification.acceptance === 'boolean', `rescore receipts did not verify for ${id}: ${[...verification.missing, ...verification.invalid].join(', ')}`);
   const file = name => readJson(join(root, id, name));
   const manifest = file('manifest.json'), result = file('result.json');
   const { identity } = manifest;
   const scenario = 'ruler-expand-judge-only';
-  requireThat(identity.ruler === ruler && [manifest, result].every(row => row.id === id && row.phase === 'train' && row.scenario === scenario && row.mode === initial.mode) &&
+  requireThat(identity.ruler === expectedRuler, `rescore ruler mismatch for ${id}: expected ${expectedRuler}, got ${identity.ruler}`);
+  requireThat([manifest, result].every(row => row.id === id && row.phase === 'train' && row.scenario === scenario && row.mode === initial.mode) &&
     hash(manifest.planned) === hash(planned) && ['dataset', 'dialogueSource', 'policy', 'routes', 'judgeOutputContract'].every(field => hash(identity[field]) === hash(initial.identity[field])) &&
     manifest.identityId === hash({ mode: manifest.mode, scenario, identity }), `rescore changes the frozen training inputs or policy: ${id}`);
   const receiptPath = run => join(root, '_receipts', `${run}.json`);
@@ -198,7 +199,7 @@ function align(planned, mapping, machine, manifest, split, labels, ai) {
   return { rows, edits, conditionTotals };
 }
 
-function calibrate(run, draftPath, planPath, splitPath, rescoreId) {
+function calibrate(run, draftPath, planPath, splitPath, rescoreId, expectedRuler) {
   const bytes = name => readFileSync(join(run, name));
   const json = name => readJson(join(run, name));
   const lock = json('label-lock.json');
@@ -214,7 +215,7 @@ function calibrate(run, draftPath, planPath, splitPath, rescoreId) {
   const planned = trainingPlan('train', split);
   requireThat(hash(planned) === hash(initial.planned), 'training schedule mismatch');
   const mappingBytes = bytes('blind-mapping.json');
-  const scored = rescoreId ? readRescore(dirname(resolve(run)), rescoreId, initial, planned) : (() => {
+  const scored = rescoreId ? readRescore(dirname(resolve(run)), rescoreId, initial, planned, expectedRuler) : (() => {
     const machineBytes = bytes('machine-scores.json');
     return { manifest: initial, machine: readJson('machine-scores.json', machineBytes), machineSha256: hash(machineBytes), missingScores: [] };
   })();
@@ -246,10 +247,12 @@ function calibrate(run, draftPath, planPath, splitPath, rescoreId) {
 }
 
 try {
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { rescore: { type: 'string' } } });
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { rescore: { type: 'string' }, 'rescore-ruler': { type: 'string' } } });
   const [run, draft, plan, split = new URL('../data/ruler-expand-v1.json', import.meta.url)] = positionals;
-  requireThat(run && draft && plan && positionals.length <= 4, 'usage: node scripts/ruler-calibration.mjs <score-run-dir> <labels.ai.csv> <plan.md> [split.json] [--rescore <id>]');
-  console.log(JSON.stringify(calibrate(run, draft, plan, split, values.rescore), null, 2));
+  requireThat(run && draft && plan && positionals.length <= 4, 'usage: node scripts/ruler-calibration.mjs <score-run-dir> <labels.ai.csv> <plan.md> [split.json] [--rescore <id> [--rescore-ruler <version>]]');
+  const { rescore, 'rescore-ruler': expectedRuler = ruler } = values;
+  requireThat(values['rescore-ruler'] === undefined || (nonblank(rescore) && nonblank(expectedRuler)), '--rescore-ruler requires --rescore and a nonempty ruler version');
+  console.log(JSON.stringify(calibrate(run, draft, plan, split, rescore, expectedRuler), null, 2));
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

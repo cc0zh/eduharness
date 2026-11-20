@@ -96,11 +96,7 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   assert.ok(messages.every(m=>!JSON.stringify(payload.messages).includes(m.id)));
   const request = JSON.parse(payload.messages.at(-1).content);
   assert.deepEqual(request.messages.map(m=>m.n),messages.map((_,i)=>i+1));
-  const verification = request.rubric.verification_or_transfer[1];
-  assert.match(verification, /0 .*worked check that supplies the reasoning|0 .*solves the check and only asks for confirmation/);
-  assert.match(verification, /0 .*learner checks alone and the tutor only confirms/);
-  assert.match(verification, /1 .*asks the learner to explain before giving the reasoning.*echoes/);
-  assert.match(verification, /2 learner explains the concept independently or transfers it/);
+  assert.equal(request.rubric.verification_or_transfer[1], '0 no conceptual check or only confirmation (e.g. asks if everything is clear). 1 attempts check with weak learner evidence (e.g. asks why, learner echoes the explanation). 2 learner explains the concept independently or transfers it (e.g. justifies the same rule in a changed example).');
   assert.equal(rows[0].judgementMode, 'json_schema');
 
   const margin = policy.judge.minVisibleTokens;
