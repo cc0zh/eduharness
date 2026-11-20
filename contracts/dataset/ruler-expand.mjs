@@ -3,7 +3,7 @@ import { hash, record, requireThat } from '../core/schema.mjs';
 import { readTask } from './schema.mjs';
 
 export const rulerTaskSource = 'data/upstream/tasks/stage0_situated_tutoring.json';
-const splitPath = 'data/ruler-expand-v1.json';
+export const rulerSplitPath = 'data/ruler-expand-v1.json';
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url));
 const seed = 'teacharena-ruler-expand-v1';
 const trainCount = 15;
@@ -72,8 +72,8 @@ export function validateRulerSplit(split, sourceBytes, legacy) {
   return split;
 }
 
-export function loadRulerSplit() {
-  return validateRulerSplit(JSON.parse(read(splitPath)), read(rulerTaskSource), JSON.parse(read('data/s0-v1.json')));
+export function loadRulerSplit(bytes = read(rulerSplitPath)) {
+  return validateRulerSplit(JSON.parse(bytes), read(rulerTaskSource), JSON.parse(read('data/s0-v1.json')));
 }
 
 export function trainingPlan(phase, split) {
@@ -83,7 +83,17 @@ export function trainingPlan(phase, split) {
   return split.train.map((taskId, i) => ({ taskId, condition: conditions[(i + 4) % conditions.length] }));
 }
 
-export function readRulerTask(rows, split, taskId) {
-  requireThat(split.train.includes(taskId), `${taskId} is not in the training list`);
+export function testPlan(split) {
+  const assigned = split.test.map((taskId, i) => ({ taskId, condition: conditions[1 + i % (conditions.length - 1)] }));
+  return [
+    ...split.test.map(taskId => ({ taskId, condition: 'normal' })),
+    ...assigned.filter(cell => cell.condition !== 'no_teach'),
+    ...assigned.filter(cell => cell.condition === 'no_teach'),
+  ];
+}
+
+export function readRulerTask(rows, split, taskId, phase = 'train') {
+  requireThat(phase === 'train' || phase === 'test', 'invalid ruler phase');
+  requireThat(split[phase].includes(taskId), `${taskId} is not in the ${phase === 'train' ? 'training' : 'test'} list`);
   return readTask(rows, taskId);
 }

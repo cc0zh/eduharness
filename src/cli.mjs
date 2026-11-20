@@ -52,7 +52,7 @@ if (option('--verify-run') >= 0) {
       id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
       'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
-      phase: { type: 'string' }, 'generate-only': { type: 'boolean' },
+      phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
     if (!['E1', 'E2', 'ruler-expand'].includes(values.scenario)) throw new Error('scenario must be E1, E2 or ruler-expand');
@@ -64,13 +64,19 @@ if (option('--verify-run') >= 0) {
     estimate = values['estimate-only'];
     config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };
     if (values.scenario === 'ruler-expand') {
-      if (Boolean(values['generate-only']) === hasJudgeSource) throw new Error('ruler-expand needs exactly one of --generate-only or --judge-only <id>');
       rulerRunner = await import('./ruler-run.mjs');
       config.phase = values.phase;
-      config.admission = rulerRunner.admitRulerRun(config.phase);
-      ceiling = rulerRunner.rulerBudget(config.admission.planned, config.judgeOnly);
+      if (config.phase === 'test') {
+        config.admission = rulerRunner.admitRulerRun(config.phase, values.freeze);
+        if (values['generate-only'] || hasJudgeSource) throw new Error('the frozen test phase only admits the combined generation and scoring run');
+      } else {
+        if (values.freeze !== undefined) throw new Error('--freeze requires --phase test');
+        if (Boolean(values['generate-only']) === hasJudgeSource) throw new Error('ruler-expand needs exactly one of --generate-only or --judge-only <id>');
+        config.admission = rulerRunner.admitRulerRun(config.phase);
+      }
+      ceiling = rulerRunner.rulerBudget(config.admission.planned, config.judgeOnly, config.phase);
     } else {
-      if (values.phase !== undefined || values['generate-only']) throw new Error('--phase and --generate-only require --scenario ruler-expand');
+      if (values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('--phase, --freeze and --generate-only require --scenario ruler-expand');
       ceiling = budget(config);
     }
     function limit(flag, maximum) {
@@ -80,6 +86,7 @@ if (option('--verify-run') >= 0) {
     }
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
+    if (config.phase === 'test') config.prepared = rulerRunner.prepareRulerRun(config);
   } catch (error) {
     console.error(error.message);
     emit({ failure: failure('invalid_input', {}, error.message).failure });
@@ -89,13 +96,13 @@ if (option('--verify-run') >= 0) {
   if (config && !process.exitCode) {
     try {
       if (conflict) throw failure('run_conflict', {}, `run ID ${id} already has a startup record; this launch was recorded as ${recorder.start.runId}`);
-      if (estimate) emit({ scenario: scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens });
+      if (estimate) emit({ scenario: scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens, ...rulerRunner?.holdoutEstimate(config.prepared) });
       else {
-        const prepared = rulerRunner?.prepareRulerRun(config);
+        const prepared = config.prepared ?? rulerRunner?.prepareRulerRun(config);
         if (config.mode === 'real') {
           config.checkReceipt = requireCheckReceipt(checkout, [recorder.startPath, recorder.requestPath]);
           if (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head) throw failure('preflight_failed', {}, 'checkout changed after startup');
-          loadCredentials(config.judgeOnly ? ['judge'] : rulerRunner ? ['teacher', 'learner'] : undefined);
+          loadCredentials(config.judgeOnly ? ['judge'] : config.phase === 'train' ? ['teacher', 'learner'] : undefined);
         }
         const result = rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
         acceptance = result.acceptance;

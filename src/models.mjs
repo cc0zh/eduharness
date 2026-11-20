@@ -10,11 +10,13 @@ const roleConfig = role => role === 'regrade' ? 'judge' : role;
 
 export function attemptBudget({ maxAttempts, maxRequestedOutputTokens }) {
   let attempts = 0, requested = 0;
-  return (where, limit) => {
-    if (attempts >= maxAttempts || requested + limit > maxRequestedOutputTokens) throw failure('budget_exhausted', where, 'remaining request budget cannot cover the next attempt');
+  const canCover = (calls, tokens) => attempts + calls <= maxAttempts && requested + tokens <= maxRequestedOutputTokens;
+  const reserve = (where, limit) => {
+    if (!canCover(1, limit)) throw failure('budget_exhausted', where, 'remaining request budget cannot cover the next attempt');
     attempts++;
     requested += limit;
   };
+  return Object.assign(reserve, { canCover });
 }
 
 export function stopFailure(response, text, reasoning, limit, finishReason) {

@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
 import { checkSnapshot, checkout } from './real-preflight.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--judge-only', '--max-attempts', '--max-requested-output-tokens']);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens']);
 const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test']);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
@@ -23,7 +23,10 @@ function parameterSummary(argv) {
     if (!safeOptions.has(name)) continue;
     const value = inline ?? (argv[index + 1]?.startsWith('--') ? undefined : argv[++index]);
     if (value === undefined) continue;
-    values[name.slice(2).replaceAll('-', '_')] = (['--mode', '--scenario', '--phase'].includes(name) && safeValues.has(value)) || (name.startsWith('--max-') && /^\d+$/.test(value)) ? value : '<redacted>';
+    const safe = ['--mode', '--scenario', '--phase'].includes(name) && safeValues.has(value)
+      || name.startsWith('--max-') && /^\d+$/.test(value)
+      || name === '--freeze' && /^[a-f0-9]{40}$/.test(value);
+    values[name.slice(2).replaceAll('-', '_')] = safe ? value : '<redacted>';
   }
   return { flags: [...new Set(flags)].sort(), values };
 }
@@ -231,21 +234,42 @@ export function verifyRun(root, id) {
         const checkArtifact = (path, expected) => {
           if (!sha256(expected)) { invalid.push(`${path} missing valid digest`); return; }
           try {
-            if (digestBytes(readFileSync(join(root, id, path))) !== expected) invalid.push(`${path} digest differs from evaluation receipt`);
+            const bytes = readFileSync(join(root, id, path));
+            if (digestBytes(bytes) !== expected) invalid.push(`${path} digest differs from evaluation receipt`);
+            else return bytes;
           } catch (error) {
             if (error.code === 'ENOENT') missing.push(path);
             else invalid.push(`${path} could not be read`);
           }
         };
         checkArtifact(filenames.manifest, evaluation.manifestSha256);
-        checkArtifact(filenames.result, evaluation.resultSha256);
+        const result = checkArtifact(filenames.result, evaluation.resultSha256);
         const judgeOnly = evaluation.scenario === 'ruler-expand-judge-only';
-        const artifacts = judgeOnly ? evaluation.graded : evaluation.frozen;
-        if (!Array.isArray(artifacts)) invalid.push('evaluation receipt does not list frozen artifacts');
-        else for (const artifact of artifacts) {
-          const { taskId, condition, path } = artifact ?? {};
-          if (typeof taskId !== 'string' || !/^S0-\d+$/.test(taskId) || !cellIds.includes(condition) || path !== `${taskId}/${condition}/${judgeOnly ? filenames.judge : filenames.transcript}`) invalid.push('invalid frozen artifact coordinate');
-          else checkArtifact(path, judgeOnly ? artifact.sha256 : artifact.transcriptSha256);
+        const test = evaluation.phase === 'test' || start?.parameters?.values?.phase === 'test';
+        const checkArtifacts = kind => {
+          const grading = kind === 'graded';
+          const artifacts = evaluation[kind];
+          if (!Array.isArray(artifacts)) { invalid.push(`evaluation receipt does not list ${kind} artifacts`); return []; }
+          return artifacts.map(artifact => {
+            const { taskId, condition, path } = artifact ?? {};
+            if (typeof taskId !== 'string' || !/^S0-\d+$/.test(taskId) || !cellIds.includes(condition) || path !== `${taskId}/${condition}/${grading ? filenames.judge : filenames.transcript}`) invalid.push('invalid frozen artifact coordinate');
+            else checkArtifact(path, grading ? artifact.sha256 : artifact.transcriptSha256);
+            return `${taskId}:${condition}`;
+          });
+        };
+        if (test) {
+          if (judgeOnly || evaluation.phase !== 'test' || start?.parameters?.values?.phase !== 'test') invalid.push('holdout phase differs between receipts');
+          const lists = [checkArtifacts('frozen'), checkArtifacts('graded')];
+          if (result) {
+            try {
+              const parsed = JSON.parse(result);
+              if (parsed.phase !== 'test' || parsed.acceptance !== receipt.acceptance) invalid.push('holdout result and receipts disagree');
+              const valid = parsed.cells.filter(cell => cell.validTotal === true).map(cell => `${cell.taskId}:${cell.condition}`);
+              if (new Set(valid).size !== valid.length || lists.some(list => digest(list) !== digest(valid))) invalid.push('holdout artifact coordinates differ from scored cells');
+            } catch { invalid.push('invalid holdout result'); }
+          }
+        } else {
+          checkArtifacts(judgeOnly ? 'graded' : 'frozen');
         }
       }
     }

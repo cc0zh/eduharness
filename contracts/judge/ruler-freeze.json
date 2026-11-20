@@ -1,0 +1,25 @@
+{
+  "decisionCommit": "e34d8c767ada4a31de5c58016d07d87c2b231ffb",
+  "sourceCommit": "889fc4bad254f5fcfb813f705643f36bf376ec0e",
+  "training": {
+    "runId": "ruler-train-score-v1",
+    "identityId": "2091ec93bf769195672752a836574761244bd7ea1630461e7534416a5bcea7c8",
+    "manifestSha256": "a8a68385fc5b6aa9e92dd043492fcb924bd4cc9844a2c9cf7e0d3c7061f1662f",
+    "receiptSha256": "bb54307490c3019b559d10b31be76b4bd658c6d424de372766626179e99de564"
+  },
+  "identity": {
+    "ruler": "e1-numbered-evidence-v3",
+    "judgeOutputContract": "judge-output-v2",
+    "version": "evaluation-identity-v2",
+    "policyVersion": "e1-call-policy-v4",
+    "judgeRoute": { "provider": "openrouter", "id": "tencent/hy4-flash", "responseFormat": "json_schema" },
+    "sources": {
+      "contracts/judge/schema.mjs": "b0a6ea053746f0e6c1038947363b47261935c7d26481d8d232850f45fffddaa6",
+      "src/judge.mjs": "ab381df3ac385ce40f6f2f4be107bc12162ae8a16b2151707b711038783ddd04",
+      "config/e1.mjs": "79951191c7f67dc984bd1d732b1826af4a43662003b459bda5e0ebcff8750409"
+    }
+  },
+  "splitSha256": "53b94250e1d5baadaf45b42a81e1ea0e1fe9bd58bff359561fb3f91ffddb5c26",
+  "testSha256": "5ba6f198751577c5a622c2c8d748cf2072f566b28001c5ca52524b356b24a3c8",
+  "protocolSha256": "59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22"
+}

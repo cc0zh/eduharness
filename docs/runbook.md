@@ -25,6 +25,13 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 
 生成完成后用 `--verify-run <生成 run ID>` 核对收据，再串行运行初评。每题产物在 `<run>/<题号>/<教师条件>/`。达到第四题失败或剩余额度不足时停止。核对两个真实 run 后用 `node scripts/ruler-labels.mjs <生成 run ID> <初评 run ID>` 导出盲标材料。盲标文件在系统临时目录的 `teacharena/ruler-expand/labeling/`。映射和机器分数保存在初评 run 下。
 
+未见题测试使用 `--scenario ruler-expand --phase test --freeze <冻结决定的完整提交 SHA>`。入口拒绝缺失冻结记录、尺子源码或清单哈希不符，以及 `--generate-only`、`--judge-only` 或自选题。冻结决定及训练参考见[冻结记录](status.md#冻结记录)。
+
+1. 用新 ID 加 `--mode real --estimate-only` 预检。登记测试 `identityId`、哨兵题及请求上限。锁定 25 题最省档的常规请求数为 450，硬上限为 1,650 次尝试和 17,054,400 个请求输出 token。
+2. 确认授权和干净 HEAD 的 `npm run check` 收据后，登记实际 ID。去掉 `--estimate-only`，加 `--confirm-cost`，以及授权的 `--max-attempts` 和 `--max-requested-output-tokens`。使用单进程串行执行。先跑 `normal` 和 `answer_dump`、`lecture`、`sycophant_close`，再跑前四道 `no_teach`。只有至少三格有有效总分且剩余额度覆盖后两格，才继续 `no_teach`。第六道故障题或预算耗尽时停止，不重跑已执行格。
+3. 用 `--verify-run <测试 run ID>` 核对进程和评测收据。将 `manifest.writer.pid` 和格子的遥测 PID 与启动记录比对。用原始 `judge.json` 和 `transcript.json` 回读预登记维度的证据；运行 `acceptance` 只表示拿齐有效分，不代表测试通过。
+4. 用 `node scripts/ruler-test-report.mjs --id <测试 run ID>` 生成证据回读清单。完成回读后，追加 `--audit <回读 JSON>` 复算。报告、逐题计算结果和回读清单保存在该 run 下。不带回读记录的输出不能授予通过。
+
 直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档，stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器条件见[裁判契约](../contracts/judge/README.md#e2-坏教师的目标维度)。运行收据记录 `acceptance`。人工验收时同时保存命令退出码和引用回读结论。
 
 用 `node src/cli.mjs --verify-run <id>` 核对 `runs/_receipts/` 中的进程原件。自定义运行根时传入原 `--run-root`。[运行收据契约](../contracts/artifacts/README.md#运行收据)

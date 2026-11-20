@@ -2,36 +2,49 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cellResult, filenames } from '../contracts/artifacts/schema.mjs';
 import { executionSuccess, failure, hash, infraFailure, message, requireThat } from '../contracts/core/schema.mjs';
-import { loadRulerSplit, readRulerTask, rulerTaskSource, trainingPlan } from '../contracts/dataset/ruler-expand.mjs';
+import { loadRulerSplit, readRulerTask, rulerSplitPath, rulerTaskSource, testPlan, trainingPlan } from '../contracts/dataset/ruler-expand.mjs';
 import { policy, rounds, taskId as distanceTask } from '../config/e1.mjs';
 import { attemptBudget } from './models.mjs';
 import { offlineResponses } from './offline.mjs';
+import { freezeFile, loadRulerFreeze, requireFrozenIdentity } from './ruler-freeze.mjs';
 import { evaluationIdentity, executeCell, scenarioName, source, write } from './run.mjs';
 import { verifyRun } from './run-receipts.mjs';
 
 const scenario = 'ruler-expand';
 const sources = ['contracts/dataset/ruler-expand.mjs', 'src/ruler-run.mjs'];
-const maxFailures = 4;
+const trainingFailureLimit = 4;
+const testFailureLimit = 6;
+const sentinelTrials = 4;
+const sentinelMinValid = 3;
 const same = (a, b) => hash(a) === hash(b);
 const cellKey = ({ taskId, condition }) => `${taskId}:${condition}`;
 const coordinate = ({ taskId, condition }) => ({ taskId, condition });
 const transcriptPath = ({ taskId, condition }) => `${taskId}/${condition}/${filenames.transcript}`;
 
-export function admitRulerRun(phase) {
+export function admitRulerRun(phase, reference) {
+  if (phase === 'test') {
+    const freeze = loadRulerFreeze(reference);
+    const bytes = source(rulerSplitPath);
+    requireThat(hash(bytes) === freeze.splitSha256, 'test phase freeze split file digest mismatch');
+    const split = loadRulerSplit(bytes);
+    requireThat(split.testSha256 === freeze.testSha256, 'test phase freeze list digest mismatch');
+    return { split, planned: testPlan(split), freeze };
+  }
   if (phase !== 'train') trainingPlan(phase);
   const split = loadRulerSplit();
   const planned = trainingPlan(phase, split);
   return { split, planned };
 }
 
-export function rulerBudget(planned, judgeOnly) {
+export function rulerBudget(planned, judgeOnly, phase = 'train') {
   const count = planned.length;
   const attempts = policy.retries + 1;
   if (judgeOnly) return { typicalCalls: count, maxCalls: count * attempts, maxOutputTokens: count * attempts * policy.judge.maxTokens };
   const normal = planned.filter(cell => cell.condition === 'normal').length;
   const learner = count * rounds;
   const teacher = learner + normal * rounds * (policy.teacher.requestsPerTurn - 1);
-  return { typicalCalls: learner * 2, maxCalls: (teacher + learner) * attempts, maxOutputTokens: (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens) * attempts };
+  const judge = phase === 'test' ? count : 0;
+  return { typicalCalls: learner * 2 + judge, maxCalls: (teacher + learner + judge) * attempts, maxOutputTokens: (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens + judge * policy.judge.maxTokens) * attempts };
 }
 
 function frozenGeneration({ root, mode, judgeOnly: id, phase }, planned, dataset) {
@@ -58,7 +71,7 @@ function frozenGeneration({ root, mode, judgeOnly: id, phase }, planned, dataset
     ), 'source result does not match the admitted plan');
     const failed = result.cells.filter(cell => cell.status === infraFailure);
     const failedTasks = new Set(failed.map(cell => cell.taskId));
-    requireThat(failedTasks.size < maxFailures, 'source already reached the limit of four distinct failed training tasks');
+    requireThat(failedTasks.size < trainingFailureLimit, 'source already reached the limit of four distinct failed training tasks');
     requireThat(mode !== 'real' || !failed.some(cell => cell.failure.kind === 'budget_exhausted'), 'real scoring cannot resume a budget-stopped generation source');
     requireThat(Array.isArray(evaluation.frozen) && evaluation.frozen.length > 0, 'source has no frozen dialogues');
     const successful = result.cells.filter(cell => cell.status === executionSuccess);
@@ -84,17 +97,30 @@ function frozenGeneration({ root, mode, judgeOnly: id, phase }, planned, dataset
 }
 
 export function prepareRulerRun(config) {
-  const { split, planned } = config.admission;
+  const { split, planned, freeze } = config.admission;
   const taskBytes = source(rulerTaskSource);
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   requireThat(hash(taskBytes) === split.sourceSha256, 'ruler task source changed after admission');
-  const dataset = { trainSha256: split.trainSha256, seed: split.seed };
+  const testing = config.phase === 'test';
+  const dataset = { seed: split.seed, ...(testing ? { testSha256: split.testSha256, splitSha256: freeze.splitSha256 } : { trainSha256: split.trainSha256 }) };
   const rows = config.judgeOnly ? undefined : JSON.parse(taskBytes);
-  const tasks = rows && new Map(planned.map(({ taskId }) => [taskId, readRulerTask(rows, split, taskId)]));
-  const identity = evaluationIdentity({ ...config, taskBytes, policyBytes, dataset, sources });
+  const tasks = rows && new Map([...new Set(planned.map(cell => cell.taskId))].map(taskId => [taskId, readRulerTask(rows, split, taskId, config.phase)]));
+  const identity = evaluationIdentity({ ...config, taskBytes, policyBytes, dataset, sources: testing ? [...sources, 'src/ruler-freeze.mjs', freezeFile] : sources });
   const frozen = config.judgeOnly ? frozenGeneration(config, planned, identity.dataset) : undefined;
-  Object.assign(identity, { phase: config.phase, planned, maxFailures, dialogueSource: frozen?.provenance });
-  return { identity, tasks, planned, frozen, operatorPolicy: `${policyBytes.toString('utf8')}\nThe private check_distance tool is optional. Use it only when the learner’s actual problem calls for Euclidean distance. Never invent a distance calculation.` };
+  Object.assign(identity, { phase: config.phase, planned, maxFailures: testing ? testFailureLimit : trainingFailureLimit, dialogueSource: frozen?.provenance });
+  if (testing) {
+    requireFrozenIdentity(freeze, identity);
+    Object.assign(identity, { freeze, sentinel: { trials: sentinelTrials, minValid: sentinelMinValid } });
+  }
+  const identityId = hash({ mode: config.mode, scenario: scenarioName({ scenario, judgeOnly: config.judgeOnly }), identity });
+  if (testing) requireThat(identityId !== freeze.training.identityId, 'test identity must not reuse the training identity');
+  return { identity, identityId, tasks, planned, frozen, operatorPolicy: `${policyBytes.toString('utf8')}\nThe private check_distance tool is optional. Use it only when the learner’s actual problem calls for Euclidean distance. Never invent a distance calculation.` };
+}
+
+export function holdoutEstimate(prepared) {
+  if (!prepared) return;
+  const { identity, identityId, planned } = prepared;
+  return { identityId, testSha256: identity.dataset.testSha256, freeze: identity.freeze.decisionCommit, sentinelTasks: planned.filter(cell => cell.condition === 'no_teach').slice(0, sentinelTrials).map(cell => cell.taskId) };
 }
 
 function trainingFixtures({ taskId, condition }) {
@@ -111,7 +137,9 @@ function trainingFixtures({ taskId, condition }) {
 }
 
 export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt, limits, recorder }, prepared) {
-  const { planned, identity, tasks, frozen, operatorPolicy } = prepared;
+  const { planned, identity, identityId, tasks, frozen, operatorPolicy } = prepared;
+  const testing = phase === 'test';
+  const generateOnly = !testing && !judgeOnly;
   const runScenario = scenarioName({ scenario, judgeOnly });
   const runDir = join(root, id);
   mkdirSync(root, { recursive: true });
@@ -121,15 +149,17 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
     throw error;
   }
   const writer = { pid: recorder.start.pid, startedAt: recorder.start.startedAt };
-  const budget = rulerBudget(planned, judgeOnly);
+  const budget = rulerBudget(planned, judgeOnly, phase);
   const reserve = attemptBudget(limits);
   const base = { scenario: runScenario, phase, id, mode };
-  const identityId = hash({ mode, scenario: runScenario, identity });
   const manifestPath = join(runDir, filenames.manifest);
   write(manifestPath, { ...base, identity, identityId, planned, budget, limits, writer, checkReceipt, source: frozen?.provenance });
   const cells = [], freezes = [], graded = [];
   const failedTasks = new Set(frozen?.failedTasks);
-  for (const coordinate of planned) {
+  const sentinel = testing ? { planned: sentinelTrials, attempted: 0, valid: 0, status: 'not_reached' } : undefined;
+  const result = { ...base, runDir, acceptance: false, cells, ...(testing && { sentinel, stop: null }) };
+  const resultPath = join(runDir, filenames.result);
+  for (const [index, coordinate] of planned.entries()) {
     const { taskId, condition } = coordinate;
     const messages = frozen?.dialogues.get(cellKey(coordinate));
     if (judgeOnly && !messages) continue;
@@ -137,32 +167,50 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
     try {
       outcome = await executeCell({
         runDir, id, variant: condition, coordinate, task: tasks?.get(taskId), operatorPolicy, mode, reserve, recorder, writer,
-        generateOnly: !judgeOnly, frozen: messages, judgeOnly, fixtures: mode === 'offline' ? trainingFixtures(coordinate) : undefined,
+        generateOnly, frozen: messages, judgeOnly, fixtures: mode === 'offline' ? trainingFixtures(coordinate) : undefined,
       });
-      if (!judgeOnly && !outcome.failure) {
-        const path = transcriptPath(coordinate);
-        freezes.push({ ...coordinate, path, transcriptSha256: hash(readFileSync(join(runDir, path))), messageIds: outcome.messages.map(m => m.id) });
-      }
-      if (judgeOnly && !outcome.failure) {
-        const path = `${taskId}/${condition}/${filenames.judge}`;
-        graded.push({ ...coordinate, path, sha256: hash(readFileSync(join(runDir, path))) });
+      if (!outcome.failure) {
+        const dialoguePath = transcriptPath(coordinate);
+        const gradePath = `${taskId}/${condition}/${filenames.judge}`;
+        const transcriptSha256 = !judgeOnly && hash(readFileSync(join(runDir, dialoguePath)));
+        const gradeSha256 = !generateOnly && hash(readFileSync(join(runDir, gradePath)));
+        if (transcriptSha256) freezes.push({ ...coordinate, path: dialoguePath, transcriptSha256, messageIds: outcome.messages.map(m => m.id) });
+        if (gradeSha256) graded.push({ ...coordinate, path: gradePath, sha256: gradeSha256 });
       }
     } catch (error) { outcome = { failure: failure('artifact_io', coordinate, error.message).failure }; }
-    if (outcome.failure || judgeOnly) cells.push({ ...cellResult(condition, outcome.scores, outcome.failure), ...coordinate });
-    else cells.push({ ...coordinate, recorded: true, status: executionSuccess, scored: false, validTotal: false });
+    const cell = outcome.failure || !generateOnly
+      ? { ...cellResult(condition, outcome.scores, outcome.failure), ...coordinate }
+      : { ...coordinate, recorded: true, status: executionSuccess, scored: false, validTotal: false };
+    cells.push(cell);
+    let stop;
     if (outcome.failure) {
       failedTasks.add(taskId);
-      if (failedTasks.size >= maxFailures || outcome.failure.kind === 'budget_exhausted') break;
+      if (failedTasks.size >= identity.maxFailures) stop = 'failure_limit';
+      else if (outcome.failure.kind === 'budget_exhausted') stop = 'budget_exhausted';
     }
+    if (testing) {
+      if (condition === 'no_teach' && sentinel.attempted < sentinelTrials) {
+        sentinel.attempted++;
+        if (cell.validTotal) sentinel.valid++;
+        if (sentinel.attempted === sentinelTrials) {
+          const remaining = rulerBudget(planned.slice(index + 1), false, phase);
+          sentinel.status = sentinel.valid < sentinelMinValid ? 'insufficient_scores'
+            : reserve.canCover(remaining.maxCalls, remaining.maxOutputTokens) ? 'passed' : 'insufficient_budget';
+        }
+      }
+      result.stop = stop ?? null;
+      write(resultPath, result);
+      if (sentinel.status === 'insufficient_scores' || sentinel.status === 'insufficient_budget') break;
+    }
+    if (stop) break;
   }
-  const acceptance = failedTasks.size === 0 && cells.length === planned.length && (!judgeOnly || cells.every(cell => cell.validTotal));
-  const result = { ...base, runDir, acceptance, cells };
-  const resultPath = join(runDir, filenames.result);
+  const acceptance = failedTasks.size === 0 && cells.length === planned.length && (generateOnly || cells.every(cell => cell.validTotal));
+  result.acceptance = acceptance;
   write(resultPath, result);
   const receipt = {
     ...base, runDir, result: filenames.result, acceptance, identityId,
     manifestSha256: hash(readFileSync(manifestPath)), resultSha256: hash(readFileSync(resultPath)),
-    ...(judgeOnly ? { source: frozen.provenance, graded } : { frozen: freezes }),
+    ...(!judgeOnly && { frozen: freezes }), ...(!generateOnly && { graded }), ...(judgeOnly && { source: frozen.provenance }),
   };
   recorder.publishEvaluation(receipt);
   return result;
