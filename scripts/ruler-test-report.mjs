@@ -461,8 +461,13 @@ function calculate(run, evidence, audit, rows) {
         unknownOpportunity: pairs.filter(row => row.status === 'unknownOpportunity').map(row => row.taskId), incomplete: auditIncomplete, rejected: auditRejected } }];
   }));
   const verdicts = Object.values(groups).map(group => group.verdict);
-  const statisticalVerdict = evidence.issues.length || verdicts.includes('pending') ? 'pending' : verdicts.includes('failed') ? 'failed' : 'passed';
-  return { machineAcceptance: run.result.acceptance, statisticalVerdict, thresholds, stop: run.result.stop, sentinel: run.result.sentinel,
+  const numericShortfall = conditions.filter(condition => {
+    const { planned, missingScore, numericHits } = groups[condition].target;
+    return missingScore === 0 && numericHits / planned < thresholds.hits;
+  });
+  const statisticalVerdict = evidence.issues.length ? 'pending' : numericShortfall.length ? 'failed'
+    : verdicts.includes('pending') ? 'pending' : verdicts.includes('failed') ? 'failed' : 'passed';
+  return { machineAcceptance: run.result.acceptance, statisticalVerdict, numericShortfall, thresholds, stop: run.result.stop, sentinel: run.result.sentinel,
     verification: run.verification, budget: run.manifest.budget, limits: run.manifest.limits, maxFailures: run.manifest.identity.maxFailures, freeze: run.manifest.identity.freeze,
     telemetry: evidence.telemetry, issues: evidence.issues, audit: { reviewer: audit.reviewer, sha256: audit.sha256 },
     bootstrap: { draws, seed: `${run.split.seed}:ci`, method: 'subject-stratified whole families, percentile 2.5% and 97.5% with linear interpolation; undefined draws omitted' },
@@ -486,6 +491,10 @@ function render(calc, run, auditPath) {
   const labels = { eligible: '可判定', missingScore: '缺分', noOpportunity: '无机会', unknownOpportunity: '机会不明', unknownEvidence: '证据未确认', unsupportedEvidence: '证据不支持' };
   const callFailure = side => side.failure ? `${side.failure.kind} (${[side.failure.role, side.failure.turn, side.failure.call, side.failure.attempt].map(fmt).join('/')}): ${side.failure.detail ?? ''} ${link('末次原件', side.failure.attemptPath)}` : side.status === 'not_run' ? '未运行' : side.score === null ? '评分未通过报告复核' : '';
   const transfer = groups.sycophant_close.target;
+  const shortfall = calc.numericShortfall.map(condition => {
+    const { numericHits, planned } = groups[condition].target;
+    return `\`${condition}\` ${fraction(numericHits, planned)}`;
+  });
   return [
     '# 第 3 步：冻结 v3 的未见题验证',
     `本次预登记 ${run.families.length} 题。冻结 v3 的训练标签由 AI 预标后交用户复核，改动 0/90；这不是独立人工校准。单次运行不能证明跨运行稳定性。`,
@@ -496,6 +505,8 @@ function render(calc, run, auditPath) {
     `证据回读：${calc.audit.reviewer ? `${md(calc.audit.reviewer)}，SHA256 \`${calc.audit.sha256}\`` : '未提供'}。机器绑定不代表实际教学机会或证据语义。`,
     '## 预登记判定',
     '总分方向只比较同题 normal 严格高于坏教师，不决定统计验收。目标维要求同题两侧分档有效、绑定可回读、教学机会明确、引用支持分档，且 normal 至少高 1 档。每组有效/计划至少 90%，命中/计划至少 80%。缺分、无机会、机会不明或证据不足都留在计划分母。no_teach 哨兵未通过时，该组待定，不能授予四组通过。',
+    '原 40 道测试题的最省档按本次锁定清单换算为 25 道、50 格。按锁定顺序轮换坏教师，四组的计划对数为 7、6、6、6。有效至少 7、6、6、6 对，命中至少 6、5、5、5 对。no_teach 首四题为 S0-71、S0-97、S0-73、S0-70。',
+    ...(statisticalVerdict === 'failed' && shortfall.length ? [`即使保留全部原始分档，${shortfall.join('、')} 的目标维数值命中已低于 80% 通过线。本轮不通过；未确认的抽查不改记为通过。`] : []),
     table(['条件 / 目标维', '总分命中/计划', '总分命中/有分', '目标数值方向/计划（未判机会）', '有效/计划', '目标命中/计划', '目标命中/有效', '同档 / 反向', '缺分 / 无机会 / 机会不明 / 证据不明 / 不支持', '统计'], conditions.map(condition => {
       const { dimension, total, target, verdict: status } = groups[condition];
       return [`${condition} / ${dimension}`, fraction(total.hits, total.planned), fraction(total.hits, total.scored), fraction(target.numericHits, target.planned), fraction(target.eligible, target.planned), fraction(target.hits, target.planned), fraction(target.hits, target.eligible), `${target.ties} / ${target.reversals}`, [target.missingScore, target.noOpportunity, target.unknownOpportunity, target.unknownEvidence, target.unsupportedEvidence].join(' / '), verdict[status]];

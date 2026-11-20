@@ -238,6 +238,21 @@ test('a rejected ranked evidence hit stays visible and cannot produce a statisti
   assert.equal(group.target.hits, 6);
 });
 
+test('all scored pairs but too few numeric hits fail the round even when sampled evidence is pending', t => {
+  const nonHits = new Set(split.test.filter((_, i) => i % conditions.length === conditions.indexOf('lecture')).slice(0, 3));
+  const { root, report, audit } = fixture(t, { scoreFor: ({ taskId, condition }) => condition === 'normal' || condition === 'lecture' && nonHits.has(taskId) ? 1 : 0 });
+  for (const row of audit.rows.filter(row => row.condition === 'lecture' && !nonHits.has(row.taskId))) row.bad.support = 'unsupported';
+  const path = report('audit.json');
+  write(path, audit);
+  const output = execute(root, '--audit', path);
+  assert.equal(output.status, 0, output.stderr);
+  const calc = read(report('test-calculations.json'));
+  assert.equal(calc.groups.lecture.target.numericHits, 3);
+  assert.equal(calc.groups.lecture.verdict, 'pending');
+  assert.equal(calc.statisticalVerdict, 'failed');
+  assert.match(readFileSync(report('test-report.md'), 'utf8'), /lecture.*3\/6.*80%/);
+});
+
 test('keeps a missing score and a reviewed unknown opportunity in their planned denominators', t => {
   const { root, report, audit } = fixture(t, { failedKey: `${split.test[0]}/normal` });
   audit.rows = audit.rows.filter(row => row.taskId !== split.test[0]);

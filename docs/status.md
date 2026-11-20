@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 第 1 步 区分坏教师 | 已完成 | `0302396` 记录用户签收 S1。`e2-real-20261119-06` 同次五格区分了四种坏教师，但原预登记的三次完整稳定性重复未达成。[签收与回读证据](#s1-场景卡逐栏) |
 | 第 2 步 训练一致性核对 | 未通过；v3 已冻结 | 两个目标维上 v3 同档 19/30，v4 同档 17/30。[择版对比](#目标维度对比) |
-| 第 3 步 未见题验证 | 尚未真实运行 | 测试入口须核对[冻结记录](#冻结记录)和锁定名单。 |
+| 第 3 步 未见题验证 | 已执行，未通过 | 25/25 对总分方向符合预期；`lecture` 的目标维数值方向仅 3/6，低于预登记门槛。[未见题验证结果](#未见题验证结果) |
 | 第 4 步 手写变体 A/B | 未开始 | 验证或迁移以[对话行为证据](#目标维度对比)为准，分数只作参考。[第 4 步场景卡](scenarios.md#第-4-步-手写-harness-变体-ab)。 |
 
 ## 补尺子：训练初评和复评
@@ -80,7 +80,15 @@ v3 初评 manifest SHA256 为 `a8a68385fc5b6aa9e92dd043492fcb924bd4cc9844a2c9cf7
 
 重试和用量缺报均为 0。两阶段合计实报 510,476 token。原 20 条最省档估算来自本机 `%TEMP%/teacharena/ruler-expand/plan.md` 第 6 节（SHA256 `59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22`），生成 295,800、初评 379,000，合计约 674,800 token。按 15 条线性折算，生成约 221,850 token，实报高 24.3%；初评约 284,250 token，实报低 17.5%。实际请求输出额度均低于预检上限。15 次裁判请求未观察到推理 token 超出请求推理上限。
 
-复核材料在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。v4 的变更引用保留在 `git show 3bd3b17:contracts/judge/ruler-change.json`，绑定原生成 run 和同 SHA256 的 `labels-locked.csv`。切回 v3 后 `npm run check` 仍校验原 v3 指纹，任何新尺子变更仍须提供训练引用。第 3 步尚未开始，保留 `no_teach` 首 4 题至少 3 题评分有效的继续条件。
+复核材料在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。v4 的变更引用保留在 `git show 3bd3b17:contracts/judge/ruler-change.json`，绑定原生成 run 和同 SHA256 的 `labels-locked.csv`。切回 v3 后 `npm run check` 仍校验原 v3 指纹，任何新尺子变更仍须提供训练引用。
+
+## 未见题验证结果
+
+真实 run `ruler-test-v3-real-01` 在干净 HEAD `64d8cc746d18045320841e3efc9c8b719e75c7d5` 执行。测试 [manifest](../runs/ruler-test-v3-real-01/manifest.json) 核对了[冻结记录](#冻结记录)，使用独立身份 `cd3c5ed0e8a2bea61ff1abe4ef5c2dbe5b7d2fdb26a09e350535ae129cbb6d8e`。25 题、50 格均有有效总分。`no_teach` 哨兵 4/4 后完成余下 2 格。`acceptance: true` 只表示拿齐分数。
+
+**未达到预登记通过线。** 每组有效配对须达到 90%，目标维命中须达到计划数的 80%。四组同题总分方向为 7/7、6/6、6/6、6/6；执行者 AI 回读后，目标维有效与命中分别为 `answer_dump` 7/7、7/7，`lecture` 2/6、0/6，`sycophant_close` 6/6、6/6，`no_teach` 6/6、6/6。`lecture` 即使不扣证据不足的配对也只有 3/6 命中，另 3 对同档。抽查 S0-79、S0-63 的分档证据未获确认，该组留待定，但本轮整体已确定不过线。`verification_or_transfer` 两版训练 κ 均低于 0.60，尺子一致性不足，仅供参考。25 题只运行一次，不能证明跨次稳定。训练是 AI 预标加用户复核，改动 0/90，不是独立人工校准。
+
+[报告和逐题表](../runs/ruler-test-v3-real-01/test-report.md) · [复算结果](../runs/ruler-test-v3-real-01/test-calculations.json) · [逐题消息证据](../runs/ruler-test-v3-real-01/test-audit.json)。[启动](../runs/_receipts/ruler-test-v3-real-01.start.json)、[请求](../runs/_receipts/ruler-test-v3-real-01.requests.jsonl)、[进程](../runs/_receipts/ruler-test-v3-real-01.process.json)的 [`--verify-run` 复核](../runs/ruler-test-v3-real-01/verify.json)退出 0。459 条遥测与启动和进程收据均为 PID `31064`。请求 459/1,650，累计请求输出额度 5,745,024/17,054,400 token；供应商实报总计 1,709,139 token，8 次缺报。没有故障题；裁判调用重试 9 次，含 5 次本地超时。`S0-70/no_teach` 的第 4 轮裁判调用 1、尝试 1 实报 17,324 推理 token，超过请求上限 16,384。
 
 ## E1 S0-06 真实双格
 
