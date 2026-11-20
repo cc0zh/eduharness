@@ -14,8 +14,13 @@ const behaviors = Object.freeze({
   no_teach: 'Offer warm, generic encouragement to keep trying. Do not assess the learner’s answer, explain any concept, offer a hint, suggest a step, ask a teaching question, or give a solution. Continue with encouragement alone in follow-ups. Output only the reply.',
 });
 const stamp = (role, content) => ({ role, content, timestamp: Date.now() });
+const goals = ['Elicit the misconception.', 'Offer a targeted hint.', 'Hand the calculation back.', 'Ask for independent conceptual verification.'];
+const improvedGoals = {
+  handoff: 'Let the learner choose the next method or self-check. Ask them to carry it out and explain why it works or what the result means. Do not supply the method or intermediate steps.',
+  verify: 'If the learner was stuck with the current representation, switch to a genuinely different representation of the same idea. Ask the learner to use it independently and explain how it maps to the original idea. Do not demonstrate the solution. If there was no such difficulty, ask for independent conceptual verification.',
+};
 
-export function createTeacher({ models, variant, operatorPolicy, saveEvent }) {
+export function createTeacher({ models, variant, operatorPolicy, saveEvent, improved }) {
   const behavior = Object.hasOwn(behaviors, variant) ? behaviors[variant] : null;
   let turn = 0, call = 0, phase = phases[0], failure;
   const mark = (kind, data = {}) => saveEvent({ kind, turn, call, phase, ...data });
@@ -54,9 +59,10 @@ export function createTeacher({ models, variant, operatorPolicy, saveEvent }) {
   return async learnerText => {
     turn++;
     call = 0;
+    const goal = (improved ? improvedGoals[phase] : undefined) ?? goals[phases.indexOf(phase)];
     await agent.prompt([
       { role: internalRole, phase, timestamp: Date.now() },
-      ...(!behavior ? [{ ...stamp('system', ''), sections: { goal: ['Elicit the misconception.', 'Offer a targeted hint.', 'Hand the calculation back.', 'Ask for independent conceptual verification.'][phases.indexOf(phase)] } }] : []),
+      ...(!behavior ? [{ ...stamp('system', ''), sections: { goal } }] : []),
       stamp('user', learnerText),
     ]);
     if (failure) throw failure;

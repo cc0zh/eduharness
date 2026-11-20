@@ -4,8 +4,8 @@ import { dirname, join, resolve } from 'node:path';
 import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
 import { checkSnapshot, checkout } from './real-preflight.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens']);
-const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test']);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root']);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric']);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -23,7 +23,7 @@ function parameterSummary(argv) {
     if (!safeOptions.has(name)) continue;
     const value = inline ?? (argv[index + 1]?.startsWith('--') ? undefined : argv[++index]);
     if (value === undefined) continue;
-    const safe = ['--mode', '--scenario', '--phase'].includes(name) && safeValues.has(value)
+    const safe = ['--mode', '--scenario', '--phase', '--harness'].includes(name) && safeValues.has(value)
       || name.startsWith('--max-') && /^\d+$/.test(value)
       || name === '--freeze' && /^[a-f0-9]{40}$/.test(value);
     values[name.slice(2).replaceAll('-', '_')] = safe ? value : '<redacted>';
@@ -246,6 +246,7 @@ export function verifyRun(root, id) {
         const result = checkArtifact(filenames.result, evaluation.resultSha256);
         const judgeOnly = evaluation.scenario === 'ruler-expand-judge-only';
         const test = evaluation.phase === 'test' || start?.parameters?.values?.phase === 'test';
+        const ab = evaluation.phase === 'ab' || start?.parameters?.values?.phase === 'ab';
         const checkArtifacts = kind => {
           const grading = kind === 'graded';
           const artifacts = evaluation[kind];
@@ -257,13 +258,14 @@ export function verifyRun(root, id) {
             return `${taskId}:${condition}`;
           });
         };
-        if (test) {
-          if (judgeOnly || evaluation.phase !== 'test' || start?.parameters?.values?.phase !== 'test') invalid.push('holdout phase differs between receipts');
+        if (test || ab) {
+          const phase = ab ? 'ab' : 'test';
+          if (test && judgeOnly || evaluation.phase !== phase || start?.parameters?.values?.phase !== phase) invalid.push('holdout phase differs between receipts');
           const lists = [checkArtifacts('frozen'), checkArtifacts('graded')];
           if (result) {
             try {
               const parsed = JSON.parse(result);
-              if (parsed.phase !== 'test' || parsed.acceptance !== receipt.acceptance) invalid.push('holdout result and receipts disagree');
+              if (parsed.phase !== phase || parsed.acceptance !== receipt.acceptance) invalid.push('holdout result and receipts disagree');
               const valid = parsed.cells.filter(cell => cell.validTotal === true).map(cell => `${cell.taskId}:${cell.condition}`);
               if (new Set(valid).size !== valid.length || lists.some(list => digest(list) !== digest(valid))) invalid.push('holdout artifact coordinates differ from scored cells');
             } catch { invalid.push('invalid holdout result'); }

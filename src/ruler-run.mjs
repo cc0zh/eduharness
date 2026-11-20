@@ -4,6 +4,7 @@ import { cellResult, filenames } from '../contracts/artifacts/schema.mjs';
 import { executionSuccess, failure, hash, infraFailure, message, requireThat } from '../contracts/core/schema.mjs';
 import { loadRulerSplit, readRulerTask, rulerSplitPath, rulerTaskSource, testPlan, trainingPlan } from '../contracts/dataset/ruler-expand.mjs';
 import { policy, rounds, taskId as distanceTask } from '../config/e1.mjs';
+import { harnessPlan, harnessSides, prepareRhetoric, preregistrationSha256 } from './harness-ab.mjs';
 import { attemptBudget } from './models.mjs';
 import { offlineResponses } from './offline.mjs';
 import { freezeFile, loadRulerFreeze, requireFrozenIdentity } from './ruler-freeze.mjs';
@@ -21,14 +22,15 @@ const cellKey = ({ taskId, condition }) => `${taskId}:${condition}`;
 const coordinate = ({ taskId, condition }) => ({ taskId, condition });
 const transcriptPath = ({ taskId, condition }) => `${taskId}/${condition}/${filenames.transcript}`;
 
-export function admitRulerRun(phase, reference) {
-  if (phase === 'test') {
+export function admitRulerRun(phase, reference, side) {
+  if (phase === 'test' || phase === 'ab') {
     const freeze = loadRulerFreeze(reference);
     const bytes = source(rulerSplitPath);
     requireThat(hash(bytes) === freeze.splitSha256, 'test phase freeze split file digest mismatch');
     const split = loadRulerSplit(bytes);
     requireThat(split.testSha256 === freeze.testSha256, 'test phase freeze list digest mismatch');
-    return { split, planned: testPlan(split), freeze };
+    if (phase === 'ab') requireThat(harnessSides.includes(side), 'A/B --harness must be baseline, improved or rhetoric');
+    return { split, planned: phase === 'ab' ? harnessPlan(split) : testPlan(split), freeze, ...(phase === 'ab' && { harness: { side, preregistrationSha256 } }) };
   }
   if (phase !== 'train') trainingPlan(phase);
   const split = loadRulerSplit();
@@ -43,7 +45,7 @@ export function rulerBudget(planned, judgeOnly, phase = 'train') {
   const normal = planned.filter(cell => cell.condition === 'normal').length;
   const learner = count * rounds;
   const teacher = learner + normal * rounds * (policy.teacher.requestsPerTurn - 1);
-  const judge = phase === 'test' ? count : 0;
+  const judge = phase === 'train' ? 0 : count;
   return { typicalCalls: learner * 2 + judge, maxCalls: (teacher + learner + judge) * attempts, maxOutputTokens: (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens + judge * policy.judge.maxTokens) * attempts };
 }
 
@@ -96,30 +98,41 @@ function frozenGeneration({ root, mode, judgeOnly: id, phase }, planned, dataset
   }
 }
 
-export function prepareRulerRun(config) {
-  const { split, planned, freeze } = config.admission;
+export function prepareRulerRun(config, { estimate = false } = {}) {
+  const { split, planned, freeze, harness } = config.admission;
   const taskBytes = source(rulerTaskSource);
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   requireThat(hash(taskBytes) === split.sourceSha256, 'ruler task source changed after admission');
   const testing = config.phase === 'test';
-  const dataset = { seed: split.seed, ...(testing ? { testSha256: split.testSha256, splitSha256: freeze.splitSha256 } : { trainSha256: split.trainSha256 }) };
+  const dataset = { seed: split.seed, ...(freeze ? { testSha256: split.testSha256, splitSha256: freeze.splitSha256 } : { trainSha256: split.trainSha256 }) };
   const rows = config.judgeOnly ? undefined : JSON.parse(taskBytes);
-  const tasks = rows && new Map([...new Set(planned.map(cell => cell.taskId))].map(taskId => [taskId, readRulerTask(rows, split, taskId, config.phase)]));
-  const identity = evaluationIdentity({ ...config, taskBytes, policyBytes, dataset, sources: testing ? [...sources, 'src/ruler-freeze.mjs', freezeFile] : sources });
-  const frozen = config.judgeOnly ? frozenGeneration(config, planned, identity.dataset) : undefined;
-  Object.assign(identity, { phase: config.phase, planned, maxFailures: testing ? testFailureLimit : trainingFailureLimit, dialogueSource: frozen?.provenance });
-  if (testing) {
+  const tasks = rows && new Map([...new Set(planned.map(cell => cell.taskId))].map(taskId => [taskId, readRulerTask(rows, split, taskId, freeze ? 'test' : 'train')]));
+  const identity = evaluationIdentity({ ...config, taskBytes, policyBytes, dataset, sources: [
+    ...sources, ...(freeze ? ['src/ruler-freeze.mjs', freezeFile] : []), ...(harness ? ['src/harness-ab.mjs'] : []),
+  ] });
+  Object.assign(identity, { phase: config.phase, planned, maxFailures: testing ? testFailureLimit : trainingFailureLimit });
+  if (freeze) {
     requireFrozenIdentity(freeze, identity);
-    Object.assign(identity, { freeze, sentinel: { trials: sentinelTrials, minValid: sentinelMinValid } });
+    identity.freeze = freeze;
   }
+  if (testing) identity.sentinel = { trials: sentinelTrials, minValid: sentinelMinValid };
+  if (harness) identity.harness = harness;
+  const frozen = !config.judgeOnly ? undefined : harness
+    ? estimate ? undefined : prepareRhetoric(config, identity)
+    : frozenGeneration(config, planned, identity.dataset);
+  identity.dialogueSource = frozen?.provenance;
   const identityId = hash({ mode: config.mode, scenario: scenarioName({ scenario, judgeOnly: config.judgeOnly }), identity });
-  if (testing) requireThat(identityId !== freeze.training.identityId, 'test identity must not reuse the training identity');
+  if (freeze) requireThat(identityId !== freeze.training.identityId, 'test identity must not reuse the training identity');
   return { identity, identityId, tasks, planned, frozen, operatorPolicy: `${policyBytes.toString('utf8')}\nThe private check_distance tool is optional. Use it only when the learner’s actual problem calls for Euclidean distance. Never invent a distance calculation.` };
 }
 
 export function holdoutEstimate(prepared) {
   if (!prepared) return;
   const { identity, identityId, planned } = prepared;
+  if (identity.harness) return {
+    ...(identity.harness.side !== 'rhetoric' && { identityId }),
+    harness: identity.harness, taskIds: planned.map(cell => cell.taskId), freeze: identity.freeze.decisionCommit,
+  };
   return { identityId, testSha256: identity.dataset.testSha256, freeze: identity.freeze.decisionCommit, sentinelTasks: planned.filter(cell => cell.condition === 'no_teach').slice(0, sentinelTrials).map(cell => cell.taskId) };
 }
 
@@ -139,7 +152,8 @@ function trainingFixtures({ taskId, condition }) {
 export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt, limits, recorder }, prepared) {
   const { planned, identity, identityId, tasks, frozen, operatorPolicy } = prepared;
   const testing = phase === 'test';
-  const generateOnly = !testing && !judgeOnly;
+  const ab = phase === 'ab';
+  const generateOnly = phase === 'train' && !judgeOnly;
   const runScenario = scenarioName({ scenario, judgeOnly });
   const runDir = join(root, id);
   mkdirSync(root, { recursive: true });
@@ -157,7 +171,7 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
   const cells = [], freezes = [], graded = [];
   const failedTasks = new Set(frozen?.failedTasks);
   const sentinel = testing ? { planned: sentinelTrials, attempted: 0, valid: 0, status: 'not_reached' } : undefined;
-  const result = { ...base, runDir, acceptance: false, cells, ...(testing && { sentinel, stop: null }) };
+  const result = { ...base, runDir, acceptance: false, cells, ...(testing && { sentinel }), ...((testing || ab) && { stop: null }) };
   const resultPath = join(runDir, filenames.result);
   for (const [index, coordinate] of planned.entries()) {
     const { taskId, condition } = coordinate;
@@ -168,11 +182,12 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
       outcome = await executeCell({
         runDir, id, variant: condition, coordinate, task: tasks?.get(taskId), operatorPolicy, mode, reserve, recorder, writer,
         generateOnly, frozen: messages, judgeOnly, fixtures: mode === 'offline' ? trainingFixtures(coordinate) : undefined,
+        improved: identity.harness?.side === 'improved',
       });
       if (!outcome.failure) {
         const dialoguePath = transcriptPath(coordinate);
         const gradePath = `${taskId}/${condition}/${filenames.judge}`;
-        const transcriptSha256 = !judgeOnly && hash(readFileSync(join(runDir, dialoguePath)));
+        const transcriptSha256 = (!judgeOnly || ab) && hash(readFileSync(join(runDir, dialoguePath)));
         const gradeSha256 = !generateOnly && hash(readFileSync(join(runDir, gradePath)));
         if (transcriptSha256) freezes.push({ ...coordinate, path: dialoguePath, transcriptSha256, messageIds: outcome.messages.map(m => m.id) });
         if (gradeSha256) graded.push({ ...coordinate, path: gradePath, sha256: gradeSha256 });
@@ -187,6 +202,7 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
       failedTasks.add(taskId);
       if (failedTasks.size >= identity.maxFailures) stop = 'failure_limit';
       else if (outcome.failure.kind === 'budget_exhausted') stop = 'budget_exhausted';
+      else if (ab && outcome.failure.attempt === policy.retries + 1) stop = 'call_retries_exhausted';
     }
     if (testing) {
       if (condition === 'no_teach' && sentinel.attempted < sentinelTrials) {
@@ -198,10 +214,12 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
             : reserve.canCover(remaining.maxCalls, remaining.maxOutputTokens) ? 'passed' : 'insufficient_budget';
         }
       }
+    }
+    if (testing || ab) {
       result.stop = stop ?? null;
       write(resultPath, result);
-      if (sentinel.status === 'insufficient_scores' || sentinel.status === 'insufficient_budget') break;
     }
+    if (testing && (sentinel.status === 'insufficient_scores' || sentinel.status === 'insufficient_budget')) break;
     if (stop) break;
   }
   const acceptance = failedTasks.size === 0 && cells.length === planned.length && (generateOnly || cells.every(cell => cell.validTotal));
@@ -210,7 +228,7 @@ export async function runRuler({ mode, root, id, phase, judgeOnly, checkReceipt,
   const receipt = {
     ...base, runDir, result: filenames.result, acceptance, identityId,
     manifestSha256: hash(readFileSync(manifestPath)), resultSha256: hash(readFileSync(resultPath)),
-    ...(!judgeOnly && { frozen: freezes }), ...(!generateOnly && { graded }), ...(judgeOnly && { source: frozen.provenance }),
+    ...((!judgeOnly || ab) && { frozen: freezes }), ...(!generateOnly && { graded }), ...(judgeOnly && { source: frozen.provenance }),
   };
   recorder.publishEvaluation(receipt);
   return result;

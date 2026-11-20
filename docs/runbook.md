@@ -32,6 +32,16 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 3. 用 `--verify-run <测试 run ID>` 核对进程和评测收据。将 `manifest.writer.pid` 和格子的遥测 PID 与启动记录比对。用原始 `judge.json` 和 `transcript.json` 回读预登记维度的证据；运行 `acceptance` 只表示拿齐有效分，不代表测试通过。
 4. 用 `node scripts/ruler-test-report.mjs --id <测试 run ID>` 生成证据回读清单。完成回读后，追加 `--audit <回读 JSON>` 复算。报告、逐题计算结果和回读清单保存在该 run 下。不带回读记录的输出不能授予通过。
 
+## 第 4 步 harness 对照
+
+`--scenario ruler-expand --phase ab --freeze e34d8c767ada4a31de5c58016d07d87c2b231ffb` 固定冻结 v3 与预抽样的 10 题。用 `--harness baseline` 或 `--harness improved` 生成并评分。`--harness rhetoric` 加 `--judge-only <基线 ID> --source-root <基线根>`，从已核对的完整基线取副本，只给 #8 追加预登记话术，再评分。不会重生成学生或写入基线根。
+
+1. 干净 HEAD 上运行 `npm run check`。给三侧各分配一个独立 `--run-root` 和一个新 `--id`。先在每侧命令中使用 `--mode real --estimate-only` 和单独的预检 ID。预检不发请求，话术预检不要求基线已运行。
+2. 按 `AGENTS.md` 用 `ask_user` 报本次调用和请求输出 token 上限。确认后，才把 `--estimate-only` 替换为 `--confirm-cost --max-attempts <上限> --max-requested-output-tokens <上限>`。按 `baseline`、`improved`、`rhetoric` 串行运行。每侧结束后以原根执行 `node src/cli.mjs --verify-run <id> --run-root <root>`，核对启动、进程、manifest 和遥测 PID。遇到调用重试耗尽、第四道故障题或预检额度用完，保留现有原件并停止，不启动下一侧。
+3. 先按预登记回读头五题各侧的 `transcript.json`，保存 #n 与行为判断。再运行 `node scripts/harness-ab-compare.mjs --baseline-root <根> --baseline-id <id> --improved-root <根> --improved-id <id> --rhetoric-root <根> --rhetoric-id <id>`。脚本验证收据与身份、话术副本及 PID，输出逐题分差与整题族重抽 95% 区间。它不作采用决定。缺分保留计划分母，不补零；如果有侧未启动，报告为未观测。
+
+将报告写到 `runs/<ab-id>/ab-report.md`，按预登记合并分数和行为证据。不用离线成绩决定是否采用。
+
 直接运行 `node src/cli.mjs`，stdout 为一个 JSON 文档，stderr 为诊断。退出 0 表示当前模式机器检查通过，1 表示执行或对照未达到条件，2 表示输入无效。E2 的机器条件见[裁判契约](../contracts/judge/README.md#e2-坏教师的目标维度)。运行收据记录 `acceptance`。人工验收时同时保存命令退出码和引用回读结论。
 
 用 `node src/cli.mjs --verify-run <id>` 核对 `runs/_receipts/` 中的进程原件。自定义运行根时传入原 `--run-root`。[运行收据契约](../contracts/artifacts/README.md#运行收据)

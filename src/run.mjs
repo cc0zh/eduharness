@@ -95,7 +95,7 @@ function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
   } catch (error) { throw failure('invalid_input', {}, `judge-only cannot validate the frozen ${scenario} ${cell} dialogue: ${error.message}`); }
 }
 
-export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, judgeOnly, fixtures }) {
+export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, judgeOnly, fixtures, improved }) {
   const cell = coordinate ? `${coordinate.taskId}:${variant}` : variant;
   const folder = coordinate ? `${coordinate.taskId}/${variant}` : variant;
   const path = join(runDir, folder);
@@ -121,7 +121,7 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     const roles = frozen ? ['judge'] : generateOnly ? ['teacher', 'learner'] : undefined;
     const models = new Models({ mode, responses: frozen && fixtures ? fixtures.slice(-1) : fixtures, roles, save, reserve, recorder, cell });
     if (!frozen) {
-      const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event) });
+      const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event), improved });
       const { instructions, persona } = task.user_scenario;
       say('learner', 0, instructions.task_instructions);
       const profile = { persona, reason: instructions.reason_for_call, known: instructions.known_info, unknown: instructions.unknown_info, model: instructions.student_model };

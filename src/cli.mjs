@@ -53,6 +53,7 @@ if (option('--verify-run') >= 0) {
       'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
       phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
+      harness: { type: 'string' }, 'source-root': { type: 'string' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
     if (!['E1', 'E2', 'ruler-expand'].includes(values.scenario)) throw new Error('scenario must be E1, E2 or ruler-expand');
@@ -61,6 +62,7 @@ if (option('--verify-run') >= 0) {
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
     if (e2Replay ? !['no_teach', 'all'].includes(judgeCell) : judgeCell !== undefined) throw new Error('E2 judge-only requires --judge-cell no_teach or all');
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
+    if ((values.harness !== undefined || values['source-root'] !== undefined) && (values.scenario !== 'ruler-expand' || values.phase !== 'ab')) throw new Error('--harness and --source-root require ruler-expand --phase ab');
     estimate = values['estimate-only'];
     config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };
     if (values.scenario === 'ruler-expand') {
@@ -69,6 +71,11 @@ if (option('--verify-run') >= 0) {
       if (config.phase === 'test') {
         config.admission = rulerRunner.admitRulerRun(config.phase, values.freeze);
         if (values['generate-only'] || hasJudgeSource) throw new Error('the frozen test phase only admits the combined generation and scoring run');
+      } else if (config.phase === 'ab') {
+        config.harness = values.harness;
+        if (values['generate-only'] || (config.harness === 'rhetoric') !== hasJudgeSource || (config.harness === 'rhetoric') !== Boolean(values['source-root']?.trim())) throw new Error('A/B requires combined generation and scoring except rhetoric, which requires --judge-only <baseline ID> and --source-root <baseline root>');
+        config.sourceRoot = values['source-root'];
+        config.admission = rulerRunner.admitRulerRun(config.phase, values.freeze, config.harness);
       } else {
         if (values.freeze !== undefined) throw new Error('--freeze requires --phase test');
         if (Boolean(values['generate-only']) === hasJudgeSource) throw new Error('ruler-expand needs exactly one of --generate-only or --judge-only <id>');
@@ -86,7 +93,7 @@ if (option('--verify-run') >= 0) {
     }
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
-    if (config.phase === 'test') config.prepared = rulerRunner.prepareRulerRun(config);
+    if (config.phase === 'test' || config.phase === 'ab') config.prepared = rulerRunner.prepareRulerRun(config, { estimate });
   } catch (error) {
     console.error(error.message);
     emit({ failure: failure('invalid_input', {}, error.message).failure });

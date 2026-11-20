@@ -7,7 +7,7 @@
 | 第 1 步 区分坏教师 | 已完成 | `0302396` 记录用户签收 S1。`e2-real-20261119-06` 同次五格区分了四种坏教师，但原预登记的三次完整稳定性重复未达成。[签收与回读证据](#s1-场景卡逐栏) |
 | 第 2 步 训练一致性核对 | 未通过；v3 已冻结 | 两个目标维上 v3 同档 19/30，v4 同档 17/30。[择版对比](#目标维度对比) |
 | 第 3 步 未见题验证 | 已执行，未通过 | 25/25 对总分方向符合预期；`lecture` 的目标维数值方向仅 3/6，低于预登记门槛。[未见题验证结果](#未见题验证结果) |
-| 第 4 步 手写变体 A/B | 未开始 | 验证或迁移以[对话行为证据](#目标维度对比)为准，分数只作参考。[第 4 步场景卡](scenarios.md#第-4-步-手写-harness-变体-ab)。 |
+| 第 4 步 手写变体 A/B | 离线准备完成，真实试验未执行 | [预登记与运行记录](#第-4-步-harness-对照)。改进未判定，normal 仍使用基线。 |
 
 ## 补尺子：训练初评和复评
 
@@ -89,6 +89,12 @@ v3 初评 manifest SHA256 为 `a8a68385fc5b6aa9e92dd043492fcb924bd4cc9844a2c9cf7
 **未达到预登记通过线。** 每组有效配对须达到 90%，目标维命中须达到计划数的 80%。四组同题总分方向为 7/7、6/6、6/6、6/6；执行者 AI 回读后，目标维有效与命中分别为 `answer_dump` 7/7、7/7，`lecture` 2/6、0/6，`sycophant_close` 6/6、6/6，`no_teach` 6/6、6/6。`lecture` 即使不扣证据不足的配对也只有 3/6 命中，另 3 对同档。抽查 S0-79、S0-63 的分档证据未获确认，该组留待定，但本轮整体已确定不过线。`verification_or_transfer` 两版训练 κ 均低于 0.60，尺子一致性不足，仅供参考。25 题只运行一次，不能证明跨次稳定。训练是 AI 预标加用户复核，改动 0/90，不是独立人工校准。
 
 [报告和逐题表](../runs/ruler-test-v3-real-01/test-report.md) · [复算结果](../runs/ruler-test-v3-real-01/test-calculations.json) · [逐题消息证据](../runs/ruler-test-v3-real-01/test-audit.json)。[启动](../runs/_receipts/ruler-test-v3-real-01.start.json)、[请求](../runs/_receipts/ruler-test-v3-real-01.requests.jsonl)、[进程](../runs/_receipts/ruler-test-v3-real-01.process.json)的 [`--verify-run` 复核](../runs/ruler-test-v3-real-01/verify.json)退出 0。459 条遥测与启动和进程收据均为 PID `31064`。请求 459/1,650，累计请求输出额度 5,745,024/17,054,400 token；供应商实报总计 1,709,139 token，8 次缺报。没有故障题；裁判调用重试 9 次，含 5 次本地超时。`S0-70/no_teach` 的第 4 轮裁判调用 1、尝试 1 实报 17,324 推理 token，超过请求上限 16,384。
+
+## 第 4 步 harness 对照
+
+预登记以第 3 步 normal 的最低两维为目标：`representation_pivot` 为 1.760，`agency_handoff` 为 1.840。`verification_or_transfer` 为 1.880，保留对话回读，不列为目标分档。表征转换的 0 分含无机会；主动权在第 3 步的 lecture 上回读后 0/6。两项目标的改善不能只凭涨分判断。
+
+预登记 SHA256 为 `bdc17d6a32e46df8664d338cc6b976bc3adb41b348cf914114d011da32037967`。`ab` 阶段提供同题基线、T3/T4 改进和只追加 #8 话术的对照。20 条基线与改进对话及 10 条话术副本可由离线夹具回归；这不证明教学变好。真实调用未执行，采用结论待证，默认提示不变。[恢复命令](runbook.md#第-4-步-harness-对照) · [本地报告](../runs/harness-ab-v1/ab-report.md) · [本地预登记](../.tmp/scratch/harness-ab/preregistration.md)
 
 ## E1 S0-06 真实双格
 
