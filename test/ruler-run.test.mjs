@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { dimensions } from '../contracts/judge/schema.mjs';
 import test from 'node:test';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -135,6 +136,37 @@ test('training generation freezes 15 tasks and judge-only keeps scores off stdou
     assert.equal(binding.taskId, taskId);
     assert.equal(binding.condition, condition);
   }
+
+  const partial = failCellWrites(root, [frozen[0].taskId], '--judge-only', 'source', '--id', 'rescore');
+  assert.equal(partial.status, 1);
+  const sourceScore = json('score/manifest.json');
+  const { seed } = sourceScore.identity.dataset;
+  const blindSalt = 'fixture';
+  const entries = sourceScore.planned.map(({ taskId, condition }) => ({ taskId, condition, opaqueId: sha256(`${seed}:opaque:${blindSalt}:${taskId}:${condition}`).slice(0, 12) }));
+  const sheet = ['opaqueId,dim,score,msgNums,opportunity,reason,confidence', ...entries.flatMap(({ opaqueId }, i) => dimensions.map(dim => `${opaqueId},${dim},${i < 2 ? 0 : i < 4 ? 1 : 2},#1,有,#1 confirms the premise.,高`))].join('\n');
+  const plan = resolve(root, 'plan.md'), draft = resolve(root, 'labels.ai.csv');
+  writeFileSync(plan, 'Frozen plan');
+  writeFileSync(draft, sheet);
+  writeFileSync(resolve(root, 'score/labels.csv'), sheet);
+  writeFileSync(resolve(root, 'score/label-lock.json'), JSON.stringify({ runId: 'score', file: 'labels.csv', byteEqual: true, sha256: sha256(sheet), aiDraftSha256: sha256(sheet), planSha256: sha256('Frozen plan') }));
+  writeFileSync(resolve(root, 'score/blind-mapping.json'), JSON.stringify({ entries, blindSalt }));
+  const calculate = () => spawnSync(process.execPath, ['scripts/ruler-calibration.mjs', resolve(root, 'score'), draft, plan, '--rescore', 'rescore'], { encoding: 'utf8' });
+  const calibrated = calculate();
+  assert.equal(calibrated.status, 0, calibrated.stderr);
+  const stats = JSON.parse(calibrated.stdout);
+  assert.equal(stats.scoreRunId, 'rescore');
+  assert.equal(stats.ruler, 'e1-numbered-evidence-v4');
+  assert.equal(stats.pooled.paired, 84);
+  assert.equal(stats.pooled.missingMachine, 6);
+  assert.deepEqual(stats.dimensions.misconception_repair.lockedLabelCounts, [2, 2, 11]);
+  assert.deepEqual(stats.dimensions.misconception_repair.labelCounts, [1, 2, 11]);
+  assert.equal(stats.dimensions.misconception_repair.criteria.coverage, true);
+  assert.deepEqual(stats.missingScores.map(({ taskId, reason }) => ({ taskId, reason })), [{ taskId: frozen[0].taskId, reason: 'artifact_io' }]);
+  const rescoreJudge = resolve(root, 'rescore', json('_receipts/rescore.json').graded[0].path);
+  writeFileSync(rescoreJudge, '{}');
+  const tampered = calculate();
+  assert.notEqual(tampered.status, 0);
+  assert.match(tampered.stderr, /rescore receipts did not verify/);
 
   const last = frozen.at(-1);
   const lastGrade = resolve(root, 'score', graded.at(-1).path);

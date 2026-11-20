@@ -94,7 +94,13 @@ test('pi OpenRouter transport sends the contract schema and requires parameter s
   assert.match(payload.messages[0].content, /on that message or later/);
   assert.doesNotMatch(JSON.stringify(payload.messages), /context_id/);
   assert.ok(messages.every(m=>!JSON.stringify(payload.messages).includes(m.id)));
-  assert.deepEqual(JSON.parse(payload.messages.at(-1).content).messages.map(m=>m.n),messages.map((_,i)=>i+1));
+  const request = JSON.parse(payload.messages.at(-1).content);
+  assert.deepEqual(request.messages.map(m=>m.n),messages.map((_,i)=>i+1));
+  const verification = request.rubric.verification_or_transfer[1];
+  assert.match(verification, /0 .*worked check that supplies the reasoning|0 .*solves the check and only asks for confirmation/);
+  assert.match(verification, /0 .*learner checks alone and the tutor only confirms/);
+  assert.match(verification, /1 .*asks the learner to explain before giving the reasoning.*echoes/);
+  assert.match(verification, /2 learner explains the concept independently or transfers it/);
   assert.equal(rows[0].judgementMode, 'json_schema');
 
   const margin = policy.judge.minVisibleTokens;

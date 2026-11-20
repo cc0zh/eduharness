@@ -1,19 +1,37 @@
 # 当前状态
 
-**第 2 步：人工校准，等待用户盲标。**
+**第 2 步：训练初评未通过。准备一次训练复评，尺子尚未冻结。**
 
 | 步骤 | 状态 | 证据入口 |
 | --- | --- | --- |
 | 第 1 步 区分坏教师 | 已完成 | `0302396` 记录用户签收 S1。`e2-real-20261119-06` 同次五格区分了四种坏教师，但原预登记的三次完整稳定性重复未达成。[签收与回读证据](#s1-场景卡逐栏) |
-| 第 2 步 人工校准 | 进行中 | `fae5f1b` 记录 15 条训练对话的生成、初评与盲标交接。还没有逐维加权 κ 和一致率。[训练记录](#补尺子训练初评完成待人工盲标) |
-| 第 3 步 未见题验证 | 未开始 | 尺子尚未冻结。冻结后对 25 道测试题沿用人工校准的盲标和一致性协议。 |
+| 第 2 步 训练一致性核对 | v3 初评未通过；v4 复评未启动 | 71/90 同档，线性加权 κ 0.741。[训练初评和复评](#补尺子训练初评和复评) |
+| 第 3 步 未见题验证 | 未开始 | 尺子尚未冻结，测试集继续封存。测试运行的版本要求见[冻结记录约定](#冻结记录约定)。 |
 | 第 4 步 手写变体 A/B | 未开始 | [第 4 步场景卡](scenarios.md#第-4-步-手写-harness-变体-ab)。 |
 
-## 补尺子：训练初评完成，待人工盲标
+## 补尺子：训练初评和复评
+
+**v3 训练初评未通过。** 标签由 `gpt-6.2-sol` 预标后交用户逐格复核，改动率 0/90。锁定 CSV 的 SHA256 为 `3498764b4c9844ff8dae9ee9ba8033affacdf0500239f67e63b7644b13f4e841`。结论是经用户认可的跨模型一致性，不是人工独立校准；用户在 `20261119` 改为预标加复核，没有按原方案单人盲标和隔天重标 4 条。`plan.md:92` 的通过线不变。`support_escalation_and_fading` 缺标签 2 档，`productive_struggle` 缺标签 1 档，`verification_or_transfer` 为 κ 0.478、7/15 同档，`misconception_repair` 的一个同档证据未确认。见本机[初评报告](../runs/ruler-train-score-v1/calibration-report.md)、[标签锁定收据](../runs/ruler-train-score-v1/label-lock.json)、[计算结果](../runs/ruler-train-score-v1/calibration-results.json)及[复算脚本](../scripts/ruler-calibration.mjs)。
+
+按用户新增的处置规则，只从以下方案选一次最小修订。原预登记不是新冻结授权；仍按原线报告通过或未通过。复评只用原 15 条训练对话，不动测试集。
+
+| 方案 | 预计成本 | 处置 |
+| --- | --- | --- |
+| 给「验证或迁移」补 0/1 档例子，区分展示、确认与让学生解释 | 约 0.5–1 人时修订、测试与审查；一次 15 条裁判复评 | **选定。** 该维占 8/19 个分歧。v4 不改分档定义，不重标。 |
+| 给训练题补逐题检查项，再复评 | 约 1–2 人时整理和复核；若用于裁判，须另登记输入变化和复评额度 | 不实施。 |
+| 请未见预标与分数的人独立盲标 15 条并隔天重标 4 条 | 约 3–3.5 人时，依据原标注说明；只对现有原件做标注时无模型请求 | 不实施。 |
+
+唯一复评 run ID 为 `ruler-train-rescore-v4-20261120-01`，源为 `ruler-train-gen-v1`。使用 `ruler-expand / train / judge-only`，单进程，不重生成。新版本仍用 `judge-output-v2`、`evaluation-identity-v2`、`e1-call-policy-v4` 和原裁判路由。额度预检使用单独的 run ID，真实调用前需按仓库规则登记并获额度授权。
+
+### 冻结记录约定
+
+冻结与统计过线分开记。完成这一次复评后，按 `plan.md:92` 报读数，并按本轮用户指示冻结复评版本，不做第二轮改动；未达线不能记为通过。冻结记录须写尺子版本、该版本提交 SHA、复评 run/收据和标签哈希。第 3 步 manifest 必须引用该冻结记录及其 `identity.ruler`、`identity.judgeOutputContract`、`identity.version`，并核对 `identity.policy.version`、`identity.routes.judge`、尺子相关 `identity.sources` 与冻结提交。题目、条件及来源对话改变时保留各自的 `identityId`，不复用训练 run 的身份。第 3 步另按 `plan.md:95–98` 执行，本次不启动；现行 CLI 继续拦截测试阶段。
+
+### 历史训练运行
 
 `6fd2875` 锁定 15/25 划分，`60a93cc` 固定候选题并校验训练引用，`5e56667` 提供训练生成、初评及复核入口。
 
-只纳入原件初筛通过的 40 道题，锁定 15 道训练和 25 道测试。20 道待校正、5 道暂缓、28 道旧封存均保持原状。名单、种子、复算规则和 SHA256 见[数据契约](../contracts/dataset/README.md#补尺子划分)。本轮未生成或评测试题。尺子仍是 `e1-numbered-evidence-v3 / judge-output-v2 / evaluation-identity-v2`，尚未完成校准和冻结。
+只纳入原件初筛通过的 40 道题，锁定 15 道训练和 25 道测试。20 道待校正、5 道暂缓、28 道旧封存均保持原状。名单、种子、复算规则和 SHA256 见[数据契约](../contracts/dataset/README.md#补尺子划分)。当时用 `e1-numbered-evidence-v3 / judge-output-v2 / evaluation-identity-v2` 做初评，未生成或评测试题。
 
 干净 HEAD `5e56667` 的 [检查收据](../runs/_receipts/check-5e5666738fd1d096e3caabde4b20b567ea5ffb77.json)记录 68 项通过。真实生成和初评串行执行。15 道训练题均 `execution_success`，初评全部 `scored: true`、`validTotal: true`。两个 run 的进程及 `--verify-run` 均退出 0；[生成复核](../.tmp/scratch/ruler-expand/ruler-train-gen-v1.verify.json)和[初评复核](../.tmp/scratch/ruler-expand/ruler-train-score-v1.verify.json)均为 `verified: true`、`acceptance: true`。全部遥测 PID 与对应启动收据一致，生成 `61792`、初评 `18516`。
 
@@ -24,7 +42,7 @@
 
 重试和用量缺报均为 0。两阶段合计实报 510,476 token。原 20 条最省档估算来自本机 `%TEMP%/teacharena/ruler-expand/plan.md` 第 6 节（SHA256 `59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22`），生成 295,800、初评 379,000，合计约 674,800 token。按 15 条线性折算，生成约 221,850 token，实报高 24.3%；初评约 284,250 token，实报低 17.5%。实际请求输出额度均低于预检上限。15 次裁判请求未观察到推理 token 超出请求推理上限。
 
-盲标在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。交接时，`blind.md` 含 15 条完整编号对话，`labels.csv` 提供 90 个评分项，`README.md` 为填写说明。机器分数和匿名映射在初评 run 下，标注时不打开。五份文件摘要见本机 `.tmp/scratch/ruler-expand/verify-delivery.log`。标完后交回填写的 CSV，后续在生成 run 下保存 `labels-locked.csv` 并锁定 SHA256，再揭分。[人工盲标协议](scenarios.md#人工盲标协议)引用预登记通过线，说明逐维统计的分母和证据要求。第 3 步尚未开始，保留 `no_teach` 首 4 题至少 3 题评分有效的继续条件。
+复核材料在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。用于 `npm run check` 的 [尺子变更引用](../contracts/judge/ruler-change.json)指向原生成 run 的收据和同 SHA256 的 `labels-locked.csv`。第 3 步尚未开始，保留 `no_teach` 首 4 题至少 3 题评分有效的继续条件。
 
 ## E1 S0-06 真实双格
 

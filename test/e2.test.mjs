@@ -29,7 +29,7 @@ test('offline E2 records four preregistered raw comparisons against one normal d
   assert.equal(manifest.scenario, 'E2');
   assert.equal(manifest.mode, 'offline');
   assert.equal(manifest.taskId, 'S0-06');
-  assert.equal(manifest.identity.ruler, 'e1-numbered-evidence-v3');
+  assert.equal(manifest.identity.ruler, 'e1-numbered-evidence-v4');
   assert.equal(manifest.identity.judgeOutputContract, 'judge-output-v2');
   assert.deepEqual(manifest.identity.targets, targets);
   assert.deepEqual(result.cells.map(cell => cell.id).sort(), ['normal', ...Object.keys(targets)].sort());
@@ -136,6 +136,21 @@ test('E2 judge-only verifies frozen sources and never reruns their teachers or l
     assert.deepEqual(readCell('transcript.json'), JSON.parse(readFileSync(resolve(root, 'source', id, 'transcript.json'))));
     assert.equal(readCell('judge.json').binding.sourceRunId, 'source');
   }
+  const manifestPath = resolve(root, 'source/manifest.json');
+  const callPath = resolve(root, 'source/no_teach/calls/judge-4-1-1.json');
+  const sourceCall = JSON.parse(readFileSync(callPath));
+  for (const version of [2, 3]) {
+    const ruler = `e1-numbered-evidence-v${version}`;
+    const historical = JSON.parse(originalManifest);
+    historical.identity.ruler = ruler;
+    writeFileSync(manifestPath, JSON.stringify(historical));
+    writeFileSync(callPath, JSON.stringify({ ...sourceCall, binding: { ...sourceCall.binding, ruler } }));
+    const replay = cli(...options, '--id', `replay-v${version}`);
+    assert.equal(replay.status, 0, replay.stderr);
+    assert.equal(JSON.parse(readFileSync(resolve(root, `replay-v${version}/no_teach/judge.json`))).binding.ruler, 'e1-numbered-evidence-v4');
+  }
+  writeFileSync(manifestPath, originalManifest);
+  writeFileSync(callPath, JSON.stringify(sourceCall));
   const changed = JSON.parse(bytes);
   changed[1].text += ' edited';
   writeFileSync(transcript, JSON.stringify(changed));
