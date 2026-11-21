@@ -22,7 +22,7 @@
 | (d) 四个目标维命中数 /3 各 | 未测，0/3 有配对 | 未测，0/3 有配对 | 未达，0/3 各 |
 | (e) 确定项 FP+FN /2 | 0/2，但 0 项观测、99 项缺判* | 0/2，但 0 项观测、99 项缺判* | 未达，11/2 |
 
-`*` Haiku/Gemini 的 (e) 为 0 个错误、0 个真值观测；99 个确定位全缺。不能把空分母解释为准确。两侧每次出站都带 strict JSON Schema、固定端点及 `require_parameters:true`，但实际返回 403；原件只保留状态码，没有供应商错误正文，具体拒绝原因未知。不能据此判定是 reasoning 参数不支持，也不能确定是账户权限问题。Haiku/Gemini 未测到，原因待用户处理。运行后不切到 Gemini 2.5 Flash-Lite；这会违反已锁定身份。[403 零费用诊断](../.tmp/scratch/judge-bakeoff/403-diagnosis.md)
+`*` Haiku/Gemini 的 (e) 为 0 个错误、0 个真值观测；99 个确定位全缺。两候选因 403 未测到。原 bakeoff 未保存错误正文；后续 A→D 的 8 个小探针均在 OpenRouter `Gate Endpoints with Geo Restrictions` 步骤被拒。请账户所有者联系 OpenRouter 核对地区准入；未改账户、未改生产裁判参数、未补跑 bakeoff。[403 诊断与逐次原件](../.tmp/scratch/judge-bakeoff/403-diagnosis.md)
 
 Qwen 的最终采用线为：(a) 7/18，(b) 7/15，(c) 0/3 遍，(d) 四个目标各 0/3，(e) 11 个确定项错误（10 FP、1 FN，上限 2）。构造矩阵缺 39/99 位。跨维 S3/P1 冲突 0 次；规范化 11 次。5 格因单维 3 次尝试后仍有本地 `order` 错误而记 `judge_partial_failure`，其中表征转换 3 格、保留试错 2 格；没有跨维部分失败。另有 2 格在停线时只完成部分维度，未发布整格判决；4 格未启动，逐格逐维列在候选报告中。
 
