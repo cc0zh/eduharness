@@ -20,6 +20,7 @@
 | 2026-11 | [构造矩阵零错不代表学生证据充分](2026-11/20261121-construction-truth-coverage.md) | 第二轮 S1 `b0fc4d3`、`s1-binary-round2-01` |
 | 2026-11 | [定向扰动后要核对裁判是否换了引用](2026-11/20261121-counterfactual-anchor-switch.md) | 第二轮 ①b `round2-perturbation-01`，`normal` #4–#7 |
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
+| 2026-11 | [推理为零、正文及时，仍须校验证据锚](2026-11/20261121-reasoning-off-binding-failure.md) | 第二轮 ①d `round2-reasoning-off-01` 的 `r1/normal`，三次 M2 锚不匹配 |
 
 ## 目录与命名
 
