@@ -1,5 +1,24 @@
 # 当前状态
 
+<a name="round2-s1"></a>
+
+## 第二轮 ① 二元尺子与 S1（20261121）
+
+**候选尺子通过固定五格的机器判线，尚未冻结。** `b0fc4d3` 实现 `e1-binary-v1 / judge-output-v3 / evaluation-identity-v3`。尺子用 19 道是非题和公开对话引用，由代码定档。无机会的维度记 N/A，不进入满分；同题配对只用共同适用维。v3 分数不与新版相减。[题目和评分表](../contracts/judge/binary.md)
+
+干净 `b0fc4d3` 的 `npm run check` 通过 115 项。预检发出 0 请求。`s1-binary-round2-01` 只复判 `e2-real-20261119-06` 的五份原对话，各三遍。正式运行和 `--verify-run` 均退出 0，15/15 格有合规判决；启动、进程、manifest 和 17 条遥测同为 PID `36952`。预登记 SHA256 为 `2ed20c5803aaa3d4c01773cbe2f8531083b22693ab05cad5522685aa1c15cf13`。[预登记](../runs/s1-binary-round2-01/preregistration.md) · [报告与逐题引用](../runs/s1-binary-round2-01/s1-binary-report.md) · [复核](../runs/s1-binary-round2-01/verify-run.json)
+
+| 检查 | 结果 |
+| --- | --- |
+| (a) 适用分率 | 3/3 遍四个坏教师均低于本遍 `normal`。 |
+| (b) 目标维 | `answer_dump` 试错、`lecture` 主动权、`sycophant_close` 验证或迁移、`no_teach` 误解修复，各 3/3 低于本遍 `normal`。 |
+| (c) 三遍分档全同 | 误解修复、表征转换各 4/5；其余四维各 5/5。表征转换的 4/5 包含两格三遍均为 N/A，只看三遍均适用的格为 2/3。 |
+| 构造真值 | 预期 Yes 判对 6/6、预期 No 判对 93/93。R0 的 N/A 判对 6/6，其余门控无构造真值。构造样本极端且重复，不检验细微差别。 |
+
+执行者 AI 回读确认 `lecture` #9 复述教师 #8 已解的公式。`normal` 的 V2 三遍引同一条 #5，学生选 x 但仍说不清原因。可确认教师发起检查，不能独立确认满档。表征转换 `normal` 的 2/0/2 波动和 `answer_dump` 的 M3 翻位均保留。机器方向不代替学生行为的独立复核。本阶段没有训练一致性、留出泛化或冻结结论。
+
+实际请求 17/45 次，仅裁判，含 2 次恢复性重试；累计请求输出额度 1,114,112/2,949,120 token。供应商实报 246,695 token，1 次缺报。三次 `normal` 实报推理超过出站参数 16,384。[请求日志](../runs/_receipts/s1-binary-round2-01.requests.jsonl) · [进程收据](../runs/_receipts/s1-binary-round2-01.process.json)
+
 ## 首轮收尾（20261120）
 
 **这次 harness 改动没有被证明更好，预登记的判线挡住了一个仅看部分行为指标就可能被误判为「更好」的改动。** 首轮到此结束，不再改 harness 或尺子。
