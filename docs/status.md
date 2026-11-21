@@ -1,5 +1,21 @@
 # 当前状态
 
+<a name="stage2a-hard-learners-revision"></a>
+
+## 阶段 2a 画像单轮修订与审核校准（20261121）
+
+**`stage2a-hard-learners-03` 审核齐 48/48，三类画像最终均为不可用。** 原样本的重复审核整条同判为 10/12。只改提示的 v3 为 9/12，停在审核校准。v4 结构化提交尝试、修正依据和新增事实原字，复审同判 11/12，几何两例均同为 `repair` 且无跃迁，两条教师给数的跃迁位均为 false。`r2/S0-06/pretender/answer` 仍有一个进步标签分歧。新旧共有 11 条，两版均同判 10 条。闸门通过后才修订各画像一次。[原口径复审](../runs/stage2a-audit-original-01/result.json) · [v3 复审](../runs/stage2a-audit-calibrated-01/result.json) · [v4 复审](../runs/stage2a-audit-calibrated-02/result.json)
+
+| 画像 | 重复 | 给答案 | 针对错因 | 独立解释 | 两题可教性 | 跃迁标记／泄漏 | 最终 |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 顽固误解型 | 4/4 | 3/4 | 4/4 | 2/4 | 2/2、1/2 | 1／0 | 不可用 |
+| 伸手要答案型 | 4/4 | 2/4 | 4/4 | 4/4 | 2/2、2/2 | 0／0 | 不可用 |
+| 假装懂了型 | 3/4 | 0/4 | 4/4 | 1/4 | 2/2、1/2 | 1／0 | 不可用 |
+
+对照原小样，三类的重复条件均过 3/4，两题可教性均达到各至少一次。审核仍把两条由 5 与 3 的比较支撑的局部修正标为跃迁，两条明确索步骤的回复被判表面理解。报告保留标签及前后数值，另列 #8/#9 回读。画像修订额度已用完。原 run 和结论在下节保留。[正式报告](../runs/stage2a-hard-learners-03/hard-learner-fidelity-report.md) · [预登记与附录](../runs/stage2a-hard-learners-03/preregistration.md)
+
+附录合并 SHA256 `9d0bd249eef81b2e822d76a7c16f2d502b683ea75bb5ec25e3273a293e25e2b5`。干净 `27f004d` 范围检查 22/22，预检 0 请求。正式 run 退出 0，`--verify-run` 通过，启动、进程、manifest 与尝试遥测均为 PID `33336`。62/72 次请求、253,952/294,912 请求输出 token，实报 80,396 token，无缺报。两次学生 JSON 契约重试恢复。[复核](../runs/stage2a-hard-learners-03/verify-run.json) · [预检收据](../runs/_receipts/stage2a-hard-learners-estimate-04.process.json)
+
 <a name="stage2a-hard-learners"></a>
 
 ## 阶段 2a 高压学生保真（20261121）
