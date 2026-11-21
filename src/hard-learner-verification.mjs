@@ -4,10 +4,14 @@ import { hardLearnerCheckScope, hardLearnerScenario as scenario } from '../confi
 import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { parseFidelityAudit, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
 import { matchesHardProfileIdentity } from '../contracts/learner/profiles.mjs';
-import { parseLearner } from '../contracts/learner/schema.mjs';
-import { assessFidelity, auditContext, fidelityIdentityVersion, fidelityPlan, frozenPrefix, groupPath, learnerTask, plannedReplyNumber, registrationFile, trialCoordinates, trialMessage } from './hard-learner-plan.mjs';
+import { learnerJsonExample, parseLearner } from '../contracts/learner/schema.mjs';
+import { advanceFidelityStopState, assessFidelity, auditContext, fidelityIdentityVersion, fidelityPlan, fidelityStopRules, frozenPrefix,
+  groupPath, initialFidelityStopState, learnerOutputProtocol, learnerTask, plannedReplyNumber, registrationFile, trialCoordinates, trialMessage } from './hard-learner-plan.mjs';
 
 const responseText = response => response.content.filter(block => block.type === 'text').map(block => block.text).join('');
+const sameFailureRows = (actual, expected) => Array.isArray(actual) && actual.length === expected.length && actual.every((row, index) =>
+  row.path === expected[index].path && row.kind === expected[index].kind && row.attempt === expected[index].attempt
+    && row.attemptPath === expected[index].attemptPath);
 const originalAuditPromptSha256 = '38b1571b594c4b7daa2d8668aa8dc02d4f69a54260b52ed07629ba00afcf87b5';
 
 export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, requests, checkArtifact, invalid }) {
@@ -28,12 +32,17 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
     const manifest = json('manifest.json');
     const result = json('result.json');
     const { mode, identity, identityId, limits } = manifest;
+    const legacyIdentity = identity.version === 'hard-learner-fidelity-v1';
+    const currentIdentity = identity.version === fidelityIdentityVersion;
     requireThat([manifest, result, evaluation].every(row => row.scenario === scenario && row.id === id && row.mode === start.mode)
       && start.parameters.values.scenario === scenario, 'scenario, mode or run ID mismatch');
     requireThat(same(manifest.writer, { pid: start.pid, startedAt: start.startedAt }), 'manifest writer PID or start time mismatch');
-    requireThat(identity.version === fidelityIdentityVersion && identityId === evaluation.identityId && identityId === hash({ mode, scenario, identity })
+    requireThat((legacyIdentity || currentIdentity) && identityId === evaluation.identityId && identityId === hash({ mode, scenario, identity })
       && same(identity.planned, fidelityPlan) && same(identity.limits, limits), 'identity or plan mismatch');
+    if (currentIdentity) requireThat(same(identity.learnerOutputProtocol, learnerOutputProtocol)
+      && same(identity.stopRules, fidelityStopRules), 'learner output protocol or stop rules identity mismatch');
     const auditRoute = identity.routes?.fidelity_audit;
+    const learnerRoute = identity.routes?.learner;
     const parseAudit = identity.calls?.fidelity_audit?.version === 'hard-learner-audit-v4' ? parseFidelityEvidence : parseFidelityAudit;
     const legacyAudit = identity.calls?.fidelity_audit?.version === 'hard-learner-audit-v1' && auditRoute?.id === 'openai/gpt-4.1-mini';
     const auditPromptSha256 = ['hard-learner-audit-v1', 'hard-learner-audit-v2'].includes(identity.calls?.fidelity_audit?.version)
@@ -45,6 +54,7 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
         && identity.preregistrationSha256, 'real fidelity provenance mismatch');
       requireThat(auditRoute?.provider === 'openrouter' && typeof auditRoute.id === 'string'
         && (legacyAudit || typeof auditRoute.endpoint === 'string' && auditRoute.endpoint.length > 0), 'missing audit route identity');
+      if (currentIdentity) requireThat(learnerRoute?.provider === 'deepseek' && learnerRoute.responseFormat === 'json_object', 'missing learner JSON mode route identity');
     }
     if (identity.preregistrationSha256) requireThat(hash(read(registrationFile)) === identity.preregistrationSha256
       && identity.preregistrationSha256 === start.parameters.values.preregistration_sha256, 'preregistration mismatch');
@@ -54,12 +64,15 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
     const sent = requests.filter(event => event.type === 'request_start').map(event => event.callId);
     const attempts = [];
     let outputTokens = 0, cursor = 0;
+    let stopState = initialFidelityStopState(), observedStopRule = null;
+    const formatCleanupStats = { attempts: 0, operations: {} };
     function lastSuccess(folder, role, matchesPrompt, expectedView) {
       const telemetry = json(`${folder}/telemetry.json`, true);
-      if (!telemetry) return undefined;
+      if (!telemetry) return {};
       const limit = role === 'learner' ? policy.learner.maxTokens : fidelityPolicy.maxTokens;
-      requireThat(Array.isArray(telemetry) && telemetry.length <= policy.retries + 1, `attempt count mismatch at ${folder}`);
-      let success;
+      const retries = currentIdentity ? fidelityStopRules.maxReplyRetries : policy.retries;
+      requireThat(Array.isArray(telemetry) && telemetry.length <= retries + 1, `attempt count mismatch at ${folder}`);
+      let success, lastFailure, callStop;
       for (const [i, row] of telemetry.entries()) {
         const attemptPath = `${folder}/calls/${role}-${rounds}-1-${i + 1}.json`;
         const raw = json(attemptPath);
@@ -68,6 +81,37 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
         requireThat(Number.isSafeInteger(row.requestLimit) && row.requestLimit > 0 && row.requestLimit <= limit, `bad output limit at ${attemptPath}`);
         requireThat(matchesPrompt(raw.context.systemPrompt) && same(JSON.parse(raw.context.messages[0].content), expectedView), `request evidence differs at ${attemptPath}`);
         const callId = `${folder}:${role}:${rounds}:1:${i + 1}`;
+        if (currentIdentity) {
+          requireThat(!observedStopRule, `unexpected attempt after the batch stop at ${attemptPath}`);
+          const callOutcome = advanceFidelityStopState(stopState, { type: 'call', failureKind: row.failureKind });
+          stopState = callOutcome.state;
+          callStop = callOutcome.stopRule;
+          observedStopRule ??= callStop;
+        }
+        if (currentIdentity && role === 'learner') {
+          requireThat(Array.isArray(raw.formatCleanups), `learner cleanup record missing at ${attemptPath}`);
+          if (mode === 'real' && sent.includes(callId)) {
+            const { model, max_tokens, max_completion_tokens, response_format } = raw.outbound ?? {};
+            requireThat(row.model === learnerRoute.id && row.provider === learnerRoute.provider && model === learnerRoute.id
+              && (max_tokens ?? max_completion_tokens) === row.requestLimit && response_format?.type === 'json_object', `bad learner outbound JSON mode at ${attemptPath}`);
+          }
+          const metadata = { allowBoundedCleanup: true, formatCleanups: [] };
+          const parseFailure = row.failureKind === 'simulator_generation_contract';
+          const normalBody = raw.response?.stopReason === 'stop' && !raw.response.content.some(block => block.type === 'toolCall');
+          if ((!row.failureKind || parseFailure) && normalBody) {
+            let detail;
+            try { parseLearner(responseText(raw.response), undefined, undefined, metadata); }
+            catch (error) { detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message; }
+            requireThat((row.detail ?? undefined) === detail && parseFailure === (detail !== undefined), `learner parse outcome does not replay at ${attemptPath}`);
+          }
+          requireThat(same(raw.formatCleanups, metadata.formatCleanups), `learner format cleanup does not replay at ${attemptPath}`);
+          if (raw.formatCleanups.length) {
+            formatCleanupStats.attempts++;
+            for (const cleanup of raw.formatCleanups) {
+              formatCleanupStats.operations[cleanup.kind] = (formatCleanupStats.operations[cleanup.kind] ?? 0) + 1;
+            }
+          }
+        }
         if (role === 'fidelity_audit' && mode === 'real' && !legacyAudit && sent.includes(callId)) {
           const { model, max_tokens, max_completion_tokens, provider, response_format, reasoning } = raw.outbound ?? {};
           requireThat(row.model === auditRoute.id && row.provider === auditRoute.provider && model === auditRoute.id && row.auditMode === 'json_schema'
@@ -77,46 +121,85 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
         }
         attempts.push(callId);
         outputTokens += limit;
-        if (!row.failureKind) {
+        if (row.failureKind) lastFailure = { kind: row.failureKind, attempt: row.attempt, attemptPath: row.attemptPath, detail: row.detail };
+        else {
           requireThat(i === telemetry.length - 1 && raw.response.stopReason === 'stop' && (mode === 'offline' || sent.includes(callId)), `bad successful attempt at ${attemptPath}`);
           success = responseText(raw.response);
+          lastFailure = undefined;
         }
       }
-      return success;
+      const terminalFailure = lastFailure && lastFailure.kind !== 'configuration' && (callStop || telemetry.length === retries + 1);
+      return { success, failure: terminalFailure ? lastFailure : undefined };
     }
 
+    const observedFailedReplies = [], observedAuditFailures = [];
     for (const group of fidelityPlan) {
       const folder = groupPath(group);
       const groupTrials = [];
+      const auditedTrials = [];
       const transcripts = [];
       const task = learnerTask(group.taskId);
       const learnerIdentity = identity.learners[group.profileId];
-      const matchesLearner = prompt => matchesHardProfileIdentity(prompt, task, group.profileId, learnerIdentity);
+      const matchesLearner = prompt => {
+        if (currentIdentity && !prompt.endsWith(learnerJsonExample)) return false;
+        const profilePrompt = currentIdentity ? prompt.slice(0, -learnerJsonExample.length) : prompt;
+        return matchesHardProfileIdentity(profilePrompt, task, group.profileId, learnerIdentity);
+      };
       for (const trial of trialCoordinates(group)) {
         const stored = result.trials[cursor++];
-        const { generated, audit, ...coordinate } = stored;
+        const { generated, audit, failure: replyFailure, ...coordinate } = stored;
         requireThat(typeof generated === 'boolean' && same(coordinate, trial), `trial coordinate mismatch at ${trial.path}`);
+        requireThat(generated || audit === undefined, `audit without a learner reply at ${trial.path}`);
         const prefix = frozenPrefix(id, trial);
         const transcript = json(`${trial.path}/transcript.json`, true);
-        const success = lastSuccess(trial.path, 'learner', matchesLearner, prefix.map(({ role, text }) => ({ role, text })));
-        const expected = success === undefined ? prefix : [...prefix, trialMessage(id, trial, prefix.length, parseLearner(success).text)];
+        const learnerCall = lastSuccess(trial.path, 'learner', matchesLearner, prefix.map(({ role, text }) => ({ role, text })));
+        const success = learnerCall.success;
+        if (currentIdentity && (success !== undefined || learnerCall.failure)) {
+          const replyOutcome = advanceFidelityStopState(stopState, { type: 'reply', failed: success === undefined });
+          stopState = replyOutcome.state;
+          observedStopRule ??= replyOutcome.stopRule;
+        }
+        if (currentIdentity && learnerCall.failure) {
+          requireThat(replyFailure?.path === trial.path && replyFailure.kind === learnerCall.failure?.kind
+            && replyFailure.attempt === learnerCall.failure?.attempt && replyFailure.attemptPath === learnerCall.failure?.attemptPath,
+          `failed learner reply does not match attempts at ${trial.path}`);
+          observedFailedReplies.push(replyFailure);
+        } else requireThat(replyFailure === undefined, `unexpected failed learner reply record at ${trial.path}`);
+        const learnerText = success === undefined ? undefined : parseLearner(success, undefined, undefined,
+          currentIdentity ? { allowBoundedCleanup: true, formatCleanups: [] } : undefined).text;
+        const expected = learnerText === undefined ? prefix : [...prefix, trialMessage(id, trial, prefix.length, learnerText)];
         requireThat(generated === (success !== undefined) && (!transcript && !generated || same(transcript, expected)), `transcript does not replay at ${trial.path}`);
-        if (generated) transcripts.push(transcript);
+        if (generated) {
+          transcripts.push(transcript);
+          auditedTrials.push(stored);
+        }
         groupTrials.push(stored);
       }
       const view = auditContext(group.taskId, transcripts);
-      const success = lastSuccess(folder, 'fidelity_audit', prompt => hash(prompt) === auditPromptSha256, view);
+      const auditCall = lastSuccess(folder, 'fidelity_audit', prompt => hash(prompt) === auditPromptSha256, view);
+      const success = auditCall.success;
       const audit = json(`${folder}/audit.json`, true);
       if (success !== undefined) {
-        requireThat(transcripts.length === groupTrials.length && transcripts.every(messages => messages.length === plannedReplyNumber), `incomplete audit window at ${folder}`);
-        requireThat(same(parseAudit(success, view.samples), audit) && same(audit, groupTrials.map(trial => trial.audit)), `audit cannot be replayed at ${folder}`);
-      } else requireThat(!audit && groupTrials.every(trial => trial.audit === undefined), `audit without completed request at ${folder}`);
+        requireThat(transcripts.length === auditedTrials.length && transcripts.every(messages => messages.length === plannedReplyNumber), `incomplete audit window at ${folder}`);
+        requireThat(same(parseAudit(success, view.samples), audit) && same(audit, auditedTrials.map(trial => trial.audit)), `audit cannot be replayed at ${folder}`);
+      } else {
+        requireThat(!audit && groupTrials.every(trial => trial.audit === undefined), `audit without completed request at ${folder}`);
+        if (currentIdentity && auditCall.failure) {
+          observedAuditFailures.push({ path: folder, ...auditCall.failure });
+        }
+      }
     }
     requireThat(readPaths.size === Object.keys(files).length, 'unexpected fidelity artifact paths');
     requireThat(attempts.length <= limits.maxAttempts && outputTokens <= limits.maxRequestedOutputTokens, 'attempts exceed run limits');
     requireThat(same(sent, attempts.filter(callId => sent.includes(callId))) && requests.every((event, i) =>
       i % 2 ? event.type === 'request_end' && event.requestId === requests[i - 1].requestId : event.type === 'request_start'), 'requests do not match serial attempt evidence');
     requireThat(same(result.assessment, assessFidelity(result.trials)), 'assessment differs from preregistered line');
+    if (currentIdentity) {
+      requireThat(same(result.formatCleanupStats, formatCleanupStats), 'format cleanup summary differs from attempts');
+      requireThat(sameFailureRows(result.failedReplies, observedFailedReplies) && sameFailureRows(result.auditFailures, observedAuditFailures), 'failure lists differ from attempt evidence');
+      requireThat(result.failure?.stopRule === observedStopRule || result.failure?.stopRule === undefined && observedStopRule === null,
+        'batch stop rule differs from attempt evidence');
+    }
     requireThat(result.acceptance === result.trials.every(trial => trial.audit) && result.acceptance === receipt.acceptance, 'completion disagrees with receipts');
   } catch (error) {
     invalid.push(`hard learner verification failed: ${error.message}`);

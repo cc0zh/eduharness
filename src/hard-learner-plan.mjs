@@ -4,7 +4,29 @@ import { message } from '../contracts/core/schema.mjs';
 import { hardProfileIds } from '../contracts/learner/profiles.mjs';
 
 export const registrationFile = 'preregistration.md';
-export const fidelityIdentityVersion = 'hard-learner-fidelity-v1';
+export const fidelityIdentityVersion = 'hard-learner-fidelity-v2';
+export const learnerOutputProtocol = Object.freeze({ responseFormat: 'json_object', cleanup: 'bounded-json-v1', ambiguousControlEscapes: 'reject' });
+export const fidelityStopRules = Object.freeze({ maxReplyRetries: policy.retries, consecutiveProviderFailures: 3, consecutiveReplyFailures: 3, totalReplyFailures: 8 });
+
+export function initialFidelityStopState() {
+  return { consecutiveProviderFailures: 0, consecutiveReplyFailures: 0, totalReplyFailures: 0 };
+}
+
+export function advanceFidelityStopState(state, outcome) {
+  if (outcome.type === 'call') {
+    const consecutiveProviderFailures = outcome.failureKind === 'provider_failure' ? state.consecutiveProviderFailures + 1 : 0;
+    return { state: { ...state, consecutiveProviderFailures },
+      stopRule: consecutiveProviderFailures >= fidelityStopRules.consecutiveProviderFailures ? 'provider_failure_streak' : null };
+  }
+  if (outcome.type === 'reply') {
+    const consecutiveReplyFailures = outcome.failed ? state.consecutiveReplyFailures + 1 : 0;
+    const totalReplyFailures = state.totalReplyFailures + Number(outcome.failed);
+    const stopRule = consecutiveReplyFailures >= fidelityStopRules.consecutiveReplyFailures ? 'consecutive_reply_failures'
+      : totalReplyFailures >= fidelityStopRules.totalReplyFailures ? 'total_reply_failures' : null;
+    return { state: { ...state, consecutiveReplyFailures, totalReplyFailures }, stopRule };
+  }
+  throw new TypeError('unknown fidelity stop outcome');
+}
 
 export const fidelityPlan = [1, 2].flatMap(repetition => Object.keys(developmentTopics).flatMap(taskId =>
   hardProfileIds.map(profileId => ({ repetition, taskId, profileId })),
@@ -22,7 +44,7 @@ export const trialCoordinates = ({ repetition, taskId, profileId, conditions }) 
 export function fidelityBudget() {
   const learner = fidelityPlan.length * fidelityConditions.length;
   const fidelity_audit = fidelityPlan.length;
-  const attempts = policy.retries + 1;
+  const attempts = fidelityStopRules.maxReplyRetries + 1;
   return { typicalCalls: learner + fidelity_audit, logicalCalls: { learner, fidelity_audit },
     maxCalls: attempts * (learner + fidelity_audit),
     maxOutputTokens: attempts * (learner * policy.learner.maxTokens + fidelity_audit * fidelityPolicy.maxTokens) };

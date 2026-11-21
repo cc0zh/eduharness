@@ -18,8 +18,9 @@ E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与�
 
 1. 在干净 HEAD 运行 `npm run check -- --scope=hard-learners`。该检查运行导入边界和不读取题库的测试。收据为 `runs/_receipts/check-hard-learners-<sha>.json`，只准入本场景，不代替全量检查。
 2. 用 `node src/cli.mjs --scenario hard-learner-fidelity --mode real --estimate-only --id <新预检 ID>` 取得零请求预算。写好四条件、预期行为、判线和停线并计算预登记 SHA256。记录正式 ID 和事前授权硬上限。
-3. 使用 `--scenario hard-learner-fidelity --mode real --confirm-cost --id <已登记 ID> --preregistration <文件> --preregistration-sha256 <摘要>` 串行启动。用 `--max-attempts` 和 `--max-requested-output-tokens` 显式传入实跑上限。只需要 `DEEPSEEK_API_KEY` 和 `OPENROUTER_API_KEY`。审核端固定为 `config/e1.mjs` 的 `fidelityRoute`，要求严格 JSON，不发送推理字段或允许回退。账户模型目录不能证明推理访问成功。同类故障到第三次停止。
-4. 运行 `node src/cli.mjs --verify-run <ID>`。核对启动和进程 PID、manifest 写入 PID 与逐调用遥测。`result.json` 的 `acceptance` 表示拿齐 48 条审核，`assessment` 才是画像判线。每份审核都绑定 `r<遍次>/<题号>/<画像>/<条件>/transcript.json` 的 #8、#9。固定前八条不是新生成。不要把 faux 夹具当保真证据。
+3. 串行执行 `node src/cli.mjs --scenario hard-learner-fidelity --mode real --confirm-cost --id <已登记 ID> --preregistration <文件> --preregistration-sha256 <摘要>`，用 `--max-attempts` 和 `--max-requested-output-tokens` 指定预登记上限。凭据从 `DEEPSEEK_API_KEY` 和 `OPENROUTER_API_KEY` 读取。DeepSeek 学生请求使用 `response_format: {type:"json_object"}`，系统提示含 JSON 示例。调用原件记录围栏、首尾文字和可逐字恢复的反斜线修复。歧义转义作为回复失败记录。
+4. 单条学生或审核回复最多重试 2 次。整批按计划 48 条学生回复为分母：连续 3 次供应商级/传输级调用失败、连续 3 条学生回复失败、或累计学生回复失败达到 8 条，任一即停。失败回复逐条列出，不计画像行为分母、不算画像行为失败；审核只覆盖有效学生回复，审核回复故障另列。遇到该三条停线后保留原件，不重启或补稿。审核端固定为 `config/e1.mjs` 的 `fidelityRoute`，要求严格 JSON，不发送推理字段或允许回退。账户模型目录不能证明推理访问成功。
+5. 运行 `node src/cli.mjs --verify-run <ID>`。核对启动和进程 PID、manifest 写入 PID 与逐调用遥测。`result.json` 的 `acceptance` 表示拿齐 48 条审核，`assessment` 才是画像判线。每份审核都绑定 `r<遍次>/<题号>/<画像>/<条件>/transcript.json` 的 #8、#9。固定前八条不是新生成。不要把 faux 夹具当保真证据。
 
 E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --judge-cell no_teach`。运行器把冻结对话与源裁判请求的消息和绑定核对，即使源裁判未产出分数也可复核。新 run 单列裁判结果，完整 E2 验收仍按场景卡核对。
 

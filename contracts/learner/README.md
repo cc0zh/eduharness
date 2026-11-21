@@ -1,6 +1,6 @@
 # Learner
 
-`schema.mjs` 校验单个 JSON 文档，不截取看似有效的前缀。话语进入公开对话，画像不进入教师输入。
+`schema.mjs` 默认校验单个完整 JSON 文档，不截取看似有效的前缀。仅 `hard-learner-fidelity` 学生调用启用 DeepSeek `json_object` mode 和有界格式清理：可去除围栏及首尾多余文字，只修复语法无效且可逆的字符串反斜线；与合法 JSON 控制 escape 歧义的内容作为失败，不猜测。每次清理记入对应调用原件。其它 learner 路径仍使用严格解析。话语进入公开对话，画像不进入教师输入。
 
 `profiles.mjs` 定义三种高压学生。`executeCell({ learnerVariant })` 显式选择 `stubborn`、`answer-seeker` 或 `pretender`。省略该参数沿用原提示和任务画像，不改回归集。高压画像身份由私有提示与行为规则散列。题目的已知、未知与开场仍由输入任务所有。学生只从私有画像与既有公开话语推断下一步，不持久化掌握度，不插入额外消息。完整对话仍为九条。从第三次学生回复 #7 开始计末三分之一。
 

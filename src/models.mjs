@@ -3,6 +3,7 @@ import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
 import { fidelityAuditSchema } from '../contracts/learner/fidelity.mjs';
+import { learnerJsonExample } from '../contracts/learner/schema.mjs';
 import { fidelityPolicy, fidelityRoute, policy, routes } from '../config/e1.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
@@ -90,12 +91,17 @@ export class Models {
   #recorder;
   #cell;
   #judgeTimeoutMs;
+  #learnerJsonMode;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, learnerJsonMode = false }) {
     if (judgeTimeoutMs !== undefined && (roles.length !== 1 || roles[0] !== 'judge'
       || !Number.isSafeInteger(judgeTimeoutMs) || judgeTimeoutMs < 1 || judgeTimeoutMs > 2_147_483_647)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'positive judge timeout override requires a judge-only run');
     }
+    if (typeof learnerJsonMode !== 'boolean' || learnerJsonMode && !roles.includes('learner')) {
+      throw failure('configuration', { role: 'learner', turn: 0, call: 0 }, 'learner JSON mode requires the learner role');
+    }
+    this.#learnerJsonMode = learnerJsonMode;
     this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
@@ -162,6 +168,8 @@ export class Models {
     const canonical = roleConfig(role);
     const config = canonical === 'fidelity_audit' ? fidelityPolicy : policy[canonical];
     const model = this.model(role);
+    const learnerJsonMode = this.#learnerJsonMode && canonical === 'learner';
+    const learnerRequest = learnerJsonMode && { ...context, systemPrompt: `${context.systemPrompt}${learnerJsonExample}` };
     const strictAudit = canonical === 'fidelity_audit' && model.provider === fidelityRoute.provider;
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure', fidelity_audit: 'fidelity_audit_contract' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? policy.timeoutMs;
@@ -169,7 +177,7 @@ export class Models {
     for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
       const coordinates = { role, turn, call, attempt };
       this.#reserve?.(coordinates, config.maxTokens);
-      const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
+      const request = learnerRequest || (priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context);
       const raw = { ...coordinates, context: request, ...(scope.binding && { binding:scope.binding }) };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
       const startedAt = new Date().toISOString();
@@ -198,6 +206,18 @@ export class Models {
         const response = await send(input, init);
         if (!response.ok) auditError = await auditErrorFields(response);
         return response;
+      } : learnerJsonMode && model.provider === routes.learner.provider ? (input, init) => {
+        const body = JSON.parse(init.body);
+        const cap = body.max_tokens ?? body.max_completion_tokens;
+        if (body.model !== routes.learner.id || cap !== requestLimit || body.response_format?.type !== 'json_object'
+          || !body.messages.some(message => message.role === 'system' && message.content === request.systemPrompt)) {
+          outboundRejection = 'outbound learner JSON mode, prompt or budget mismatch';
+          throw new Error(outboundRejection);
+        }
+        raw.outbound = { model: body.model,
+          ...(body.max_completion_tokens === undefined ? { max_tokens: cap } : { max_completion_tokens: cap }),
+          response_format: body.response_format };
+        return send(input, init);
       } : schema ? (input, init) => {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
@@ -236,6 +256,13 @@ export class Models {
             provider: { ...payload.provider, require_parameters: true },
             response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
           };
+          if (learnerJsonMode) {
+            if (model.provider !== routes.learner.provider) {
+              outboundRejection = 'learner JSON mode requires the configured DeepSeek route';
+              throw new Error(outboundRejection);
+            }
+            return { ...payload, response_format: { type: 'json_object' } };
+          }
         },
         onResponse({ status }) { httpStatus = status; },
         onProviderStreamEvent(chunk) {
@@ -247,6 +274,8 @@ export class Models {
       };
       let response, failureKind, parsed, detail;
       const events = [], originalOrder = [];
+      const parseMetadata = learnerJsonMode
+        ? { allowBoundedCleanup: true, formatCleanups: [] } : {};
       try {
         if (stream) {
           const source = this.#pi.streamSimple(model, request, options);
@@ -264,7 +293,7 @@ export class Models {
         if (!failureKind) {
           try {
             if (!stream && (response.stopReason !== 'stop' || response.content.some(b => b.type === 'toolCall'))) throw new Error('JSON generation did not terminate normally');
-            parsed = parse(text, response, originalOrder);
+            parsed = parse(text, response, originalOrder, parseMetadata);
           }
           catch (error) { failureKind = contractFailure; detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message; }
         }
@@ -277,9 +306,11 @@ export class Models {
         detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
       }
       const usage = failureKind === 'provider_failure' && !response?.usage?.totalTokens ? null : response?.usage ?? null;
-      const attemptPath = this.#save({
+      const rawAttempt = {
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
-      }, {
+      };
+      if (learnerJsonMode) rawAttempt.formatCleanups = parseMetadata.formatCleanups ?? [];
+      const attemptPath = this.#save(rawAttempt, {
         ...coordinates, ...this.identity(role), policyVersion: config.version ?? policy.version, requestLimit, finish_reason, httpStatus,
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,

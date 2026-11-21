@@ -6,6 +6,8 @@ import test from 'node:test';
 import { fauxAssistantMessage, fauxText } from '@earendil-works/pi-ai';
 import { hash } from '../contracts/core/schema.mjs';
 import { executeCell } from '../src/run.mjs';
+import { runHardLearners } from '../src/hard-learner-run.mjs';
+import { verifyHardLearnerArtifacts } from '../src/hard-learner-verification.mjs';
 
 function sandbox(t) {
   const parent = resolve('.tmp/scratch/hard-learners');
@@ -73,10 +75,12 @@ test('fidelity replays fixed nine-message histories, binds each audit and detect
   const call = invoke(root, '--scenario', 'hard-learner-fidelity', '--id', 'matrix');
   assert.equal(call.status, 0, call.stderr);
   const manifest = read(root, 'matrix/manifest.json');
-  assert.equal(manifest.identity.version, 'hard-learner-fidelity-v1');
+  assert.equal(manifest.identity.version, 'hard-learner-fidelity-v2');
+  assert.deepEqual(manifest.identity.learnerOutputProtocol, { responseFormat: 'json_object', cleanup: 'bounded-json-v1', ambiguousControlEscapes: 'reject' });
   assert.deepEqual(Object.keys(manifest.identity.learners), expectedProfiles);
   assert.equal(new Set(Object.values(manifest.identity.learners)).size, 3);
   const result = read(root, 'matrix/result.json');
+  assert.deepEqual(result.formatCleanupStats, { attempts: 0, operations: {} });
   assert.equal(result.trials.length, 48);
   assert.deepEqual(new Set(result.trials.map(row => row.taskId)), new Set(['S0-01', 'S0-06']));
   const coordinates = result.trials.map(row => [row.repetition, row.taskId, row.profileId, row.condition].join(':'));
@@ -90,6 +94,7 @@ test('fidelity replays fixed nine-message histories, binds each audit and detect
     assert.deepEqual([row.audit.teacher.n, row.audit.learner.n], [8, 9]);
     assert.ok(publicView[8].text.includes(row.audit.learner.quote));
     const meter = read(root, `${path}/telemetry.json`);
+    assert.deepEqual(read(root, `${path}/calls/learner-4-1-1.json`).formatCleanups, []);
     assert.equal(meter.length, 1);
     assert.equal(meter[0].pid, manifest.writer.pid);
     assert.equal(meter[0].role, 'learner');
@@ -128,7 +133,7 @@ test('the formal matrix sends the validated audit prompt and the clarified prete
   assert.match(profile('targeted'), /If the tutor gives a targeted contrast, work through it/);
   assert.equal(manifest.identity.learners.stubborn, '9a5b8e7256c3885d004eca0ff4ed028448ca42f67b6dfb64ddb4db34c7be1b37');
   assert.equal(manifest.identity.learners['answer-seeker'], 'a0d26c5fb22f753c9be92f905775b408ab06fa0b2ddd31b542cf06b572650f6e');
-  assert.notEqual(manifest.identity.learners.pretender, 'd9dab8e5440f362d0faeb46c6a9ba9f75647bc49f7b200998bd587acae930c41');
+  assert.equal(manifest.identity.learners.pretender, '336e280b91fa46662af62a77f703713c49aea8745a7a3f092d1bc7a1713323f5');
 });
 
 test('fidelity keeps the planned denominators and valid receipts when the shared budget stops the batch', t => {
@@ -171,4 +176,125 @@ test('audit evidence cannot count a tutor quote as new knowledge and keeps a gro
   assert.equal(parse({ ...row, unexplainedClaim: 'A rotated copy has area 81' }).unsupported, true);
   assert.equal(parse({ ...row, correctionWithBasis: false }).progress, 'attempt');
   assert.throws(() => parse({ ...row, unexplainedClaim: 'made-up fact' }), /unbound/);
+});
+
+test('the two-layer stop policy counts calls and failed learner replies separately', async () => {
+  const plan = await import('../src/hard-learner-plan.mjs');
+  const initial = plan.initialFidelityStopState?.() ?? { consecutiveProviderFailures: 0, consecutiveReplyFailures: 0, totalReplyFailures: 0 };
+  assert.equal(plan.fidelityStopRules?.maxReplyRetries, 2);
+  let callState = initial;
+  for (let i = 0; i < 3; i++) {
+    const result = plan.advanceFidelityStopState?.(callState, { type: 'call', failureKind: 'provider_failure' });
+    assert.deepEqual(result, { state: { ...callState, consecutiveProviderFailures: i + 1 }, stopRule: i === 2 ? 'provider_failure_streak' : null });
+    callState = result.state;
+  }
+  const callReset = plan.advanceFidelityStopState?.({ ...initial, consecutiveProviderFailures: 2 }, { type: 'call', failureKind: 'simulator_generation_contract' });
+  assert.deepEqual(callReset, { state: initial, stopRule: null });
+
+  let replyState = initial;
+  for (let i = 0; i < 2; i++) {
+    const result = plan.advanceFidelityStopState?.(replyState, { type: 'reply', failed: true });
+    assert.equal(result.stopRule, null);
+    replyState = result.state;
+  }
+  const replyReset = plan.advanceFidelityStopState?.(replyState, { type: 'reply', failed: false });
+  assert.deepEqual(replyReset.state, { ...initial, totalReplyFailures: 2 });
+  replyState = replyReset.state;
+  for (let i = 0; i < 3; i++) {
+    const result = plan.advanceFidelityStopState?.(replyState, { type: 'reply', failed: true });
+    assert.equal(result.stopRule, i === 2 ? 'consecutive_reply_failures' : null);
+    replyState = result.state;
+  }
+
+  let cumulative = initial;
+  for (let i = 0; i < 7; i++) {
+    cumulative = plan.advanceFidelityStopState?.(cumulative, { type: 'reply', failed: true }).state;
+    cumulative = plan.advanceFidelityStopState?.(cumulative, { type: 'reply', failed: false }).state;
+  }
+  const eighth = plan.advanceFidelityStopState?.(cumulative, { type: 'reply', failed: true });
+  assert.equal(eighth.state.totalReplyFailures, 8);
+  assert.equal(eighth.stopRule, 'total_reply_failures');
+});
+
+test('hard learner run continues after individual reply failures and stops on three failed replies', async t => {
+  const env = { DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY, OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY };
+  process.env.DEEPSEEK_API_KEY = 'learner-stop-canary';
+  process.env.OPENROUTER_API_KEY = 'audit-stop-canary';
+  t.after(() => {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const root = sandbox(t), outbound = [], events = [];
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    outbound.push(JSON.parse(init.body));
+    const chunk = { id: `learner-stop-${outbound.length}`, provider: 'DeepSeek', choices: [{ index: 0,
+      delta: { content: '{"text":7}' }, finish_reason: 'stop' }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+  });
+  const registration = Buffer.from('registered test input');
+  const now = new Date().toISOString();
+  const checkReceipt = { head: 'a'.repeat(40), scope: 'hard-learners' };
+  let evaluation;
+  const start = { runId: 'reply-stop', head: checkReceipt.head, clean: true, mode: 'real', pid: process.pid, startedAt: now,
+    parameters: { flags: ['--confirm-cost'], values: { scenario: 'hard-learner-fidelity', preregistration_sha256: hash(registration) } } };
+  const recorder = { start, append: event => events.push(event), publishEvaluation: value => { evaluation = value; } };
+  const result = await runHardLearners({ id: 'reply-stop', root, mode: 'real',
+    limits: { maxAttempts: 180, maxRequestedOutputTokens: 737280 },
+    checkReceipt, recorder,
+    registrationDigest: hash(registration) }, registration);
+  assert.equal(outbound.length, 9);
+  assert.ok(outbound.every(payload => payload.response_format?.type === 'json_object'));
+  assert.equal(result.failure.stopRule, 'consecutive_reply_failures');
+  assert.deepEqual(result.failedReplies.map(row => row.path), [
+    'r1/S0-01/stubborn/repeat', 'r1/S0-01/stubborn/answer', 'r1/S0-01/stubborn/targeted',
+  ]);
+  assert.equal(result.generated, 0);
+  assert.equal(result.assessment.stubborn.conditions.repeat.audited, 0);
+  assert.equal(result.assessment.stubborn.verdict, '不可用');
+  const invalid = [];
+  verifyHardLearnerArtifacts({ id: 'reply-stop', start, receipt: { acceptance: false }, evaluation, requests: events,
+    checkArtifact(path, expected) {
+      const bytes = readFileSync(join(root, 'reply-stop', path));
+      return hash(bytes) === expected ? bytes : null;
+    }, invalid });
+  assert.deepEqual(invalid, []);
+});
+
+test('three consecutive provider failures stop on the third call and verify against telemetry', async t => {
+  const env = { DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY, OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY };
+  process.env.DEEPSEEK_API_KEY = 'learner-provider-stop-canary';
+  process.env.OPENROUTER_API_KEY = 'audit-provider-stop-canary';
+  t.after(() => {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const root = sandbox(t), outbound = [], events = [];
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    outbound.push(JSON.parse(init.body));
+    return Response.json({ error: { message: 'temporary provider failure' } }, { status: 503 });
+  });
+  const registration = Buffer.from('registered provider failure input');
+  const now = new Date().toISOString(), checkReceipt = { head: 'b'.repeat(40), scope: 'hard-learners' };
+  let evaluation;
+  const start = { runId: 'provider-stop', head: checkReceipt.head, clean: true, mode: 'real', pid: process.pid, startedAt: now,
+    parameters: { flags: ['--confirm-cost'], values: { scenario: 'hard-learner-fidelity', preregistration_sha256: hash(registration) } } };
+  const recorder = { start, append: event => events.push(event), publishEvaluation: value => { evaluation = value; } };
+  const result = await runHardLearners({ id: 'provider-stop', root, mode: 'real',
+    limits: { maxAttempts: 180, maxRequestedOutputTokens: 737280 }, checkReceipt, recorder,
+    registrationDigest: hash(registration) }, registration);
+  assert.equal(outbound.length, 3);
+  assert.equal(result.failure.stopRule, 'provider_failure_streak');
+  assert.equal(result.failedReplies.length, 1);
+  assert.equal(result.failedReplies[0].attempt, 3);
+  const invalid = [];
+  verifyHardLearnerArtifacts({ id: 'provider-stop', start, receipt: { acceptance: false }, evaluation, requests: events,
+    checkArtifact(path, expected) {
+      const bytes = readFileSync(join(root, 'provider-stop', path));
+      return hash(bytes) === expected ? bytes : null;
+    }, invalid });
+  assert.deepEqual(invalid, []);
 });

@@ -138,7 +138,7 @@ if (option('--verify-run') >= 0) {
         emit(rulerRunner ? rulerRunner.publicRulerResult(result) : result);
         if (!result.acceptance) {
           const problem = result.failure ?? result.cells?.find(cell => cell.failure)?.failure;
-          if (fidelityRunner) console.error(`${problem.kind} at ${problem.path}: ${problem.detail}`);
+          if (fidelityRunner) console.error(problem ? `${problem.stopRule ?? problem.kind} at ${problem.path}: ${problem.detail}` : `hard-learner-fidelity audited ${result.audited}/48 replies`);
           else if (s1Runner) console.error(problem ? `${problem.kind} at ${result.cells.at(-1).repetition}/${result.cells.at(-1).id}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
           else if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
           else console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);
