@@ -48,6 +48,8 @@ test('a hard variant reaches only the learner while the teacher sees the same pu
   });
   const learner = read(runDir, 'no_teach/calls/learner-4-1-1.json');
   assert.match(learner.context.systemPrompt, /answer-seeker/);
+  assert.match(learner.context.systemPrompt, /latest tutor turn/);
+  assert.match(learner.context.systemPrompt, /a past invitation is not a new task/);
   assert.match(learner.context.systemPrompt, /private-canary/);
   assert.doesNotMatch(JSON.stringify(read(runDir, 'no_teach/calls/teacher-4-1-1.json').context), /private-canary|answer-seeker|private rule/);
   assert.doesNotMatch(JSON.stringify(messages), /private-canary|answer-seeker|private rule/);
@@ -99,6 +101,10 @@ test('fidelity replays fixed nine-message histories, binds each audit and detect
   assert.match(audit.context.systemPrompt, /Apply the same labels to equivalent evidence/);
   const auditInput = JSON.parse(audit.context.messages[0].content);
   assert.deepEqual(Object.keys(auditInput).sort(), ['known', 'samples', 'unknown']);
+  const privatePrompt = (profile, condition) => read(root, `matrix/r1/S0-01/${profile}/${condition}/calls/learner-4-1-1.json`).context.systemPrompt;
+  assert.match(privatePrompt('stubborn', 'independent'), /do not construct or test a new counterexample on your own/);
+  assert.match(privatePrompt('stubborn', 'targeted'), /say what fails and why/);
+  assert.match(privatePrompt('pretender', 'answer'), /keep your confusion private until the tutor checks/);
   assert.equal(invoke(root, '--verify-run', 'matrix').body.verified, true);
   const changed = `${result.trials[0].path}/calls/learner-4-1-1.json`;
   writeFileSync(join(root, 'matrix', changed), '{}');

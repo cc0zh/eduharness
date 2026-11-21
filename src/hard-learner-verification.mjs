@@ -3,7 +3,7 @@ import { fidelityPolicy, policy, rounds } from '../config/e1.mjs';
 import { hardLearnerCheckScope, hardLearnerScenario as scenario } from '../config/hard-learners.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { parseFidelityAudit, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
-import { learnerPrompt } from '../contracts/learner/profiles.mjs';
+import { matchesHardProfileIdentity } from '../contracts/learner/profiles.mjs';
 import { parseLearner } from '../contracts/learner/schema.mjs';
 import { assessFidelity, auditContext, fidelityIdentityVersion, fidelityPlan, frozenPrefix, groupPath, learnerTask, plannedReplyNumber, registrationFile, trialCoordinates, trialMessage } from './hard-learner-plan.mjs';
 
@@ -54,7 +54,7 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
     const sent = requests.filter(event => event.type === 'request_start').map(event => event.callId);
     const attempts = [];
     let outputTokens = 0, cursor = 0;
-    function lastSuccess(folder, role, expectedPromptSha256, expectedView) {
+    function lastSuccess(folder, role, matchesPrompt, expectedView) {
       const telemetry = json(`${folder}/telemetry.json`, true);
       if (!telemetry) return undefined;
       const limit = role === 'learner' ? policy.learner.maxTokens : fidelityPolicy.maxTokens;
@@ -66,7 +66,7 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
         requireThat(row.pid === start.pid && raw.pid === start.pid && row.attemptPath === attemptPath
           && [raw, row].every(attempt => attempt.role === role && attempt.turn === rounds && attempt.call === 1 && attempt.attempt === i + 1), `attempt coordinate or PID mismatch at ${attemptPath}`);
         requireThat(Number.isSafeInteger(row.requestLimit) && row.requestLimit > 0 && row.requestLimit <= limit, `bad output limit at ${attemptPath}`);
-        requireThat(hash(raw.context.systemPrompt) === expectedPromptSha256 && same(JSON.parse(raw.context.messages[0].content), expectedView), `request evidence differs at ${attemptPath}`);
+        requireThat(matchesPrompt(raw.context.systemPrompt) && same(JSON.parse(raw.context.messages[0].content), expectedView), `request evidence differs at ${attemptPath}`);
         const callId = `${folder}:${role}:${rounds}:1:${i + 1}`;
         if (role === 'fidelity_audit' && mode === 'real' && !legacyAudit && sent.includes(callId)) {
           const { model, max_tokens, max_completion_tokens, provider, response_format, reasoning } = raw.outbound ?? {};
@@ -89,21 +89,23 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
       const folder = groupPath(group);
       const groupTrials = [];
       const transcripts = [];
-      const promptSha256 = hash(learnerPrompt(learnerTask(group.taskId), group.profileId));
+      const task = learnerTask(group.taskId);
+      const learnerIdentity = identity.learners[group.profileId];
+      const matchesLearner = prompt => matchesHardProfileIdentity(prompt, task, group.profileId, learnerIdentity);
       for (const trial of trialCoordinates(group)) {
         const stored = result.trials[cursor++];
         const { generated, audit, ...coordinate } = stored;
         requireThat(typeof generated === 'boolean' && same(coordinate, trial), `trial coordinate mismatch at ${trial.path}`);
         const prefix = frozenPrefix(id, trial);
         const transcript = json(`${trial.path}/transcript.json`, true);
-        const success = lastSuccess(trial.path, 'learner', promptSha256, prefix.map(({ role, text }) => ({ role, text })));
+        const success = lastSuccess(trial.path, 'learner', matchesLearner, prefix.map(({ role, text }) => ({ role, text })));
         const expected = success === undefined ? prefix : [...prefix, trialMessage(id, trial, prefix.length, parseLearner(success).text)];
         requireThat(generated === (success !== undefined) && (!transcript && !generated || same(transcript, expected)), `transcript does not replay at ${trial.path}`);
         if (generated) transcripts.push(transcript);
         groupTrials.push(stored);
       }
       const view = auditContext(group.taskId, transcripts);
-      const success = lastSuccess(folder, 'fidelity_audit', auditPromptSha256, view);
+      const success = lastSuccess(folder, 'fidelity_audit', prompt => hash(prompt) === auditPromptSha256, view);
       const audit = json(`${folder}/audit.json`, true);
       if (success !== undefined) {
         requireThat(transcripts.length === groupTrials.length && transcripts.every(messages => messages.length === plannedReplyNumber), `incomplete audit window at ${folder}`);
