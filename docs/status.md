@@ -1,5 +1,21 @@
 # 当前状态
 
+<a name="stage2a-audit-validation-rerun"></a>
+
+## 阶段 2a 审核验证与正式重跑停线（20261121）
+
+**审核验证通过，正式小样按停线退出。第三轮结论和判线保持原样。** Qwen 审核对 16 条冻结构造样本两遍均为 16/16 四字段全对，跨遍一致 16/16。之前提示 v0 为 10/16、8/16、14/16；v1 为 14/16、14/16、16/16，均未过 15/16 线。本批样本曾用于两次提示修订，验证结论仅限这 16 条。[全版本报告](../runs/stage2a-audit-validation-2/audit-validation-report.md) · [构造真值和预登记](../.tmp/scratch/hard-learners/audit-validation/preregistration.md)
+
+审核复审 v2/v3/v4 整条一致率分别为 10/12、9/12 和 11/12。v2 与 v4 的共同 11 条都同判 10 条。v4 的构造验证通过，但只支持这批刻意构造的样本，不能证明审核对所有回复一致或正确。校准结果及限制见[本地记录](../.tmp/scratch/hard-learners/progress.md)。
+
+审核通过后仅修改假装懂了型。给答案时要有可识别的理解表态；独立解释时先尝试、暴露原误解所在的缺口，并让这个缺口保持未解。新提示及判线沿用 v4 审核和冻结门槛。单轮正式小样只完成 25/48 条生成和 24/48 条审核，第二遍 S0-01 顽固误解型独立解释发生同类 JSON 故障停线。因此三类本轮均记 **不可用，正式小样未完成**。这不意味着已审核的半批行为都不合格。
+
+`stage2a-hard-learners-04` 第三次 `simulator_generation_contract` / `invalid JSON document` 故障在 `r2/S0-01/stubborn/independent` 的第二次尝试停止；此前 `r1/S0-06/stubborn/targeted` 已有一次同类失败。未重启或换模型。进程退出 1、PID `43448`、34/72 请求、139,264/294,912 输出请求额度、实报 45,950 token、无用量缺报。`--verify-run` 中 `verified=true` 与 `conclusion=complete` 只说明已落盘部分的收据一致；同一结果仍是 `acceptance=false` 且 exit 1，不代表 48 条矩阵完成。[报告、逐条证据及部分分母](../runs/stage2a-hard-learners-04/hard-learner-fidelity-report.md) · [收据核验](../runs/stage2a-hard-learners-04/verify-run.json) · [正式预登记](../runs/stage2a-hard-learners-04/preregistration.md)
+
+干净 `2a63f11` 的范围检查通过 23 项，预检 `stage2a-hard-learners-estimate-05` 为零请求，硬上限 72 次和 294,912 请求输出 token。[范围收据](../runs/_receipts/check-hard-learners-2a63f11134217eedbc7148eab22e0aabd5425574.json) · [预检收据](../runs/_receipts/stage2a-hard-learners-estimate-05.process.json)
+
+本轮画像修改次数已用完。审核验证、本轮停线和画像使用结论均已记录。第三轮原报告、判线、画像和 run 原件未改，后续不得在无新决定前重启或追加画像轮次。
+
 <a name="stage2a-hard-learners-revision"></a>
 
 ## 阶段 2a 画像单轮修订与审核校准（20261121）
