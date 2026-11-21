@@ -11,3 +11,6 @@ export const routes = {
   learner: { provider: 'deepseek', id: 'deepseek-flash', key: 'DEEPSEEK_API_KEY' },
   judge: { provider: 'openrouter', id: 'tencent/hy4-flash', key: 'OPENROUTER_API_KEY', responseFormat: 'json_schema' },
 };
+
+export const fidelityRoute = Object.freeze({ provider: 'openrouter', id: 'openai/gpt-4.1-mini', key: 'OPENROUTER_API_KEY' });
+export const fidelityPolicy = Object.freeze({ version: 'hard-learner-audit-v1', maxTokens: 4096 });

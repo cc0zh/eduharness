@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
-import { routes } from '../config/e1.mjs';
+import { fidelityRoute, routes } from '../config/e1.mjs';
+import { hardLearnerCheckScope } from '../config/hard-learners.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 
 export const checkout = fileURLToPath(new URL('..', import.meta.url));
@@ -13,31 +14,34 @@ export function checkSnapshot(root = checkout, startupFiles = []) {
   const changes = git('status','--porcelain','-z','--untracked-files=all').split('\0').filter(Boolean);
   return { head: git('rev-parse','HEAD').trim(), clean: changes.every(change => allowed.has(change)) };
 }
-const receiptPath = (root, head) => join(root, 'runs', '_receipts', `check-${head}.json`);
+function receiptPath(root, head, scope) {
+  if (scope !== undefined && scope !== hardLearnerCheckScope) throw failure('preflight_failed', {}, 'unknown check scope');
+  return join(root, 'runs', '_receipts', scope ? `check-${scope}-${head}.json` : `check-${head}.json`);
+}
 
-export function publishCheckReceipt(head, passed, root = checkout) {
+export function publishCheckReceipt(head, passed, root = checkout, scope) {
   const current = checkSnapshot(root);
   if (!current.clean || current.head !== head || !Number.isSafeInteger(passed) || passed < 1) return false;
-  const final = receiptPath(root, head), temp = `${final}.${process.pid}.tmp`;
+  const final = receiptPath(root, head, scope), temp = `${final}.${process.pid}.tmp`;
   mkdirSync(join(root,'runs','_receipts'), {recursive:true});
-  writeFileSync(temp, JSON.stringify({head,passed,command:'npm run check',status:'passed',checkedAt:new Date().toISOString()})+'\n',{flag:'wx'});
+  writeFileSync(temp, JSON.stringify({head,passed,command:'npm run check',scope,status:'passed',checkedAt:new Date().toISOString()})+'\n',{flag:'wx'});
   renameSync(temp,final);
   return true;
 }
 
-export function requireCheckReceipt(root = checkout, startupFiles = []) {
+export function requireCheckReceipt(root = checkout, startupFiles = [], scope) {
   let current, receipt;
   try { current = checkSnapshot(root, startupFiles); }
   catch { throw failure('preflight_failed', {}, 'real mode requires a Git checkout'); }
   if (!current.clean) throw failure('preflight_failed', {}, 'real mode requires a clean Git checkout');
-  try { receipt = JSON.parse(readFileSync(receiptPath(root,current.head),'utf8')); }
-  catch { throw failure('preflight_failed', {}, 'run npm run check on the clean current HEAD before real mode'); }
-  if (receipt?.head !== current.head || receipt.command !== 'npm run check' || receipt.status !== 'passed' || !Number.isSafeInteger(receipt.passed) || receipt.passed < 1) throw failure('preflight_failed', {}, 'invalid check receipt for current HEAD');
+  try { receipt = JSON.parse(readFileSync(receiptPath(root,current.head,scope),'utf8')); }
+  catch { throw failure('preflight_failed', {}, `run npm run check${scope ? ` -- --scope=${scope}` : ''} on the clean current HEAD before real mode`); }
+  if (receipt?.head !== current.head || receipt.command !== 'npm run check' || receipt.scope !== scope || receipt.status !== 'passed' || !Number.isSafeInteger(receipt.passed) || receipt.passed < 1) throw failure('preflight_failed', {}, 'invalid check receipt for current HEAD');
   return receipt;
 }
 
 export function loadCredentials(roles = Object.keys(routes)) {
-  const missing = [...new Set(roles.map(role=>routes[role].key))].filter(key => process.env[key] === undefined);
+  const missing = [...new Set(roles.map(role => (role === 'fidelity_audit' ? fidelityRoute : routes[role]).key))].filter(key => process.env[key] === undefined);
   if (!missing.length) return;
   let values;
   try { values = parseEnv(readFileSync('.env','utf8')); }

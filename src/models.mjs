@@ -2,7 +2,7 @@ import { createAssistantMessageEventStream, createModels, fauxProvider } from '@
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
-import { policy, routes } from '../config/e1.mjs';
+import { fidelityPolicy, fidelityRoute, policy, routes } from '../config/e1.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -91,10 +91,10 @@ export class Models {
       const faux = fauxProvider();
       this.#pi.setProvider(faux.provider);
       faux.setResponses(responses);
-      this.#roles = Object.fromEntries(Object.keys(routes).map(role => [role, faux.getModel()]));
+      this.#roles = Object.fromEntries(roles.map(role => [role, faux.getModel()]));
       return;
     }
-    const selected = roles.map(role=>[role,routes[role]]);
+    const selected = roles.map(role => [role, role === 'fidelity_audit' ? fidelityRoute : routes[role]]);
     this.#keys = Object.fromEntries(selected.map(([role, route]) => {
       const key = process.env[route.key]?.trim();
       if (!key) throw failure('configuration', { role, turn: 0, call: 0 }, `missing ${route.key}`);
@@ -146,9 +146,9 @@ export class Models {
   async #invoke(scope, context, agentOptions, parse, stream, schema) {
     const { role, turn, call } = scope;
     const canonical = roleConfig(role);
-    const config = policy[canonical];
+    const config = canonical === 'fidelity_audit' ? fidelityPolicy : policy[canonical];
     const model = this.model(role);
-    const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
+    const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure', fidelity_audit: 'fidelity_audit_contract' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? policy.timeoutMs;
     let priorValidation;
     for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
@@ -241,7 +241,7 @@ export class Models {
       const attemptPath = this.#save({
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
       }, {
-        ...coordinates, ...this.identity(role), policyVersion: policy.version, requestLimit, finish_reason, httpStatus,
+        ...coordinates, ...this.identity(role), policyVersion: config.version ?? policy.version, requestLimit, finish_reason, httpStatus,
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),

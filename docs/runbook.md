@@ -12,6 +12,15 @@ E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与�
 
 只裁判冒烟可先运行 `node src/cli.mjs --mode real --judge-only e1-real-structured --estimate-only`。取得授权后，移除 `--estimate-only`，加 `--confirm-cost --id <新 ID>`。该模式只读取同一 `--run-root` 下源 run 的完整 `normal` 对话，只需要 `OPENROUTER_API_KEY`。源原件不会改写；新 run 的 `acceptance` 只表示该裁判冒烟通过，不是双格 E1 验收。
 
+## 阶段 2a 高压学生保真
+
+这一路径只读取 `config/hard-learners.mjs` 的两道已暴露训练题，且不加载混合题库。不要使用默认 E1 或无范围的全量检查代替。
+
+1. 在干净 HEAD 运行 `npm run check -- --scope=hard-learners`。该检查运行导入边界和不读取题库的测试。收据为 `runs/_receipts/check-hard-learners-<sha>.json`，只准入本场景，不代替全量检查。
+2. 用 `node src/cli.mjs --scenario hard-learner-fidelity --mode real --estimate-only --id <新预检 ID>` 取得零请求预算。写好四条件、预期行为、判线和停线并计算预登记 SHA256。记录正式 ID 和事前授权硬上限。
+3. 使用 `--scenario hard-learner-fidelity --mode real --confirm-cost --id <已登记 ID> --preregistration <文件> --preregistration-sha256 <摘要>` 串行启动。用 `--max-attempts` 和 `--max-requested-output-tokens` 显式传入实跑上限。只需要 `DEEPSEEK_API_KEY` 和 `OPENROUTER_API_KEY`。同类故障到第三次停止。
+4. 运行 `node src/cli.mjs --verify-run <ID>`。核对启动和进程 PID、manifest 写入 PID 与逐调用遥测。`result.json` 的 `acceptance` 表示拿齐 48 条审核，`assessment` 才是画像判线。每份审核都绑定 `r<遍次>/<题号>/<画像>/<条件>/transcript.json` 的 #8、#9。固定前八条不是新生成。不要把 faux 夹具当保真证据。
+
 E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --judge-cell no_teach`。运行器把冻结对话与源裁判请求的消息和绑定核对，即使源裁判未产出分数也可复核。新 run 单列裁判结果，完整 E2 验收仍按场景卡核对。
 
 使用 `--scenario E2 --judge-only <源 run ID> --judge-cell all` 可用当前尺子补评冻结五格。真实模式要求真实源 run。新 manifest 保存源评测身份、源 manifest 哈希和每格对话哈希，结果对照使用本次裁判给出的分档。OpenRouter 结构化裁判的调用原件保存脱敏 `outbound` 请求字段。将 `reasoning.max_tokens` 与遥测的 `reasoningTokens` 核对。超限时记录「路由未执行上限」，用量缺失时记录未知。

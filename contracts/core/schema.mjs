@@ -5,7 +5,7 @@ export const infraFailure = 'infra_failure';
 export const failureKinds = Object.freeze([
   'invalid_input', 'configuration', 'artifact_io', 'preflight_failed', 'run_conflict', 'budget_exhausted', 'provider_failure', 'output_truncated',
   'reasoning_exhausted_empty', 'output_limit_empty_unconfirmed', 'empty_unconfirmed',
-  'simulator_generation_contract', 'teacher_generation_contract', 'judge_partial_failure',
+  'simulator_generation_contract', 'teacher_generation_contract', 'judge_partial_failure', 'fidelity_audit_contract',
 ]);
 export const nonblank = x => typeof x === 'string' && x.trim().length > 0;
 export const hash = x => createHash('sha256').update(typeof x === 'string' || Buffer.isBuffer(x) ? x : JSON.stringify(x)).digest('hex');
