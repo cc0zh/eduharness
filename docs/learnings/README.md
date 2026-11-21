@@ -17,6 +17,7 @@
 | 2026-11 | [执行环境：费用确认入口要按当次核实](2026-11/20261120-cost-confirmation.md) | 第 4 步进度检查点、A/B 启动收据 |
 | 2026-11 | [选 A/B 目标维先核对同批基线的上升空间](2026-11/20261121-ab-baseline-headroom.md) | A/B `32ed5be`、`harness-ab-v1` |
 | 2026-11 | [预登记判线挡住只看部分指标的判优](2026-11/20261121-preregistered-adoption-gate.md) | A/B `d373cbe`、`32ed5be` |
+| 2026-11 | [公开端点参数表不证明真实请求可用](2026-11/20261121-provider-catalog-is-not-acceptance.md) | ①h `round2-bakeoff-haiku-01`、`round2-bakeoff-gemini-01` |
 | 2026-11 | [构造矩阵零错不代表学生证据充分](2026-11/20261121-construction-truth-coverage.md) | 第二轮 S1 `b0fc4d3`、`s1-binary-round2-01` |
 | 2026-11 | [定向扰动后要核对裁判是否换了引用](2026-11/20261121-counterfactual-anchor-switch.md) | 第二轮 ①b `round2-perturbation-01`，`normal` #4–#7 |
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
