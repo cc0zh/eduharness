@@ -1,7 +1,22 @@
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
+import { binaryQuestions } from '../contracts/judge/binary.mjs';
 
 const response = text => fauxAssistantMessage([fauxText(text)]);
 const learner = text => response(JSON.stringify({ text }));
+export function binaryOfflineResponses(condition) {
+  const fixture = {
+    normal: { M0: [1], M1: [1, 2], M2: [1, 3], S0: [3], A1: [5], P0: [1], P2: [1, 2, 3], V1: [8], V2: [9, 8] },
+    answer_dump: { M0: [1], M1: [1, 2], M3: [1, 2], S3: [2], P0: [1], P1: [2] },
+    lecture: { M0: [1], M1: [1, 2], M3: [1, 2], S3: [2], P0: [1], P1: [2] },
+    sycophant_close: { M0: [1], P0: [1], P1: [2] },
+    no_teach: { M0: [1], S0: [3], P0: [1] },
+  }[condition];
+  const answers = Object.fromEntries(Object.entries(binaryQuestions).map(([id, question]) => [id, {
+    answer: Object.hasOwn(fixture, id),
+    evidence: Object.fromEntries(Object.keys(question.evidence).map((slot, i) => [slot, fixture[id]?.[i] ?? null])),
+  }]));
+  return [response(JSON.stringify({ answers }))];
+}
 export const sampleJudge = (bad, dumping = bad, absent = []) => context => {
   const { rubric, messages } = JSON.parse(context.messages.at(-1).content);
   const selections = [[0, 1, 2], [1, 2, 3], [1, 8], [0, 1], [3, 4], [7, 8]];

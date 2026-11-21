@@ -17,3 +17,5 @@
 未见题测试的 `identity.freeze` 保存冻结决定、尺子来源、训练参考收据、预登记和清单哈希。测试 `identityId` 不沿用训练身份。`result.json` 在每格结束后更新，最终由评测收据锚定。`sentinel` 记录 `no_teach` 首四格的进展及继续决定；`stop` 记录故障题或预算停止条件。测试 run 的 `acceptance` 只表示所有计划格都返回有效总分，通过线另见测试报告。
 
 同一尺子的对照须锁定其余评测条件。改进对照预登记允许变动的 harness 源码和资产，逐字段核对两侧 manifest，只放行这些变化及其派生哈希。当前 `identityId` 包含教师源码哈希，变更 harness 后应保留两侧各自的身份。要纳入新提示文件或工具配置，应证明其内容已进入来源证据。历史 v6 的运行锁、学生变化排除快照及端点指纹不能从现行字段推定。
+
+`S1-binary` 使用 `evaluation-identity-v3`，绑定候选尺子源码、预登记哈希、源 manifest 和五份对话哈希。格子坐标为 `<遍次>/<条件>`。格子的 `scoring` 记录逐维分数和适用集合、`points`、`possible` 与 `rate`。裁判故障格无 `scoring`。运行的 `acceptance` 表示拿齐计划内有效分率；`assessment.passed` 才是预登记方向判线，另存于评测收据的 `passed`。`--verify-run` 核对启动、进程、manifest 和遥测 PID，锚定并重放判决、调用和各格对话。[二元尺子契约](../judge/binary.md)

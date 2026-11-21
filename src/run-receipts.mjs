@@ -3,9 +3,11 @@ import { appendFileSync, closeSync, existsSync, fsyncSync, linkSync, mkdirSync, 
 import { dirname, join, resolve } from 'node:path';
 import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
 import { checkSnapshot, checkout } from './real-preflight.mjs';
+import { s1Scenario } from './s1-binary-plan.mjs';
+import { verifyS1Artifacts } from './s1-binary-verification.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root']);
-const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric']);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256']);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario]);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -25,7 +27,8 @@ function parameterSummary(argv) {
     if (value === undefined) continue;
     const safe = ['--mode', '--scenario', '--phase', '--harness'].includes(name) && safeValues.has(value)
       || name.startsWith('--max-') && /^\d+$/.test(value)
-      || name === '--freeze' && /^[a-f0-9]{40}$/.test(value);
+      || name === '--freeze' && /^[a-f0-9]{40}$/.test(value)
+      || name === '--preregistration-sha256' && sha256(value);
     values[name.slice(2).replaceAll('-', '_')] = safe ? value : '<redacted>';
   }
   return { flags: [...new Set(flags)].sort(), values };
@@ -222,7 +225,8 @@ export function verifyRun(root, id) {
     if (start && start.mode !== 'real' && observedRequestCount) invalid.push('request log contradicts startup mode');
   }
   const evaluationReceiptPath = join(root, '_receipts', `${id}.json`);
-  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || start?.parameters?.values?.scenario === 'ruler-expand' && typeof receipt.acceptance === 'boolean');
+  const launchScenario = start?.parameters?.values?.scenario;
+  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || ['ruler-expand', s1Scenario].includes(launchScenario) && typeof receipt.acceptance === 'boolean');
   if (requiresAnchor && !sha256(receipt.evaluationSha256)) invalid.push('process receipt missing valid evaluationSha256');
   if (receipt && (requiresAnchor || existsSync(evaluationReceiptPath))) {
     const evaluation = load(evaluationReceiptPath, 'evaluation receipt', receipt.evaluationSha256);
@@ -230,18 +234,20 @@ export function verifyRun(root, id) {
       if (evaluation.acceptance !== receipt.acceptance) invalid.push('acceptance differs between evaluation receipt and process receipt');
       if (evaluation.id !== id) invalid.push('evaluation receipt id differs from requested ID');
       if (start && evaluation.mode !== start.mode) invalid.push('mode differs between evaluation receipt and startup record');
-      if (start?.parameters?.values?.scenario === 'ruler-expand' || ['ruler-expand', 'ruler-expand-judge-only'].includes(evaluation.scenario)) {
-        const checkArtifact = (path, expected) => {
-          if (!sha256(expected)) { invalid.push(`${path} missing valid digest`); return; }
-          try {
-            const bytes = readFileSync(join(root, id, path));
-            if (digestBytes(bytes) !== expected) invalid.push(`${path} digest differs from evaluation receipt`);
-            else return bytes;
-          } catch (error) {
-            if (error.code === 'ENOENT') missing.push(path);
-            else invalid.push(`${path} could not be read`);
-          }
-        };
+      const checkArtifact = (path, expected) => {
+        if (!sha256(expected)) { invalid.push(`${path} missing valid digest`); return; }
+        try {
+          const bytes = readFileSync(join(root, id, path));
+          if (digestBytes(bytes) !== expected) invalid.push(`${path} digest differs from evaluation receipt`);
+          else return bytes;
+        } catch (error) {
+          if (error.code === 'ENOENT') missing.push(path);
+          else invalid.push(`${path} could not be read`);
+        }
+      };
+      if (launchScenario === s1Scenario || evaluation.scenario === s1Scenario) {
+        verifyS1Artifacts({ id, start, receipt, evaluation, requests, checkArtifact, invalid });
+      } else if (launchScenario === 'ruler-expand' || ['ruler-expand', 'ruler-expand-judge-only'].includes(evaluation.scenario)) {
         checkArtifact(filenames.manifest, evaluation.manifestSha256);
         const result = checkArtifact(filenames.result, evaluation.resultSha256);
         const judgeOnly = evaluation.scenario === 'ruler-expand-judge-only';

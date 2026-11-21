@@ -5,6 +5,7 @@ import { modes, runId } from '../contracts/artifacts/schema.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 import { checkout, loadCredentials, requireCheckReceipt } from './real-preflight.mjs';
 import { installRunReceiptHandlers, startRunReceipt, verifyRun } from './run-receipts.mjs';
+import { s1Scenario } from './s1-binary-plan.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
@@ -45,7 +46,7 @@ if (option('--verify-run') >= 0) {
   installRunReceiptHandlers(recorder, () => acceptance);
   const { budget, run, scenarioName } = await import('./run.mjs');
 
-  let config, estimate, rulerRunner, ceiling;
+  let config, estimate, rulerRunner, s1Runner, ceiling;
   try {
     const { values } = parseArgs({ options: {
       mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
@@ -53,19 +54,26 @@ if (option('--verify-run') >= 0) {
       'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
       phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
-      harness: { type: 'string' }, 'source-root': { type: 'string' },
+      harness: { type: 'string' }, 'source-root': { type: 'string' }, preregistration: { type: 'string' }, 'preregistration-sha256': { type: 'string' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
-    if (!['E1', 'E2', 'ruler-expand'].includes(values.scenario)) throw new Error('scenario must be E1, E2 or ruler-expand');
+    if (!['E1', 'E2', 'ruler-expand', s1Scenario].includes(values.scenario)) throw new Error('scenario must be E1, E2, ruler-expand or S1-binary');
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
     if (e2Replay ? !['no_teach', 'all'].includes(judgeCell) : judgeCell !== undefined) throw new Error('E2 judge-only requires --judge-cell no_teach or all');
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
     if ((values.harness !== undefined || values['source-root'] !== undefined) && (values.scenario !== 'ruler-expand' || values.phase !== 'ab')) throw new Error('--harness and --source-root require ruler-expand --phase ab');
+    if ((values.preregistration !== undefined || values['preregistration-sha256'] !== undefined) && values.scenario !== s1Scenario) throw new Error('preregistration flags require S1-binary');
     estimate = values['estimate-only'];
     config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };
-    if (values.scenario === 'ruler-expand') {
+    if (values.scenario === s1Scenario) {
+      if (!config.judgeOnly || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('S1-binary only admits --judge-only <frozen E2 run ID>');
+      s1Runner = await import('./s1-binary.mjs');
+      config.registration = values.preregistration;
+      config.registrationDigest = values['preregistration-sha256'];
+      ceiling = s1Runner.s1Budget();
+    } else if (values.scenario === 'ruler-expand') {
       rulerRunner = await import('./ruler-run.mjs');
       config.phase = values.phase;
       if (config.phase === 'test') {
@@ -93,6 +101,7 @@ if (option('--verify-run') >= 0) {
     }
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
+    if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
     if (config.phase === 'test' || config.phase === 'ab') config.prepared = rulerRunner.prepareRulerRun(config, { estimate });
   } catch (error) {
     console.error(error.message);
@@ -103,7 +112,8 @@ if (option('--verify-run') >= 0) {
   if (config && !process.exitCode) {
     try {
       if (conflict) throw failure('run_conflict', {}, `run ID ${id} already has a startup record; this launch was recorded as ${recorder.start.runId}`);
-      if (estimate) emit({ scenario: scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens, ...rulerRunner?.holdoutEstimate(config.prepared) });
+      if (estimate) emit({ scenario: s1Runner ? s1Scenario : scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens,
+        ...(s1Runner && { source: config.prepared.source }), ...rulerRunner?.holdoutEstimate(config.prepared) });
       else {
         const prepared = config.prepared ?? rulerRunner?.prepareRulerRun(config);
         if (config.mode === 'real') {
@@ -111,12 +121,13 @@ if (option('--verify-run') >= 0) {
           if (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head) throw failure('preflight_failed', {}, 'checkout changed after startup');
           loadCredentials(config.judgeOnly ? ['judge'] : config.phase === 'train' ? ['teacher', 'learner'] : undefined);
         }
-        const result = rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
+        const result = s1Runner ? await s1Runner.runS1(config, prepared) : rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
         acceptance = result.acceptance;
         emit(rulerRunner ? rulerRunner.publicRulerResult(result) : result);
         if (!result.acceptance) {
           const problem = result.cells.find(cell => cell.failure)?.failure;
-          if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
+          if (s1Runner) console.error(problem ? `${problem.kind} at ${result.cells.at(-1).repetition}/${result.cells.at(-1).id}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
+          else if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
           else console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);
           process.exitCode = 1;
         }

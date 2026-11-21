@@ -24,7 +24,7 @@ export function evaluationIdentity({ mode, taskBytes, policyBytes, limits, prove
   const pi = Object.fromEntries(Object.entries(pkg.dependencies).filter(([key]) => key.startsWith('@earendil-works/')));
   return {
     version: 'evaluation-identity-v2', pi, runnerVersion: pkg.version,
-    dataset: { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes), ...dataset },
+    dataset: taskBytes ? { revision, tasksSha256: hash(taskBytes), policySha256: hash(policyBytes), ...dataset } : dataset,
     ruler, judgeOutputContract: outputContract, policy, limits, dialogueSource: provenance,
     routes: mode === 'real' ? routes : 'pi-ai-faux',
     sources: Object.fromEntries([...identityFiles, ...sources].map(path => [path, hash(source(path))])),
@@ -66,7 +66,7 @@ function compare(judgements) {
   });
 }
 
-function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
+export function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
   try {
     const dir = join(root,runId(id));
     const manifestBytes = readFileSync(join(dir,filenames.manifest));
@@ -88,16 +88,17 @@ function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
     if (scenario === 'E2' && (original.binding?.runId !== id || original.binding.cell !== cell || original.binding.ruler !== manifest.identity.ruler || hash(original.binding.messageIds) !== hash(messages.map(m=>m.id)))) throw Error('invalid judge binding');
     if ((original.binding?.viewHash ?? request.context_id) !== viewHash || hash(request.messages) !== hash(expectedMessages)) throw Error('source no longer matches the original judge request');
     return {
-      messages,
+      messages, bytes,
       provenance: { runId: id, cell, transcriptSha256: hash(bytes) },
       sourceIdentity: { identityId: manifest.identityId, ruler: manifest.identity?.ruler, manifestSha256: hash(manifestBytes) },
     };
   } catch (error) { throw failure('invalid_input', {}, `judge-only cannot validate the frozen ${scenario} ${cell} dialogue: ${error.message}`); }
 }
 
-export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, judgeOnly, fixtures, improved }) {
-  const cell = coordinate ? `${coordinate.taskId}:${variant}` : variant;
-  const folder = coordinate ? `${coordinate.taskId}/${variant}` : variant;
+export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, frozenBytes, judgeOnly, fixtures, improved, grader = grade }) {
+  const prefix = coordinate?.taskId ?? coordinate?.repetition;
+  const cell = prefix ? `${prefix}:${variant}` : variant;
+  const folder = prefix ? `${prefix}/${variant}` : variant;
   const path = join(runDir, folder);
   mkdirSync(join(path, filenames.raw), { recursive: true });
   const messages = frozen ?? [], events = [], telemetry = [];
@@ -112,7 +113,8 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     push(filenames.telemetry, telemetry, { ...meter, ...coordinate, ...binding, attemptPath, pid: writer.pid });
     return attemptPath;
   };
-  store(filenames.transcript, messages);
+  if (frozenBytes) writeFileSync(join(path, filenames.transcript), frozenBytes);
+  else store(filenames.transcript, messages);
   store(filenames.events, events);
   store(filenames.telemetry, telemetry);
   let turn = 0, role = frozen ? 'judge' : 'teacher', call = 0;
@@ -138,9 +140,9 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     }
     if (generateOnly) return { messages };
     role = 'judge'; turn = rounds; call = 1;
-    const { groups, scores, binding } = await grade(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly });
-    store(filenames.judge, { binding: { ...binding, ...coordinate }, groups });
-    return { groups, scores, binding, messages };
+    const { scores, binding, ...judgement } = await grader(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly });
+    store(filenames.judge, { binding: { ...binding, ...coordinate }, ...judgement });
+    return { ...judgement, scores, binding, messages };
   } catch (error) {
     const classified = error.failure ?? failure('artifact_io', { role, turn, call }, error.message).failure;
     return { failure: coordinate ? { ...classified, ...coordinate } : classified };
