@@ -4,13 +4,21 @@
 
 ## 阶段 2a 高压学生保真（20261121）
 
-**实现已提交，三类画像均不可用于考教师。** `stubborn` 须在针对错因的反例或换表征后才修正；`answer-seeker` 在教师把具体任务还给自己时尝试；`pretender` 在独立检查时露出卡点，再用针对性对照局部修正。省略 `learnerVariant` 时旧提示逐字不变。公共九条与 #7 边界不变。[学生契约](../contracts/learner/README.md)
+**重跑收齐 48/48 条审核，没有画像能用于考教师。** `stubborn` 在针对错因的反例或换表征后才修正；`answer-seeker` 在教师交还具体任务时尝试；`pretender` 在独立检查时露出卡点。有针对性教学时三类都允许局部进步。旧学生提示、公共九条与 #7 边界不变。[学生契约](../contracts/learner/README.md)
 
-`stage2a-hard-learners-01` 只在 S0-01 第一遍顽固误解型生成了四条 #9（4/48）。计划用 GPT-4.1 mini 跨家族审核 DeepSeek Flash。第一组审核三次均为 HTTP 403，两次重试后停，0/48 条获得审核。三类均为 **不可用，证据不足**，不是实测证明不符合画像。没有测教师、改判线或改尺子。[保真报告和片段](../runs/stage2a-hard-learners-01/hard-learner-fidelity-report.md) · [预登记](../runs/stage2a-hard-learners-01/preregistration.md)
+`stage2a-hard-learners-01` 在 GPT-4.1 mini 经 OpenRouter 的审核请求三次 HTTP 403 后停线，4/48 生成、0/48 审核。仅能确认请求被拒；旧原件不含错误体或实际上游。原[报告](../runs/stage2a-hard-learners-01/hard-learner-fidelity-report.md)和[复核](../runs/stage2a-hard-learners-01/verify-run.json)保留。
 
-已生成原话中，针对性提示后学生 #9 算出 `u+u²=-1`；独立解释条件的 #9 自行代入 `z=1` 并动摇原误解，是潜在反例。两者只是执行者 AI 回读，不计入判线。两道题的可教性、弱刺激保持和跃迁判线均未判定。未复测。先核实审核路由的实际访问，再另登记；不要改变此批证据或拿画像去考教师。
+`stage2a-hard-learners-02` 按附录从头生成，不复用四条旧回复。`568e0c1` 锁定跨家族审核 `openrouter/qwen/qwen3-235b-a22b-2507` 和 `parasail/fp8`，严格 JSON，不发送推理或允许回退。12 次成功审核每次覆盖四条回复，均流报 Parasail，推理实报为 0。审核不是人工评审，不出教师分数。[预登记与附录](../runs/stage2a-hard-learners-02/preregistration.md) · [报告及 #8/#9 引用](../runs/stage2a-hard-learners-02/hard-learner-fidelity-report.md)
 
-预登记 SHA256 `5a922f226af0834fa4fded7d4c0f5c0c95c7bf7b832a427f435cde32ac02616e`。干净 `e1e0f15` 的 `npm run check -- --scope=hard-learners` 19/19；默认全量检查会读混合题库，未启动。[预检](../runs/_receipts/stage2a-hard-learners-estimate-02.process.json) 0 请求。实跑退出 1，`acceptance=false`；`--verify-run` 通过，启动、进程、[manifest](../runs/stage2a-hard-learners-01/manifest.json) 和全部尝试的 PID 为 `45288`。实用 7/62 次和 28,672/253,952 请求输出 token，实报 3,715 token，审核的三次用量未知。[逐原件复核](../runs/stage2a-hard-learners-01/verify-run.json) · [检查收据](../runs/_receipts/check-hard-learners-e1e0f156630709f2e51685b166a0a176dfdbfd52.json)
+| 画像 | 重复 | 直接答案 | 针对错因 | 独立解释 | 两题可教性 | 跃迁标记／泄漏 | 结论 |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 顽固误解型 | 2/4 | 2/4 | 3/4 | 2/4 | 2/2、0/2 | 1／0 | 不可用 |
+| 伸手要答案型 | 0/4 | 4/4 | 4/4 | 4/4 | 2/2、2/2 | 1／0 | 需改 |
+| 假装懂了型 | 1/4 | 2/4 | 4/4 | 4/4 | 2/2、2/2 | 1／0 | 需改 |
+
+表中是冻结判线的 AI 审核结果，每类审核齐 16/16。前四列各需 3/4；两题分别至少有一条有依据的进步；跃迁与泄漏均须为 0。S0-06 的顽固误解型 `targeted` 两遍 #9 都比较出 5 和 3 并松动，但一遍 `repair` 被标跃迁，另一遍只给 `attempt`，因此 0/2 不能断言教不会。另两条跃迁标记引用了 #8 已给的数值，和预登记相冲突。保留原标签和判线。弱刺激仍有反例，本轮无预算重测，未修改画像。
+
+附录合并后 SHA256 `74ea73ac0a508b2143e05ed8cdbf03fdcf116b964b4048263dddc928e6d2f6c8`。[零请求预检](../runs/_receipts/stage2a-hard-learners-estimate-03.process.json)；干净 `568e0c1` 的[范围检查收据](../runs/_receipts/check-hard-learners-568e0c1a8182f08f443ce1d8ef2bed79836ced92.json) 21/21。默认全量检查会读混合题库，未启动。实跑退出 0，`acceptance=true` 仅表示收齐。`--verify-run` 通过，同 PID `46064`。用量 62/62 请求、253,952/253,952 请求输出 token，实报 76,817 token；两次审核 429 恢复，均缺报。[逐原件复核](../runs/stage2a-hard-learners-02/verify-run.json)
 
 <a name="round2-perturbation-v2"></a>
 

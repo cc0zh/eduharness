@@ -21,6 +21,7 @@
 | 2026-11 | [定向扰动后要核对裁判是否换了引用](2026-11/20261121-counterfactual-anchor-switch.md) | 第二轮 ①b `round2-perturbation-01`，`normal` #4–#7 |
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
 | 2026-11 | [模型目录能解析不等于审核路由可访问](2026-11/20261121-auditor-catalog-not-access.md) | 阶段 2a `stage2a-hard-learners-01`，三次 HTTP 403 |
+| 2026-11 | [原字引文匹配不等于找对知识来源](2026-11/20261121-quote-match-not-knowledge-source.md) | 阶段 2a `stage2a-hard-learners-02`，#8/#9 和审核标签对照 |
 
 ## 目录与命名
 
