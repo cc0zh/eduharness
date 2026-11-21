@@ -3,11 +3,13 @@ import { join, resolve } from 'node:path';
 import { isDeepStrictEqual as same } from 'node:util';
 import { filenames } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
-import { batchFolders, batchVersion, projectResult, validateBatchPlan } from './cell-batch-plan.mjs';
+import { batchFolders, batchVersion, projectResult, splitScenario, validateBatchPlan } from './cell-batch-plan.mjs';
 import { amount, replayBatchJournal, sha256 } from './cell-batch-journal.mjs';
 import { jsonBytes, processDir, readOptional, readRequestEvents, receiptPaths } from './receipt-files.mjs';
 import { constructExpectations, requireRegisteredSource, s1PreregistrationFile, s1Scenario, s1SourceId } from './s1-binary-plan.mjs';
 import { contrastRegistration, judgeContrastScenario } from './judge-contrast-plan.mjs';
+import { bakeoffConcurrency } from './judge-bakeoff-plan.mjs';
+import { createSplitProgress } from './split-judge-state.mjs';
 
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
 const readJson = path => JSON.parse(readFileSync(path));
@@ -67,6 +69,7 @@ export function readBatch(root, id, { resume = false } = {}) {
   validateBatchPlan(manifest);
   const { identity, mode, scenario } = manifest;
   const contrast = scenario === judgeContrastScenario;
+  const split = splitScenario(scenario) ? createSplitProgress(manifest.planned.length) : undefined;
   const regSha = identity.preregistrationSha256;
   let registrationStored = false;
   if (regSha) {
@@ -75,7 +78,14 @@ export function readBatch(root, id, { resume = false } = {}) {
     requireThat(sha256(regSha) && (registered ? hash(registered) === regSha : !materialized), 'preregistration digest differs from the run identity');
     if (registered) {
       const markdown = registered.toString('utf8');
-      if (contrast) {
+      if (split) {
+        const plan = contrastRegistration(markdown);
+        const candidate = plan.candidates?.[identity.judgePolicy];
+        requireThat(candidate?.runId === (mode === 'real' ? id : identity.registeredId) && same(candidate.policy, identity.policy)
+          && (mode === 'offline' || same(candidate.route, identity.routes.judge)) && plan.ruler === identity.ruler
+          && same(candidate.limits, manifest.limits) && same(plan.sources, identity.sources) && same(plan.prior, manifest.source.prior)
+          && same(plan.queue, manifest.planned) && same(plan.stop, split.rules), 'judge bakeoff preregistration does not match the batch');
+      } else if (contrast) {
         const plan = contrastRegistration(markdown);
         requireThat(plan.runId === (mode === 'real' ? id : identity.registeredId) && plan.judgePolicy === identity.judgePolicy
           && plan.ruler === identity.ruler && plan.policyVersion === identity.policy.version
@@ -106,6 +116,7 @@ export function readBatch(root, id, { resume = false } = {}) {
       requireThat((launch?.preregistration_sha256 ?? undefined) === regSha, 'startup preregistration digest differs');
       requireThat(amount(concurrency, 1, 5), 'invalid startup concurrency');
       if (contrast) requireThat(launch.judge_policy === identity.judgePolicy && (mode !== 'real' || regSha && (processIndex > 1 || concurrency === 4)), 'judge contrast launch differs from registration');
+      if (split) requireThat(launch.judge_policy === identity.judgePolicy && (mode !== 'real' || regSha && concurrency === bakeoffConcurrency), 'judge bakeoff launch differs from registration');
       for (const [flag, limit, ceiling] of [['max_attempts', 'maxAttempts', 'maxCalls'], ['max_requested_output_tokens', 'maxRequestedOutputTokens', 'maxOutputTokens']]) {
         requireThat(Number(launch?.[flag] ?? manifest.budget[ceiling]) === manifest.limits[limit], `startup limits differ for ${flag}`);
       }
@@ -124,14 +135,14 @@ export function readBatch(root, id, { resume = false } = {}) {
       const empty = !evaluationBytes && !existsSync(dir) && events.length === 0 && (!end || end.acceptance === null && end.exitCode !== 0);
       requireThat(empty || materialized, 'missing original manifest for a process with activity');
       const replay = empty ? { concurrency, requestCount: 0, peakInFlight: 0, cells: [], attempts: [], downshifts: [], stop: null }
-        : replayBatchJournal({ dir, events, start, end, manifest, manifestSha256, processIndex, used, retries, lastAttempt, selected, artifactPaths });
+        : replayBatchJournal({ dir, events, start, end, manifest, manifestSha256, processIndex, used, retries, lastAttempt, selected, artifactPaths, split });
       requireThat(!end || end.requestCount === replay.requestCount, 'requestCount differs from request log');
       const interrupted = !end || end.acceptance === null;
       if (end?.evaluationSha256 || !interrupted) requireThat(evaluationBytes && end.evaluationSha256 === hash(evaluationBytes), 'evaluation receipt digest differs from process receipt');
       if (evaluationBytes) {
         requireThat(!replay.pending, 'published process contains unsettled cells');
         const resultBytes = readFileSync(join(dir, filenames.result)), result = JSON.parse(resultBytes);
-        requireThat(typeof result.runDir === 'string' && same(result, projectResult(manifest, result.runDir, selected)), 'result does not match its plan-ordered cells');
+        requireThat(typeof result.runDir === 'string' && same(result, projectResult(manifest, result.runDir, selected, split)), 'result does not match its plan-ordered cells');
         requireThat(same(JSON.parse(evaluationBytes), evidenceFor(manifest, manifestSha256, processIndex, resultBytes, result, selected, used)), 'evaluation receipt disagrees with result, artifacts or budget');
         if (!interrupted) requireThat(end.acceptance === result.acceptance && end.exitCode === (result.acceptance ? 0 : 1) && !end.error, 'completion differs from the process receipt');
         latestEvalBytes = evaluationBytes;
@@ -153,7 +164,7 @@ export function readBatch(root, id, { resume = false } = {}) {
       requireThat(digest(readOptional(join(runDir, path))) === sha, `published ${folder} (process ${processIndex}) digest differs for ${path}`);
     }
   }
-  return { manifest, manifestSha256, materialized, registrationStored, selected, used, retries, lastAttempt, head, previousSha256, processes, latest, latestResult, attempts, artifactPaths };
+  return { manifest, manifestSha256, materialized, registrationStored, selected, used, retries, lastAttempt, head, previousSha256, processes, latest, latestResult, attempts, artifactPaths, split };
 }
 
 export function verifyBatchRun(root, id) {

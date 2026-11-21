@@ -8,6 +8,8 @@ import { installRunReceiptHandlers, startRunReceipt, verifyRun } from './run-rec
 import { s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, judgeContrastScenario } from './judge-contrast-plan.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
+import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
+import { bakeoffBudget, judgeBakeoffScenario } from './judge-bakeoff-plan.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
@@ -87,28 +89,31 @@ if (option('--export-report') >= 0) {
       'judge-policy': { type: 'string' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
-    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario].includes(values.scenario)) throw new Error('unknown scenario');
+    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario].includes(values.scenario)) throw new Error('unknown scenario');
+    const split = values.scenario === judgeBakeoffScenario;
+    const contrast = split || values.scenario === judgeContrastScenario;
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
     if (e2Replay ? !['no_teach', 'all'].includes(judgeCell) : judgeCell !== undefined) throw new Error('E2 judge-only requires --judge-cell no_teach or all');
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
     if ((values.harness !== undefined || values['source-root'] !== undefined) && (values.scenario !== 'ruler-expand' || values.phase !== 'ab')) throw new Error('--harness and --source-root require ruler-expand --phase ab');
-    if ((values.preregistration !== undefined || values['preregistration-sha256'] !== undefined) && ![s1Scenario, judgeContrastScenario].includes(values.scenario)) throw new Error('preregistration flags require a binary scenario');
-    if (values['judge-policy'] !== undefined && values.scenario !== judgeContrastScenario) throw new Error('--judge-policy requires S1-judge-contrast');
+    if ((values.preregistration !== undefined || values['preregistration-sha256'] !== undefined) && !contrast && values.scenario !== s1Scenario) throw new Error('preregistration flags require a binary scenario');
+    if (values['judge-policy'] !== undefined && !contrast) throw new Error('--judge-policy requires S1-judge-contrast or S1-judge-bakeoff');
     estimate = values['estimate-only'];
     if (values.resume && (!values.id || estimate)) throw new Error('--resume requires --id and cannot be combined with --estimate-only');
     if (values.scenario === 'ruler-expand' && (values.resume || values.concurrency !== undefined)) throw new Error('--resume and --concurrency are not supported for ruler-expand');
     config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined,
       judgeCell, openRun, resume: values.resume };
-    if (values.scenario === judgeContrastScenario) {
+    if (contrast) {
       const judgePolicy = values['judge-policy'];
-      if (hasJudgeSource || values.phase !== undefined || values.freeze !== undefined || values['generate-only'] || !Object.hasOwn(judgeCandidates, judgePolicy)) {
-        throw new Error('S1-judge-contrast requires a registered --judge-policy and fixed sources');
+      const candidates = split ? splitJudgeCandidates : judgeCandidates;
+      if (hasJudgeSource || values.phase !== undefined || values.freeze !== undefined || values['generate-only'] || !Object.hasOwn(candidates, judgePolicy)) {
+        throw new Error(`${values.scenario} requires a registered --judge-policy and fixed sources`);
       }
-      contrastRunner = await import('./judge-contrast.mjs');
+      contrastRunner = split ? await import('./judge-bakeoff.mjs') : await import('./judge-contrast.mjs');
       Object.assign(config, { judgePolicy, registration: values.preregistration, registrationDigest: values['preregistration-sha256'] });
-      ceiling = contrastBudget(judgeCandidates[judgePolicy].policy);
+      ceiling = (split ? bakeoffBudget : contrastBudget)(candidates[judgePolicy].policy);
     } else if (values.scenario === s1Scenario) {
       if (!config.judgeOnly || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('S1-binary only admits --judge-only <frozen E2 run ID>');
       s1Runner = await import('./s1-binary.mjs');
@@ -145,7 +150,7 @@ if (option('--export-report') >= 0) {
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
     if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
-    if (contrastRunner) config.prepared = contrastRunner.prepareJudgeContrast(config, estimate);
+    if (contrastRunner) config.prepared = (contrastRunner.prepareJudgeBakeoff ?? contrastRunner.prepareJudgeContrast)(config, estimate);
   } catch (error) {
     rejectInput(error);
   }
@@ -159,8 +164,9 @@ if (option('--export-report') >= 0) {
       }
       if (!process.exitCode && estimate) emit({ scenario: s1Runner ? s1Scenario : scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens,
         ...(s1Runner && { source: config.prepared.source }), ...(contrastRunner && { identityId: config.prepared.identityId,
-          runId: config.prepared.plan.runId, judgePolicy: config.judgePolicy, policyVersion: config.prepared.plan.policyVersion,
-          route: config.prepared.candidate.route, preregistrationSha256: config.registrationDigest, concurrency: config.concurrency, retriesPerKind: config.prepared.plan.retriesPerKind }),
+          runId: config.prepared.candidate.runId, judgePolicy: config.judgePolicy, policyVersion: config.prepared.candidate.policy.version,
+          route: config.prepared.candidate.route, preregistrationSha256: config.registrationDigest, concurrency: config.concurrency, retriesPerKind: config.prepared.plan.retriesPerKind,
+          ...(config.prepared.plan.stop && { stop: config.prepared.plan.stop, maxAttemptsPerDimension: config.prepared.plan.maxAttemptsPerDimension }) }),
         ...rulerRunner?.holdoutEstimate(config.prepared) });
       else if (!process.exitCode) {
         const prepared = config.prepared ?? rulerRunner?.prepareRulerRun(config);
@@ -169,7 +175,7 @@ if (option('--export-report') >= 0) {
           if (recorder && (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head)) throw failure('preflight_failed', {}, 'checkout changed after startup');
           loadCredentials(config.judgeOnly || contrastRunner ? ['judge'] : config.phase === 'train' ? ['teacher', 'learner'] : undefined);
         }
-        const result = contrastRunner ? await contrastRunner.runJudgeContrast(config, prepared) : s1Runner ? await s1Runner.runS1(config, prepared)
+        const result = contrastRunner ? await (contrastRunner.runJudgeBakeoff ?? contrastRunner.runJudgeContrast)(config, prepared) : s1Runner ? await s1Runner.runS1(config, prepared)
           : rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
         acceptance = result.acceptance;
         emit(rulerRunner ? rulerRunner.publicRulerResult(result) : result);

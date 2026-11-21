@@ -92,3 +92,11 @@ node src/cli.mjs --export-report e2-real-20261119-06 --out e2-review.html
 裁判校验失败时，下一次尝试携带上一份校验错误。仅可无损重排同一证据槽位的 ID 或互不重叠的组；记录 `normalized` 和 `originalOrder`，原件不改。各调用另记录 `elapsedMs` 和 `timeoutMs`；本地 deadline 到期与 provider 中断分别标记。
 
 OpenRouter HY4 裁判和复评通过 pi 的 `onPayload` 请求 `json_schema` 和 `provider.require_parameters`，`judgementMode` 记录对应分支。工具调用不是这个路由的备选；公开元数据没有承诺强制指定工具。语法和结构之后仍校验本地语义。历史正文重放使用兼容解析，不把重放分数写回原 run。
+
+## ①h 三候选复判
+
+用 `node scripts/judge-bakeoff-preregister.mjs` 将共同的样本、候选参数、硬上限和判线写入 `.tmp/scratch/judge-bakeoff/preregistration.md`。保存脚本输出的 SHA256。在干净 HEAD 上运行 `npm run check`，保留对应收据。
+
+每个候选使用 `--scenario S1-judge-bakeoff --judge-policy haiku|gemini|qwen --concurrency 4`，以及 `--preregistration <文件> --preregistration-sha256 <SHA256>`。先加 `--mode real --estimate-only --id <新的预检 ID>`。取得授权后，用登记的正式 ID 和两个上限，加 `--confirm-cost` 执行。执行完成后用 `--verify-run` 核对每批，再运行 `node scripts/judge-bakeoff-report.mjs --run-root runs --out .tmp/scratch/judge-bakeoff`。
+
+维度按 `call` 1 到 6 定位。判决的 `binding.dimensions` 给出每维原件的 `processIndex` 和 `attemptPath`。停线前已结算的维度在 `_processes/<processIndex>/` 和请求日志中回读。重试的反馈类别、实报用量和拒收细节保存在调用原件。规则见 [e1-binary-v3 契约](../contracts/judge/binary-v3.md)。

@@ -2,21 +2,25 @@ import { isDeepStrictEqual as same } from 'node:util';
 import { policy, rounds, routes, taskId } from '../config/e1.mjs';
 import { targets } from '../config/e2.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
+import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
 import { binaryCellResult, binaryRulingResult, cellIds, cellResult } from '../contracts/artifacts/schema.mjs';
 import { hash, message, requireThat } from '../contracts/core/schema.mjs';
 import { bindBinary, binaryIdentityVersion, binaryOutputContract, binaryRuler, parseBinaryJudgement } from '../contracts/judge/binary.mjs';
+import { splitBinaryIdentityVersion, splitBinaryOutputContract, splitBinaryRuler } from '../contracts/judge/binary-v3.mjs';
 import { bind, directDimension, dimensions, parseNumberedJudgement, rubric } from '../contracts/judge/schema.mjs';
 import { assessS1, s1Path, s1Plan, s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, contrastFolders, judgeContrastScenario } from './judge-contrast-plan.mjs';
+import { bakeoffBudget, judgeBakeoffScenario } from './judge-bakeoff-plan.mjs';
 import { matchesJudgeParameters, matchesReportedRoute } from './judge-transport.mjs';
 
 export const batchVersion = 'cell-batch-v1';
-const binaryScenario = scenario => scenario === s1Scenario || scenario === judgeContrastScenario;
-export const supportedBatch = scenario => ['E1', 'E1-judge-only', 'E2', 'E2-judge-only', s1Scenario, judgeContrastScenario].includes(scenario);
+export const splitScenario = scenario => scenario === judgeBakeoffScenario;
+const binaryScenario = scenario => scenario === s1Scenario || scenario === judgeContrastScenario || splitScenario(scenario);
+export const supportedBatch = scenario => ['E1', 'E1-judge-only', 'E2', 'E2-judge-only'].includes(scenario) || binaryScenario(scenario);
 export function batchFolders({ scenario, planned }) {
   if (scenario === s1Scenario) return planned.map(s1Path);
-  if (scenario === judgeContrastScenario) return planned.map(row => row.id);
+  if (scenario === judgeContrastScenario || splitScenario(scenario)) return planned.map(row => row.id);
   return planned;
 }
 export const cellId = folder => folder.replace('/', ':');
@@ -25,8 +29,9 @@ export const attemptFile = (folder, { role, turn, call, attempt }) => `${folder}
 export const covers = (limits, used, limit) => used.attempts < limits.maxAttempts && used.requestedOutputTokens + limit <= limits.maxRequestedOutputTokens;
 
 export function batchPolicy({ scenario, identity, source, mode }) {
-  if (scenario === judgeContrastScenario) {
-    const candidate = Object.hasOwn(judgeCandidates, identity.judgePolicy) && judgeCandidates[identity.judgePolicy];
+  if (scenario === judgeContrastScenario || splitScenario(scenario)) {
+    const candidates = splitScenario(scenario) ? splitJudgeCandidates : judgeCandidates;
+    const candidate = Object.hasOwn(candidates, identity.judgePolicy) && candidates[identity.judgePolicy];
     requireThat(source && candidate && same(identity.policy, candidate.policy)
       && same(identity.routes, mode === 'real' ? { judge: candidate.route } : 'pi-ai-faux'), 'invalid judge contrast policy or route');
     return candidate.policy;
@@ -39,7 +44,8 @@ export function batchPolicy({ scenario, identity, source, mode }) {
 
 export function validateBatchPlan(manifest) {
   const { scenario, identity, identityId, mode, planned } = manifest;
-  const contrast = scenario === judgeContrastScenario;
+  const split = splitScenario(scenario);
+  const contrast = scenario === judgeContrastScenario || split;
   requireThat(supportedBatch(scenario) && manifest.taskId === taskId, 'invalid batch scenario or task');
   const expected = scenario === 'E1' ? ['normal', 'answer_dump'] : scenario === 'E1-judge-only' ? ['normal']
     : scenario === 'E2-judge-only' && same(planned, ['no_teach']) ? ['no_teach'] : contrast ? planned : scenario === s1Scenario ? s1Plan : cellIds;
@@ -47,7 +53,7 @@ export function validateBatchPlan(manifest) {
   requireThat(identityId === hash({ mode, scenario, identity }) && same(identity.limits, manifest.limits) && same(identity.dialogueSource, manifest.source), 'evaluation identity or budget mismatch');
   const callPolicy = batchPolicy(manifest);
   if (contrast) {
-    requireThat(same(batchFolders(manifest), contrastFolders) && same(manifest.budget, contrastBudget(callPolicy)), 'judge contrast sample plan or budget differs');
+    requireThat(same(batchFolders(manifest), contrastFolders) && same(manifest.budget, split ? bakeoffBudget(callPolicy) : contrastBudget(callPolicy)), 'judge contrast sample plan or budget differs');
     for (const [i, row] of planned.entries()) {
       const coordinate = s1Plan[i];
       requireThat(row.repetition === coordinate?.repetition && row.condition === coordinate?.condition
@@ -56,7 +62,8 @@ export function validateBatchPlan(manifest) {
   }
   const { maxAttempts, maxRequestedOutputTokens } = manifest.limits;
   requireThat([maxAttempts, maxRequestedOutputTokens].every(n => Number.isSafeInteger(n) && n > 0) && maxAttempts <= manifest.budget.maxCalls && maxRequestedOutputTokens <= manifest.budget.maxOutputTokens, 'invalid registered limits');
-  if (binaryScenario(scenario)) requireThat(identity.version === binaryIdentityVersion && identity.ruler === binaryRuler && identity.judgeOutputContract === binaryOutputContract, 'binary identity version mismatch');
+  if (split) requireThat(identity.version === splitBinaryIdentityVersion && identity.ruler === splitBinaryRuler && identity.judgeOutputContract === splitBinaryOutputContract, 'split binary identity version mismatch');
+  else if (binaryScenario(scenario)) requireThat(identity.version === binaryIdentityVersion && identity.ruler === binaryRuler && identity.judgeOutputContract === binaryOutputContract, 'binary identity version mismatch');
 }
 
 export function retryClass(policy, meter) {
@@ -81,12 +88,12 @@ export function attemptStop(policy, meter, retries) {
 export function cellRow(manifest, folder, outcome) {
   const [repetition, condition] = folder.split('/');
   if (binaryScenario(manifest.scenario) && condition) return { repetition, ...binaryCellResult(condition, outcome.verdict?.scoring, outcome.failure) };
-  if (manifest.scenario === judgeContrastScenario) return binaryRulingResult(folder, outcome.verdict?.scoring, outcome.failure);
+  if (manifest.scenario === judgeContrastScenario || splitScenario(manifest.scenario)) return binaryRulingResult(folder, outcome.verdict?.scoring, outcome.failure);
   return cellResult(repetition, outcome.scores, outcome.failure);
 }
 
 export function verifyDialogue(manifest, folder, messages, transcriptSha256) {
-  if (manifest.scenario === judgeContrastScenario) {
+  if (manifest.scenario === judgeContrastScenario || splitScenario(manifest.scenario)) {
     const sample = manifest.planned.find(row => row.id === folder);
     requireThat(sample?.transcriptSha256 === transcriptSha256 && messages.length === 2 * rounds + 1, `frozen transcript mismatch at ${folder}`);
     bindBinary(messages);
@@ -151,13 +158,14 @@ export function numericScores(judgement) {
   return { all: dimensions.map(key => scores[key].score), direct: scores[directDimension].score };
 }
 
-export function projectResult(manifest, runDir, selected) {
+export function projectResult(manifest, runDir, selected, split) {
   const { scenario, taskId, id, mode, source } = manifest;
   const folders = batchFolders(manifest);
   const cells = folders.flatMap(folder => selected.has(folder) ? [selected.get(folder).row] : []);
   const complete = cells.length === folders.length && cells.every(cell => cell.validTotal);
   if (scenario === s1Scenario) return { id, scenario, taskId, mode, runDir, acceptance: complete, cells, assessment: assessS1(cells) };
-  if (scenario === judgeContrastScenario) return { id, scenario, taskId, mode, runDir, acceptance: complete, cells };
+  if (scenario === judgeContrastScenario || split) return { id, scenario, taskId, mode, runDir, acceptance: complete, cells,
+    ...(split && { crossDimensionFailures: split.crossDimensionFailures, failedCells: split.failedCells, stop: split.stop }) };
   const comparisons = scenario.startsWith('E2') && folders.length > 1 ? Object.entries(targets).map(([cell, dimension]) => {
     const side = folder => {
       const item = selected.get(folder);

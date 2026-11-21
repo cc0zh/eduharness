@@ -4,8 +4,12 @@ import { isDeepStrictEqual as same } from 'node:util';
 import { rounds } from '../config/e1.mjs';
 import { filenames } from '../contracts/artifacts/schema.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
+import { bindBinary } from '../contracts/judge/binary.mjs';
+import { splitDimensions } from '../contracts/judge/binary-v3.mjs';
 import { attemptFile, attemptStop, batchFolders, callIdFor, cellRow, covers, numericScores, replayJudge, retryClass, retryStop, verifyDialogue } from './cell-batch-plan.mjs';
 import { judgeContrastScenario } from './judge-contrast-plan.mjs';
+import { replaySplitJudge, splitBinding } from './split-judge-replay.mjs';
+import { finishInterruptedSplit, reserveSplit, settleSplit, splitMaxAttempts, splitNext } from './split-judge-state.mjs';
 
 export const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export const amount = (n, min, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(n) && n >= min && n <= max;
@@ -24,15 +28,15 @@ export function cellArtifacts(dir, folder, meters, outcome) {
   return Object.fromEntries([...files.map(file => [`${folder}/${file}`, hash(readFileSync(join(dir, folder, file)))]), ...meters.map(({ meter, sha256 }) => [meter.attemptPath, sha256])]);
 }
 
-export function verifyCell(dir, manifest, { folder, artifacts, row }, attempts) {
+export function verifyCell(dir, manifest, { folder, artifacts, row }, attempts, splitOutcome) {
   const read = file => parse(readDigest(dir, `${folder}/${file}`, artifacts[`${folder}/${file}`]));
   const messages = read(filenames.transcript);
   verifyDialogue(manifest, folder, messages, artifacts[`${folder}/${filenames.transcript}`]);
   requireThat(Array.isArray(read(filenames.events)), `invalid teacher events at ${folder}`);
   const settled = attempts.filter(a => a.meter);
   requireThat(attempts.length === settled.length && same(read(filenames.telemetry), settled.map(a => a.meter)), `attempt/telemetry sequence differs at ${folder}`);
-  let judgement;
-  for (const attempt of settled) {
+  let judgement = splitOutcome?.verdict ? splitOutcome : undefined;
+  for (const attempt of splitOutcome ? [] : settled) {
     const { meter, raw } = attempt;
     if (meter.role !== 'judge') continue;
     const replay = replayJudge(manifest, folder, messages, meter, raw);
@@ -47,31 +51,31 @@ export function verifyCell(dir, manifest, { folder, artifacts, row }, attempts) 
   if (row.failure) {
     requireThat(!judgement && row.failure.status === 'infra_failure' && typeof row.failure.kind === 'string', `invalid failure at ${folder}`);
     const last = settled.at(-1)?.meter;
-    if (row.failure.attemptPath) requireThat(last?.attemptPath === row.failure.attemptPath && last.failureKind === row.failure.kind, `last failure differs from original at ${folder}`);
+    if (!splitOutcome && row.failure.attemptPath) requireThat(last?.attemptPath === row.failure.attemptPath && last.failureKind === row.failure.kind, `last failure differs from original at ${folder}`);
   } else {
     requireThat(judgement && same(read(filenames.judge), judgement), `published ruling does not replay at ${folder}`);
   }
-  const expected = cellRow(manifest, folder, row.failure ? { failure: row.failure } : (judgement.verdict ? judgement : { scores: numericScores(judgement) }));
+  const expected = cellRow(manifest, folder, splitOutcome ?? (row.failure ? { failure: row.failure } : (judgement.verdict ? judgement : { scores: numericScores(judgement) })));
   requireThat(same(row, expected), `cell result does not replay at ${folder}`);
   return { judgement, messages };
 }
 
-export function replayBatchJournal({ dir, events, start, end, manifest, manifestSha256, processIndex, used, retries, lastAttempt, selected, artifactPaths }) {
+export function replayBatchJournal({ dir, events, start, end, manifest, manifestSha256, processIndex, used, retries, lastAttempt, selected, artifactPaths, split }) {
   const { policy } = manifest.identity;
   const origin = events[0];
   requireThat(origin?.type === 'batch_start' && origin.startHash === hash(start) && origin.manifestSha256 === manifestSha256 && amount(origin.concurrency, 1, 5)
     && origin.concurrency === Number(start.parameters?.values?.concurrency ?? 1), 'batch start does not anchor the manifest or concurrency');
-  let activeLimit = origin.concurrency, stop = null, requestCount = 0, peakInFlight = 0, stamp = Date.parse(start.startedAt);
-  const order = batchFolders(manifest).filter(folder => !selected.has(folder) || selected.get(folder).row.failure);
+  let activeLimit = origin.concurrency, stop = split?.stop ?? null, requestCount = 0, peakInFlight = 0, stamp = Date.parse(start.startedAt);
+  const order = batchFolders(manifest).filter(folder => !selected.has(folder) || !split && selected.get(folder).row.failure);
   let next = 0;
   const active = new Map(), cells = [], attempts = new Map(), downshifts = [];
   const running = new Map();
-  const commit = (event, label) => {
+  const commit = (event, label, splitOutcome) => {
     const { folder } = event;
     const group = active.get(folder);
-    requireThat(group && !running.has(folder) && (!selected.has(folder) || selected.get(folder).row.failure), `unexpected cell commit at ${label}`);
-    const verified = verifyCell(dir, manifest, event, group);
-    if (event.row.failure && !stop) stop = { kind: 'cell_failure', folder };
+    requireThat(group && !running.has(folder) && (!selected.has(folder) || !split && selected.get(folder).row.failure), `unexpected cell commit at ${label}`);
+    const verified = verifyCell(dir, manifest, event, group, splitOutcome);
+    if (!split && event.row.failure && !stop) stop = { kind: 'cell_failure', folder };
     selected.set(folder, { folder, processIndex, artifacts: event.artifacts, row: event.row, ...verified });
     cells.push(folder);
     const knownPaths = artifactPaths.get(folder) ?? new Set();
@@ -94,14 +98,18 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
     } else if (['reserve', 'budget_stop', 'retry_stop'].includes(event.type)) {
       const { scope, limit, folder } = event;
       const { role, turn, call, attempt } = scope ?? {};
-      const canonical = role === 'teacher' || role === 'learner' || role === 'judge';
-      requireThat(group && !stop && !running.has(folder) && !a && running.size < activeLimit && canonical && amount(turn, 1, rounds) && amount(call, 1)
-        && ((role === 'teacher' && !manifest.source) || (role === 'learner' && !manifest.source && call === 1) || (role === 'judge' && turn === rounds && call === 1))
-        && amount(attempt, 1) && event.callId === callIdFor(folder, scope) && limit === policy[role].maxTokens, `invalid attempt reservation at ${label}`);
+      const roleMatches = split ? role === 'judge' && turn === rounds && amount(call, 1, splitDimensions.length) && amount(attempt, 1, splitMaxAttempts)
+        : amount(turn, 1, rounds) && amount(call, 1) && amount(attempt, 1)
+          && ((role === 'teacher' && !manifest.source) || (role === 'learner' && !manifest.source && call === 1) || (role === 'judge' && turn === rounds && call === 1));
+      requireThat(group && !stop && !running.has(folder) && !a && running.size < activeLimit && roleMatches
+        && event.callId === callIdFor(folder, scope) && limit === policy[role].maxTokens, `invalid attempt reservation at ${label}`);
       const last = group.at(-1);
       const retry = last && last.scope.role === role && last.scope.turn === turn && last.scope.call === call;
-      const expectedRetryCount = retry ? last.meter.retryCount + Number(!last.meter.rateLimited) : 0;
-      requireThat(retry ? last.meter.failureKind && attempt === last.scope.attempt + 1 : attempt === 1 && !last?.meter.failureKind, `attempt sequence differs at ${label}`);
+      const expectedRetryCount = split ? attempt - 1 : retry ? last.meter.retryCount + Number(!last.meter.rateLimited) : 0;
+      if (split) {
+        const next = splitNext(split, folder);
+        requireThat(next?.call === call && next.nextAttempt === attempt, `dimension sequence differs at ${label}`);
+      } else requireThat(retry ? last.meter.failureKind && attempt === last.scope.attempt + 1 : attempt === 1 && !last?.meter.failureKind, `attempt sequence differs at ${label}`);
       const previous = lastAttempt.get(folder);
       const exhausted = retryStop(policy, previous, retries, event.callId);
       if (event.type === 'retry_stop') {
@@ -113,9 +121,11 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
       if (event.type === 'budget_stop') {
         requireThat(!covers(manifest.limits, used, limit), `budget stop with available balance at ${label}`);
         stop = { kind: 'budget_exhausted', callId: event.callId };
+        if (split) split.stop = stop;
         continue;
       }
       requireThat(covers(manifest.limits, used, limit) && !group.some(prior => prior.callId === event.callId) && event.inFlight === running.size + 1, `reservation exceeds budget or concurrency at ${label}`);
+      if (split) reserveSplit(split, folder, scope, event.callId);
       const kind = retryClass(policy, previous);
       if (kind) retries.set(kind, (retries.get(kind) ?? 0) + 1);
       used.attempts++;
@@ -142,7 +152,7 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
       const [repetition, condition] = a.folder.split('/');
       requireThat(Object.entries(a.scope).every(([key, value]) => raw[key] === value) && (condition === undefined || raw.repetition === repetition && meter.repetition === repetition)
         && (manifest.mode !== 'real' || meter.failureKind || a.sent) && (!raw.outbound || a.sent || stop), `attempt original or request log disagrees at ${label}`);
-      if (manifest.scenario === judgeContrastScenario && manifest.mode === 'real') {
+      if ((split || manifest.scenario === judgeContrastScenario) && manifest.mode === 'real') {
         const phase = meter.phaseMs;
         requireThat(meter.timeoutMs === policy.judge.timeoutMs && phase && amount(phase.ended, 0, meter.elapsedMs)
           && (a.sent ? amount(phase.requestSent, 0, phase.ended) : phase.requestSent === null)
@@ -153,20 +163,40 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
       }
       requireThat((a.ended?.status === 429 || meter.httpStatus === 429) ? meter.rateLimited === true : !meter.rateLimited || meter.failureKind === 'provider_failure', `rate-limit evidence differs at ${label}`);
       const expectedShift = meter.rateLimited && activeLimit > 1 ? { from: activeLimit, to: activeLimit - 1, callId: a.callId } : undefined;
-      const expectedStop = !stop ? attemptStop(policy, meter, retries) : undefined;
+      let outcome, expectedStop;
+      if (split) {
+        const source = manifest.planned.find(row => row.id === a.folder);
+        const messages = parse(readDigest(dir, `${a.folder}/${filenames.transcript}`, source.transcriptSha256, label));
+        verifyDialogue(manifest, a.folder, messages, source.transcriptSha256);
+        const part = replaySplitJudge(manifest, a.folder, messages, meter, raw);
+        ({ outcome, stop: expectedStop } = settleSplit(split, a.folder, meter, part,
+          part && splitBinding(manifest, a.folder, bindBinary(messages)), manifest.mode === 'offline' || Boolean(a.sent)));
+      } else expectedStop = !stop ? attemptStop(policy, meter, retries) : undefined;
       requireThat(same(event.downshift, expectedShift) && same(event.stop, expectedStop), `retry stop or downshift differs at ${label}`);
       if (expectedShift) { activeLimit--; downshifts.push(expectedShift); }
       stop ??= expectedStop ?? null;
       if (policy.retriesPerKind !== undefined && (manifest.mode === 'offline' || a.sent)) lastAttempt.set(a.folder, meter);
       Object.assign(a, { meter, raw, sha256: sha, settled: true });
       running.delete(a.folder);
-      if (meter.role === 'judge' && !meter.failureKind) {
+      if (split) {
+        requireThat(outcome ? event.cell?.folder === a.folder : !event.cell, `dimension settlement cell differs at ${label}`);
+        if (outcome) commit(event.cell, label, outcome);
+      } else if (meter.role === 'judge' && !meter.failureKind) {
         requireThat(event.cell?.folder === a.folder && !event.cell.row.failure, `successful judge lacks a committed ruling at ${label}`);
         commit(event.cell, label);
       } else requireThat(!event.cell, `unexpected ruling at ${label}`);
     } else if (event.type === 'cell_commit') {
       requireThat(event.row.failure, `standalone commit must record a failure at ${label}`);
-      commit(event, label);
+      if (split) {
+        requireThat(!stop && group && !running.has(event.folder), `unexpected split terminal commit at ${label}`);
+        const { outcome, stop: expectedStop } = finishInterruptedSplit(split, event.folder);
+        requireThat(same(event.stop, expectedStop), `interrupted dimension stop differs at ${label}`);
+        stop ??= expectedStop ?? null;
+        commit(event, label, outcome);
+      } else commit(event, label);
+    } else if (split && event.type === 'cell_pause') {
+      requireThat(stop && group && !running.has(event.folder), `unexpected paused cell at ${label}`);
+      active.delete(event.folder);
     } else throw Error(`unknown journal event at ${label}`);
   }
   return { concurrency: origin.concurrency, stop, requestCount, peakInFlight, downshifts, cells: batchFolders(manifest).filter(folder => cells.includes(folder)),

@@ -11,6 +11,7 @@ import { targets } from '../config/e2.mjs';
 import { runCellBatch } from './cell-batch.mjs';
 import { attemptFile, callIdFor } from './cell-batch-plan.mjs';
 import { grade } from './judge.mjs';
+import { gradeBinaryDimension } from './binary-judge-v3.mjs';
 import { Models } from './models.mjs';
 import { offlineResponses } from './offline.mjs';
 import { createTeacher } from './teacher/session.mjs';
@@ -126,6 +127,15 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     }
     if (generateOnly) return { messages };
     role = 'judge'; turn = rounds; call = 1;
+    if (control?.splitNext) {
+      for (let next; (next = control.splitNext());) {
+        ({ call } = next);
+        if (next.nextAttempt > control.splitMaxAttempts) return { interruptedSplit: true };
+        await gradeBinaryDimension(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly,
+          repetition: coordinate?.repetition, dimension: next.dimension, nextAttempt: next.nextAttempt, retryFeedback: next.retryFeedback });
+      }
+      return { messages };
+    }
     const { scores, binding, ...judgement } = await grader(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly });
     if (!control) store(filenames.judge, { binding: { ...binding, ...coordinate }, ...judgement });
     return { ...judgement, scores, binding, messages };

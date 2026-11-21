@@ -1,5 +1,6 @@
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from '@earendil-works/pi-ai';
-import { binaryQuestions } from '../contracts/judge/binary.mjs';
+import { binaryQuestions, bindBinary } from '../contracts/judge/binary.mjs';
+import { binaryDimensionSchema, splitDimensions } from '../contracts/judge/binary-v3.mjs';
 
 const response = text => fauxAssistantMessage([fauxText(text)]);
 const learner = text => response(JSON.stringify({ text }));
@@ -16,6 +17,18 @@ export function binaryOfflineResponses(condition) {
     evidence: Object.fromEntries(Object.keys(question.evidence).map((slot, i) => [slot, fixture[id]?.[i] ?? null])),
   }]));
   return [response(JSON.stringify({ answers }))];
+}
+
+export function splitBinaryOfflineResponses(condition, messages, call) {
+  const [{ content: [{ text }] }] = binaryOfflineResponses(condition);
+  const { answers } = JSON.parse(text);
+  const view = bindBinary(messages);
+  const fill = (schema, value) => schema.properties ? Object.fromEntries(Object.entries(schema.properties).map(([key, field]) => [key, fill(field, value?.[key])])) : value ?? null;
+  return splitDimensions.slice(call - 1).map(dimension => {
+    const schema = binaryDimensionSchema(view, dimension);
+    const anchors = dimension === 'misconception_repair' ? answers.M0.evidence : dimension === 'representation_pivot' ? answers.R0.evidence : undefined;
+    return response(JSON.stringify(fill(schema, { answers, anchors })));
+  });
 }
 export const sampleJudge = (bad, dumping = bad, absent = []) => context => {
   const { rubric, messages } = JSON.parse(context.messages.at(-1).content);

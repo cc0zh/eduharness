@@ -3,9 +3,10 @@ import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
 import { policy, routes } from '../config/e1.mjs';
+import { judgeModelMetadata, splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
-import { judgeParameters, matchesJudgeParameters, matchesReportedRoute } from './judge-transport.mjs';
+import { judgeParameters, matchesJudgeParameters, matchesReportedRoute, retryFeedbackCode, retryFeedbackCodes, splitRetryPrompt } from './judge-transport.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -70,6 +71,8 @@ export function stopFailure(response, text, reasoning, limit, finishReason) {
   if (truncated) return 'output_truncated';
 }
 
+const scopeFeedbackCodes = [...retryFeedbackCodes, 'generic'];
+
 export class Models {
   #pi = createModels();
   #roles;
@@ -82,9 +85,11 @@ export class Models {
   #policy;
   #judgeRoute;
   #judgeTimeoutMs;
+  #split;
 
   constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, judgePolicy, beforeAttempt }) {
-    const candidate = Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined;
+    const split = Object.hasOwn(splitJudgeCandidates, judgePolicy) ? splitJudgeCandidates[judgePolicy] : undefined;
+    const candidate = split ?? (Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined);
     if (judgePolicy !== undefined && (!candidate || judgeReasoningOff || roles.length !== 1 || roles[0] !== 'judge' || judgeTimeoutMs !== undefined)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'judge policy requires a judge-only run with its registered deadline');
     }
@@ -97,6 +102,7 @@ export class Models {
     }
     this.#policy = candidate?.policy ?? (judgeReasoningOff ? reasoningOffPolicy : policy);
     this.#judgeRoute = candidate?.route ?? routes.judge;
+    this.#split = Boolean(split);
     this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
@@ -120,7 +126,9 @@ export class Models {
     this.#pi.setProvider(deepseekProvider());
     this.#pi.setProvider(router);
     this.#roles = Object.fromEntries(selected.map(([role, route]) => {
-      const model = this.#pi.getModel(route.provider, route.id) ?? (role === 'judge' && route.id === routes.judge.id ? {
+      const pinned = this.#split && role === 'judge' ? judgeModelMetadata[route.id] : undefined;
+      if (this.#split && role === 'judge' && !pinned) throw failure('configuration', { role, turn: 0, call: 0 }, 'configured split judge model metadata absent');
+      const model = pinned ?? this.#pi.getModel(route.provider, route.id) ?? (role === 'judge' && route.id === routes.judge.id ? {
         id: route.id, name: 'HY4 Flash', api: 'openai-completions', provider: route.provider,
         baseUrl: 'https://openrouter.ai/api/v1', reasoning: true, input: ['text'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 131072, maxTokens: policy.judge.maxTokens,
@@ -166,18 +174,34 @@ export class Models {
     const config = callPolicy[canonical];
     const model = this.model(role);
     const route = this.#judgeRoute;
-    if ((config.reasoning || callPolicy.retriesPerKind !== undefined) && model.provider === route.provider && !schema) {
+    const split = this.#split;
+    const nextAttempt = scope.nextAttempt;
+    const initialFeedback = scope.retryFeedback;
+    if (split) {
+      if (nextAttempt !== undefined && (!Number.isSafeInteger(nextAttempt) || nextAttempt < 1 || nextAttempt > 3)) {
+        throw failure('configuration', { role, turn, call }, 'split judge recovery attempt must be 1..3');
+      }
+      if (initialFeedback !== undefined && initialFeedback !== null && !scopeFeedbackCodes.includes(initialFeedback)) {
+        throw failure('configuration', { role, turn, call }, 'split judge retry feedback must be a known code');
+      }
+    } else if (nextAttempt !== undefined || initialFeedback !== undefined) {
+      throw failure('configuration', { role, turn, call }, 'retry scope requires a split judge policy');
+    }
+    if ((split || config.reasoning || callPolicy.retriesPerKind !== undefined) && model.provider === route.provider && !schema) {
       throw failure('configuration', { role, turn, call }, 'judge policy requires a structured OpenRouter judgement');
     }
     const { reasoning, provider } = judgeParameters(route, config);
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? callPolicy.timeoutMs;
-    let priorValidation, retries = 0;
-    for (let attempt = 1; ; attempt++) {
+    let priorValidation, retries = 0, feedback = initialFeedback ?? null;
+    for (let attempt = split ? (nextAttempt ?? 1) : 1; ; attempt++) {
       const coordinates = { role, turn, call, attempt };
       if (this.#beforeAttempt) await this.#beforeAttempt(coordinates, config.maxTokens);
       else this.#reserve?.(coordinates, config.maxTokens);
-      const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
+      const appliedFeedback = split ? feedback : undefined;
+      const request = split
+        ? (feedback === null ? context : { ...context, systemPrompt: splitRetryPrompt(context.systemPrompt, feedback) })
+        : priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
       const raw = { ...coordinates, context: request, ...(scope.binding && { binding:scope.binding }) };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
       const startedAt = new Date().toISOString();
@@ -201,6 +225,7 @@ export class Models {
           ...(body.max_tokens === undefined ? {max_completion_tokens:cap} : {max_tokens:cap}),
           ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
           ...((config.reasoning || route.routing) && { parameterNames: names }),
+          ...(split && body.temperature !== undefined && { temperature: body.temperature }),
           provider,
           response_format: { type: body.response_format.type, json_schema: { strict: true, schema: '[redacted]' } },
           messages: '[redacted]',
@@ -211,18 +236,22 @@ export class Models {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
         ...(fetch && { fetch }),
         ...(this.#keys && { apiKey: this.#keys[canonical] }),
-        identity: { attribution: null }, temperature: 0, maxTokens: requestLimit, maxRetries: 0,
+        identity: { attribution: null }, temperature: route.temperature === null ? undefined : route.temperature ?? 0, maxTokens: requestLimit, maxRetries: 0,
         reasoning: stream ? agentOptions.reasoning : config.thinking,
         onPayload(payload) {
           const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
           if (!Number.isInteger(sent) || sent <= 0 || sent > config.maxTokens) throw new Error('provider request output cap invalid');
           requestLimit = sent;
-          if (schema) return {
-            ...payload,
-            reasoning,
-            provider: route.routing ? provider : { ...payload.provider, ...provider },
-            response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
-          };
+          if (schema) {
+            const next = {
+              ...payload,
+              reasoning,
+              provider: route.routing ? provider : { ...payload.provider, ...provider },
+              response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
+            };
+            if (split) delete next.thinking;
+            return next;
+          }
         },
         onResponse({ status }) { httpStatus = status; },
         onProviderStreamEvent(chunk) {
@@ -236,7 +265,7 @@ export class Models {
           }
         },
       };
-      let response, failureKind, parsed, detail, providerError;
+      let response, failureKind, parsed, detail, providerError, validationCode = null, normalizations = [];
       const events = [], originalOrder = [];
       try {
         if (stream) {
@@ -258,7 +287,16 @@ export class Models {
             if (!stream && (response.stopReason !== 'stop' || response.content.some(b => b.type === 'toolCall'))) throw new Error('JSON generation did not terminate normally');
             parsed = parse(text, response, originalOrder);
           }
-          catch (error) { failureKind = contractFailure; detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message; }
+          catch (error) {
+            failureKind = contractFailure;
+            if (split) {
+              validationCode = retryFeedbackCode(error);
+              detail = `judge validation ${validationCode}`;
+              raw.validationDetail = error instanceof Error ? error.message : String(error);
+              feedback = validationCode;
+            } else detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message;
+          }
+          if (!failureKind && split) normalizations = Array.isArray(parsed?.normalized) ? parsed.normalized : [];
         }
       }
       if (outboundRejection || responseRouteMismatch) {
@@ -269,22 +307,25 @@ export class Models {
         detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
       }
       const usage = failureKind === 'provider_failure' && !response?.usage?.totalTokens ? null : response?.usage ?? null;
-      const rateLimited = Boolean(this.#beforeAttempt && failureKind === 'provider_failure' && (httpStatus === 429
+      const rateLimited = Boolean((split || this.#beforeAttempt) && failureKind === 'provider_failure' && (httpStatus === 429
         || /(?:\brate[_ -]?limit(?:ed|ing)?(?=\W|_|$)|\btoo many requests\b)/i.test(response?.errorMessage ?? providerError ?? '')));
       const attemptPath = this.#save({
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
+        ...(parsed?.normalized !== undefined && { normalized: parsed.normalized }),
       }, {
         ...coordinates, ...this.identity(role), policyVersion: callPolicy.version, requestLimit, finish_reason, httpStatus,
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
+        ...(split && { retryFeedback: appliedFeedback ?? null, validationCode, normalizations }),
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
         ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning?.max_tokens ?? null }),
         ...(route.routing && { reportedProvider, reportedModel }),
         ...(scope.binding && { binding:scope.binding }),
-        stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: retries,
+        stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: split ? attempt - 1 : retries,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
         failureKind: failureKind ?? null, detail: detail ?? null,
       }, rateLimited);
+      if (split) feedback = failureKind === contractFailure ? validationCode : null;
       if (!failureKind) {
         if (stream) {
           for (const event of events) stream.push(event);
@@ -292,11 +333,14 @@ export class Models {
         }
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
-      if (callPolicy.retriesPerKind !== undefined && failureKind === 'configuration'
-        || !rateLimited && retries++ >= callPolicy.retries || agentOptions.signal?.aborted) {
+      const stop = split
+        ? failureKind === 'configuration' || agentOptions.signal?.aborted || attempt >= 3
+        : callPolicy.retriesPerKind !== undefined && failureKind === 'configuration'
+          || !rateLimited && retries++ >= callPolicy.retries || agentOptions.signal?.aborted;
+      if (stop) {
         throw failure(failureKind, { ...coordinates, attemptPath }, detail);
       }
-      priorValidation = canonical === 'judge' && failureKind === contractFailure ? detail : undefined;
+      if (!split) priorValidation = canonical === 'judge' && failureKind === contractFailure ? detail : undefined;
     }
   }
 }
