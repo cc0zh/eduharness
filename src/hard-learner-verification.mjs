@@ -2,7 +2,7 @@ import { isDeepStrictEqual as same } from 'node:util';
 import { fidelityPolicy, policy, rounds } from '../config/e1.mjs';
 import { hardLearnerCheckScope, hardLearnerScenario as scenario } from '../config/hard-learners.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
-import { parseFidelityAudit } from '../contracts/learner/fidelity.mjs';
+import { parseFidelityAudit, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
 import { learnerPrompt } from '../contracts/learner/profiles.mjs';
 import { parseLearner } from '../contracts/learner/schema.mjs';
 import { assessFidelity, auditContext, fidelityIdentityVersion, fidelityPlan, frozenPrefix, groupPath, learnerTask, plannedReplyNumber, registrationFile, trialCoordinates, trialMessage } from './hard-learner-plan.mjs';
@@ -34,6 +34,7 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
     requireThat(identity.version === fidelityIdentityVersion && identityId === evaluation.identityId && identityId === hash({ mode, scenario, identity })
       && same(identity.planned, fidelityPlan) && same(identity.limits, limits), 'identity or plan mismatch');
     const auditRoute = identity.routes?.fidelity_audit;
+    const parseAudit = identity.calls?.fidelity_audit?.version === 'hard-learner-audit-v4' ? parseFidelityEvidence : parseFidelityAudit;
     const legacyAudit = identity.calls?.fidelity_audit?.version === 'hard-learner-audit-v1' && auditRoute?.id === 'openai/gpt-4.1-mini';
     const auditPromptSha256 = ['hard-learner-audit-v1', 'hard-learner-audit-v2'].includes(identity.calls?.fidelity_audit?.version)
       ? originalAuditPromptSha256 : identity.auditPromptSha256;
@@ -106,7 +107,7 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
       const audit = json(`${folder}/audit.json`, true);
       if (success !== undefined) {
         requireThat(transcripts.length === groupTrials.length && transcripts.every(messages => messages.length === plannedReplyNumber), `incomplete audit window at ${folder}`);
-        requireThat(same(parseFidelityAudit(success, view.samples), audit) && same(audit, groupTrials.map(trial => trial.audit)), `audit cannot be replayed at ${folder}`);
+        requireThat(same(parseAudit(success, view.samples), audit) && same(audit, groupTrials.map(trial => trial.audit)), `audit cannot be replayed at ${folder}`);
       } else requireThat(!audit && groupTrials.every(trial => trial.audit === undefined), `audit without completed request at ${folder}`);
     }
     requireThat(readPaths.size === Object.keys(files).length, 'unexpected fidelity artifact paths');

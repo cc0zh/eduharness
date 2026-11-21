@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
 import { Models, stopFailure } from '../src/models.mjs';
-import { parseFidelityAudit } from '../contracts/learner/fidelity.mjs';
+import { parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
 import { parseLearner } from '../contracts/learner/schema.mjs';
 
 test('model boundary preserves every failed attempt; no fourth attempt or fallback text', async () => {
@@ -59,12 +59,13 @@ function realAudit(t, respond) {
 
 test('real audit sends a pinned non-reasoning strict JSON request and still binds the quotes locally', async t => {
   const sample = { sample: 'A', messages: [{ n: 8, text: 'Try a step.' }, { n: 9, text: 'I need a hint.' }] };
-  const row = { sample: 'A', stance: 'exposed-gap', progress: 'none', unsupported: false, privateLeak: false,
+  const row = { sample: 'A', stance: 'exposed-gap', stepPerformed: false, correctionWithBasis: false, unexplainedClaim: '', privateLeak: false,
     teacher: { n: 8, quote: 'Try a step' }, learner: { n: 9, quote: 'need a hint' }, reason: 'A gap is visible.' };
   const chunk = content => ({ id: 'transport-fixture', provider: 'Parasail', choices: [{ index: 0, delta: { content }, finish_reason: 'stop' }] });
   const { call, payloads, attempts } = realAudit(t, () => new Response(`data: ${JSON.stringify(chunk(JSON.stringify({ observations: [row] })))}\n\ndata: [DONE]\n\n`,
     { headers: { 'content-type': 'text/event-stream' } }));
-  assert.deepEqual((await call(text => parseFidelityAudit(text, [sample]))).value, [row]);
+  const { stepPerformed, correctionWithBasis, unexplainedClaim, ...labels } = row;
+  assert.deepEqual((await call(text => parseFidelityEvidence(text, [sample]))).value, [{ ...labels, progress: 'none', unsupported: false }]);
   const [sent] = payloads;
   assert.equal(sent.model, 'qwen/qwen3-235b-a22b-2507');
   assert.deepEqual(sent.provider, { require_parameters: true, only: ['parasail/fp8'], allow_fallbacks: false });

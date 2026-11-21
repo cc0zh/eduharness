@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fidelityPolicy, fidelityRoute, policy, rounds, routes } from '../config/e1.mjs';
 import { hardLearnerScenario as scenario } from '../config/hard-learners.mjs';
 import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
-import { fidelityAuditPrompt, parseFidelityAudit } from '../contracts/learner/fidelity.mjs';
+import { fidelityAuditPrompt, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
 import { hardProfileIdentity, hardProfileIds } from '../contracts/learner/profiles.mjs';
 import { learnerPrompt, learnerReply } from './learner.mjs';
 import { attemptBudget, Models } from './models.mjs';
@@ -95,14 +95,14 @@ export async function runHardLearners({ id, root, mode, limits, checkReceipt, re
       location = folder;
       const view = auditContext(group.taskId, transcripts);
       const fixture = mode === 'offline' ? { observations: view.samples.map(({ sample, messages }) => ({
-        sample, stance: 'other', progress: 'none', unsupported: false, privateLeak: false,
+        sample, stance: 'other', stepPerformed: false, correctionWithBasis: false, unexplainedClaim: '', privateLeak: false,
         teacher: { n: 8, quote: messages[7].text }, learner: { n: 9, quote: messages[8].text }, reason: 'Offline transport fixture.',
       })) } : undefined;
       const auditor = modelAt(folder, 'fidelity_audit', fixture);
       const { value: audit } = await auditor.complete({ role: 'fidelity_audit', turn: rounds, call: 1 }, {
         systemPrompt: fidelityAuditPrompt,
         messages: [{ role: 'user', timestamp: Date.now(), content: JSON.stringify(view) }],
-      }, text => parseFidelityAudit(text, view.samples));
+      }, text => parseFidelityEvidence(text, view.samples));
       put(`${folder}/audit.json`, audit);
       for (const [i, trial] of groupTrials.entries()) trial.audit = audit[i];
     }

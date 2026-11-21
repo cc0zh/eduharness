@@ -228,7 +228,7 @@ export class Models {
           if (strictAudit) {
             const { reasoning, ...request } = payload;
             return { ...request, provider: auditProvider,
-              response_format: { type: 'json_schema', json_schema: { name: 'teacharena_fidelity', strict: true, schema: fidelityAuditSchema } } };
+              response_format: { type: 'json_schema', json_schema: { name: 'teacharena_fidelity', strict: true, schema: schema ?? fidelityAuditSchema } } };
           }
           if (schema) return {
             ...payload,

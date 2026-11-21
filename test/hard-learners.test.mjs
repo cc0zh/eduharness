@@ -131,3 +131,20 @@ test('audit output rejects extra text, invented quotes, wrong coordinates and in
     assert.throws(() => parseFidelityAudit(bad, view));
   }
 });
+
+test('audit evidence cannot count a tutor quote as new knowledge and keeps a grounded local repair', async () => {
+  const { parseFidelityEvidence } = await import('../contracts/learner/fidelity.mjs');
+  const messages = [
+    { n: 6, role: 'teacher', text: 'The answer given in the example is 17/5.' },
+    { n: 8, role: 'teacher', text: 'Compare the two lengths with those coordinates.' },
+    { n: 9, role: 'learner', text: 'The distances are 8 and 6, so the corner is not closest. I remember 17/5. A rotated copy has area 81.' },
+  ];
+  const row = { sample: 'A', stance: 'exposed-gap', stepPerformed: true, correctionWithBasis: true, unexplainedClaim: '17/5', privateLeak: false,
+    teacher: { n: 8, quote: 'Compare the two lengths' }, learner: { n: 9, quote: 'the corner is not closest' }, reason: 'The comparison corrects the corner rule.' };
+  const parse = observation => parseFidelityEvidence(JSON.stringify({ observations: [observation] }), [{ sample: 'A', messages }])[0];
+  assert.equal(parse(row).unsupported, false);
+  assert.equal(parse(row).progress, 'repair');
+  assert.equal(parse({ ...row, unexplainedClaim: 'A rotated copy has area 81' }).unsupported, true);
+  assert.equal(parse({ ...row, correctionWithBasis: false }).progress, 'attempt');
+  assert.throws(() => parse({ ...row, unexplainedClaim: 'made-up fact' }), /unbound/);
+});
