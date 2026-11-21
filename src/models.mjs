@@ -1,10 +1,11 @@
-import { isDeepStrictEqual } from 'node:util';
 import { createAssistantMessageEventStream, createModels, fauxProvider } from '@earendil-works/pi-ai';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
 import { policy, routes } from '../config/e1.mjs';
-import { conflictingReasoningKeys, reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
+import { judgeCandidates } from '../config/judge-contrast.mjs';
+import { reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
+import { judgeParameters, matchesJudgeParameters, matchesReportedRoute } from './judge-transport.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -79,9 +80,14 @@ export class Models {
   #recorder;
   #cell;
   #policy;
+  #judgeRoute;
   #judgeTimeoutMs;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, beforeAttempt }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, judgePolicy, beforeAttempt }) {
+    const candidate = Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined;
+    if (judgePolicy !== undefined && (!candidate || judgeReasoningOff || roles.length !== 1 || roles[0] !== 'judge' || judgeTimeoutMs !== undefined)) {
+      throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'judge policy requires a judge-only run with its registered deadline');
+    }
     if (judgeTimeoutMs !== undefined && (roles.length !== 1 || roles[0] !== 'judge'
       || !Number.isSafeInteger(judgeTimeoutMs) || judgeTimeoutMs < 1 || judgeTimeoutMs > 2_147_483_647)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'positive judge timeout override requires a judge-only run');
@@ -89,7 +95,8 @@ export class Models {
     if (typeof judgeReasoningOff !== 'boolean' || judgeReasoningOff && (roles.length !== 1 || roles[0] !== 'judge')) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'reasoning-off requires a judge-only run');
     }
-    this.#policy = judgeReasoningOff ? reasoningOffPolicy : policy;
+    this.#policy = candidate?.policy ?? (judgeReasoningOff ? reasoningOffPolicy : policy);
+    this.#judgeRoute = candidate?.route ?? routes.judge;
     this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
@@ -103,7 +110,7 @@ export class Models {
       this.#roles = Object.fromEntries(Object.keys(routes).map(role => [role, faux.getModel()]));
       return;
     }
-    const selected = roles.map(role=>[role,routes[role]]);
+    const selected = roles.map(role => [role, role === 'judge' ? this.#judgeRoute : routes[role]]);
     this.#keys = Object.fromEntries(selected.map(([role, route]) => {
       const key = process.env[route.key]?.trim();
       if (!key) throw failure('configuration', { role, turn: 0, call: 0 }, `missing ${route.key}`);
@@ -113,7 +120,7 @@ export class Models {
     this.#pi.setProvider(deepseekProvider());
     this.#pi.setProvider(router);
     this.#roles = Object.fromEntries(selected.map(([role, route]) => {
-      const model = this.#pi.getModel(route.provider, route.id) ?? (role === 'judge' ? {
+      const model = this.#pi.getModel(route.provider, route.id) ?? (role === 'judge' && route.id === routes.judge.id ? {
         id: route.id, name: 'HY4 Flash', api: 'openai-completions', provider: route.provider,
         baseUrl: 'https://openrouter.ai/api/v1', reasoning: true, input: ['text'],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 131072, maxTokens: policy.judge.maxTokens,
@@ -127,7 +134,7 @@ export class Models {
   model(role) { return this.#roles[roleConfig(role)]; }
 
   usesStructuredJudgement(role) {
-    return roleConfig(role) === 'judge' && this.model(role).provider === 'openrouter' && routes.judge.responseFormat === 'json_schema';
+    return roleConfig(role) === 'judge' && this.model(role).provider === 'openrouter' && this.#judgeRoute.responseFormat === 'json_schema';
   }
 
   complete(scope, context, parse, schema) { return this.#invoke(scope, context, {}, parse, undefined, schema); }
@@ -158,10 +165,11 @@ export class Models {
     const callPolicy = this.#policy;
     const config = callPolicy[canonical];
     const model = this.model(role);
-    if (config.reasoning && model.provider === routes.judge.provider && !schema) {
-      throw failure('configuration', { role, turn, call }, 'reasoning-off requires a structured OpenRouter judgement');
+    const route = this.#judgeRoute;
+    if ((config.reasoning || callPolicy.retriesPerKind !== undefined) && model.provider === route.provider && !schema) {
+      throw failure('configuration', { role, turn, call }, 'judge policy requires a structured OpenRouter judgement');
     }
-    const reasoning = config.reasoning ?? { max_tokens: config.reasoningMaxTokens };
+    const { reasoning, provider } = judgeParameters(route, config);
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? callPolicy.timeoutMs;
     let priorValidation, retries = 0;
@@ -179,22 +187,21 @@ export class Models {
       const signal = AbortSignal.timeout(timeoutMs);
       const transport = observation?.fetch ?? globalThis.fetch;
       const send = this.#recorder ? trackedFetch(transport, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : transport;
-      let outboundRejection;
+      let outboundRejection, responseRouteMismatch, reportedProvider = null, reportedModel = null;
       const fetch = schema ? (input, init) => {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
-        const offMismatch = config.reasoning && (conflictingReasoningKeys.some(key => Object.hasOwn(body, key))
-          || body.model !== routes.judge.id || body.response_format?.type !== 'json_schema');
-        if (offMismatch || !isDeepStrictEqual(body.reasoning, reasoning) || !Number.isInteger(cap) || cap - (reasoning.max_tokens ?? 0) < config.minVisibleTokens || cap > config.maxTokens || body.provider?.require_parameters !== true || body.response_format?.json_schema?.strict !== true) {
+        const names = Object.keys(body).sort();
+        if (!matchesJudgeParameters(body, names, route, config)) {
           outboundRejection = 'outbound judge budget or schema mismatch';
           throw new Error(outboundRejection);
         }
         raw.outbound = {
-          model: routes.judge.id,
+          model: body.model,
           ...(body.max_tokens === undefined ? {max_completion_tokens:cap} : {max_tokens:cap}),
-          reasoning: body.reasoning,
-          ...(config.reasoning && { parameterNames: Object.keys(body).sort() }),
-          provider: { require_parameters: true },
+          ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
+          ...((config.reasoning || route.routing) && { parameterNames: names }),
+          provider,
           response_format: { type: body.response_format.type, json_schema: { strict: true, schema: '[redacted]' } },
           messages: '[redacted]',
         };
@@ -213,7 +220,7 @@ export class Models {
           if (schema) return {
             ...payload,
             reasoning,
-            provider: { ...payload.provider, require_parameters: true },
+            provider: route.routing ? provider : { ...payload.provider, ...provider },
             response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
           };
         },
@@ -222,6 +229,11 @@ export class Models {
           observation?.event(chunk);
           finish_reason = chunk.choices?.[0]?.finish_reason ?? finish_reason;
           reasoningTokens = chunk.usage?.completion_tokens_details?.reasoning_tokens ?? reasoningTokens;
+          if (route.routing && !responseRouteMismatch) {
+            if (nonempty(chunk.provider)) reportedProvider = chunk.provider;
+            if (nonempty(chunk.model)) reportedModel = chunk.model;
+            responseRouteMismatch = !matchesReportedRoute(route, reportedProvider, reportedModel);
+          }
         },
       };
       let response, failureKind, parsed, detail, providerError;
@@ -249,9 +261,9 @@ export class Models {
           catch (error) { failureKind = contractFailure; detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message; }
         }
       }
-      if (outboundRejection) {
+      if (outboundRejection || responseRouteMismatch) {
         failureKind = 'configuration';
-        detail = outboundRejection;
+        detail = outboundRejection ?? 'response judge route mismatch';
       } else if (failureKind === 'provider_failure') {
         httpStatus = Number(response?.errorMessage?.match(/^(?:\w+Error: )?(?:status(?: code)?[ :]+)?([45]\d\d)(?:\b|$)/i)?.[1]) || httpStatus;
         detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
@@ -266,7 +278,8 @@ export class Models {
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
-        ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens ?? null }),
+        ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning?.max_tokens ?? null }),
+        ...(route.routing && { reportedProvider, reportedModel }),
         ...(scope.binding && { binding:scope.binding }),
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: retries,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
@@ -279,7 +292,10 @@ export class Models {
         }
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
-      if ((!rateLimited && retries++ >= callPolicy.retries) || agentOptions.signal?.aborted) throw failure(failureKind, { ...coordinates, attemptPath }, detail);
+      if (callPolicy.retriesPerKind !== undefined && failureKind === 'configuration'
+        || !rateLimited && retries++ >= callPolicy.retries || agentOptions.signal?.aborted) {
+        throw failure(failureKind, { ...coordinates, attemptPath }, detail);
+      }
       priorValidation = canonical === 'judge' && failureKind === contractFailure ? detail : undefined;
     }
   }

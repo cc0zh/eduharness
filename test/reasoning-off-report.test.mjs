@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { binaryDimensions, binaryQuestions, summarizeBinary } from '../contracts/judge/binary.mjs';
 import { s1Plan, s1Targets } from '../src/s1-binary-plan.mjs';
 import { adoption, analyzeReasoningOff, renderReasoningOffReport, unchangedQuestions } from '../scripts/reasoning-off-report.mjs';
+import * as judgeContrast from '../scripts/reasoning-off-report.mjs';
 
 const cases = ['A2-assigned-multiplier', 'R0-still-learner-origin', 'R1-student-score-cards'];
 const questions = Object.keys(binaryQuestions);
@@ -166,4 +167,100 @@ test('does not turn normalized zero placeholders into provider-reported usage', 
   assert.equal(usage.knownByField.output, 17);
   assert.equal(usage.knownByField.input, 16);
   assert.equal(usage.provider.output, 505);
+});
+
+test('judge contrast uses the same a–e thresholds for both routes, with token reports descriptive only', () => {
+  const f = fixture();
+  delete f.outcomes[0].attempts[0].reasoningTokens;
+  f.outcomes[1].attempts[0].reasoningTokens = 23;
+  f.outcomes[2].attempts[0].phaseMs.firstVisible = 180020;
+  const result = judgeContrast.analyzeJudgeContrast(f);
+  assert.equal(result.adopted, true);
+  const { firstAttempts: historicFirsts, ...historicGates } = analyzeReasoningOff(f).gates;
+  const { firstAttempts, ...gates } = result.gates;
+  assert.equal(historicFirsts, false);
+  assert.equal(firstAttempts, true);
+  assert.deepEqual(gates, historicGates);
+  assert.equal(judgeContrast.analyzeJudgeContrast({ ...f, mode: 'offline' }).adopted, false);
+
+  for (const phase of [
+    { firstVisible: 180021 }, { firstVisible: null }, { firstReasoning: 21 }, { lastReasoning: 21 }, { lastReasoning: undefined },
+  ]) {
+    const broken = structuredClone(f.outcomes);
+    Object.assign(broken[2].attempts[0].phaseMs, phase);
+    assert.equal(judgeContrast.analyzeJudgeContrast({ ...f, outcomes: broken }).gates.firstAttempts, false);
+  }
+});
+
+test('after resume, a new local attempt 1 cannot replace the original plan-first or disappear from timing', () => {
+  const f = fixture();
+  const cell = f.outcomes[17];
+  const first = cell.attempts[0];
+  Object.assign(first, { processIndex: 1, failureKind: 'timeout', elapsedMs: 180000 });
+  first.phaseMs.firstVisible = null;
+  cell.attempts.push({ ...f.attempt(cell.id, 0), processIndex: 2 });
+  const result = judgeContrast.analyzeJudgeContrast(f);
+  assert.equal(result.adopted, false);
+  assert.equal(result.cells[17].firstAttempt.processIndex, 1);
+  assert.equal(result.cells[17].first.passed, false);
+  assert.equal(result.retries[0].processIndex, 2);
+  assert.deepEqual(result.elapsed.batch, { planned: 18, sent: 18, measured: 18, timeouts: 1, errors: 0, medianMs: 1850, p90Ms: 2600 });
+
+  first.sent = false;
+  const blocked = judgeContrast.analyzeJudgeContrast(f);
+  assert.equal(blocked.firstAttempts.qualify, 17);
+  assert.equal(blocked.elapsed.batch.sent, 17);
+});
+
+test('judge contrast renders the auditable evidence and keeps missing outcomes out of agreement', () => {
+  const f = fixture();
+  const first = f.outcomes[0].attempts[0];
+  Object.assign(first, { attemptPath: '_processes/1/r1/normal/calls/judge-4-1-1.json', processIndex: 1, pid: 42,
+    reportedProvider: 'Parasail', failureKind: 'judge_partial_failure', detail: 'M2: M0 anchor mismatch', reasoningTokens: null,
+    rejectedAnswers: { M2: { answer: true, evidence: { misconception: 9 } } } });
+  f.outcomes[0].attempts.push({ ...f.attempt(f.outcomes[0].id, 0), processIndex: 2, pid: 43 });
+  f.outcomes[0].verdict.answers.M0.evidence.misconception = 6;
+  f.outcomes[0].verdict.answers.V1 = { answer: true, evidence: { prompt: 7 } };
+  f.outcomes[1].verdict.answers.M0 = { answer: false, evidence: {} };
+  f.outcomes.pop();
+  const { limits } = f;
+  const budget = { attempts: 20, requestedOutputTokens: 2000, ...limits };
+  const metadata = { id: 'contrast', identityId: 'locked-id', preregistrationSha256: 'locked-plan',
+    candidate: 'Qwen3 235B Instruct / Parasail', policyVersion: 'fixture-policy', route: { id: 'qwen3-fixture', provider: 'Parasail' },
+    verification: { budget } };
+  const analysis = judgeContrast.analyzeJudgeContrast({ ...f, limits, budget: { ...budget, attempts: 19, requestedOutputTokens: 1900 } });
+  const report = judgeContrast.renderJudgeContrastReport(analysis, metadata);
+  assert.equal(report, judgeContrast.renderJudgeContrastReport(analysis, metadata));
+  assert.match(report, /①g.*no freeze evidence/);
+  assert.match(report, /Do not adopt Qwen3 235B Instruct \/ Parasail/);
+  assert.match(report, /r1\/normal.*?_processes\/1\/r1\/normal\/calls\/judge-4-1-1\.json.*?Parasail/);
+  assert.match(report, /Rejected raw answers[\s\S]*?M2=Yes misconception=#9/);
+  assert.match(report, /r1\/normal.*M0.*misconception=#3.*misconception=#6/);
+  assert.match(report, /r1\/answer_dump.*M0.*Yes.*No/);
+  assert.match(report, /r1\/normal.*A1=No.*A2=No.*V1=Yes prompt=#7.*V2=No|r1\/normal.*V1=Yes prompt=#7.*V2=No.*A1=No.*A2=No/);
+  assert.match(report, /R1-student-score-cards.*unstarted/);
+  assert.match(report, /Refusal distribution/);
+  assert.match(report, /20\/30/);
+  assert.match(report, /2000\/3000/);
+  assert.match(report, /directed retest/i);
+  assert.doesNotMatch(report, /r1\/normal \| V1 \|/);
+});
+
+test('judge contrast leaves an unsettled send unlinked and does not infer provider refusal', () => {
+  const f = fixture();
+  const cell = f.outcomes.at(-1);
+  delete cell.verdict;
+  cell.attempts = [{ attempt: 1, sent: true, callId: 'unsettled-send', processIndex: 1, pid: 42, failureKind: 'unsettled' }];
+  Object.assign(f.outcomes[0].attempts[0], { finish_reason: 'content_filter', failureKind: 'provider_failure' });
+  Object.assign(f.outcomes[1].attempts[0], { failureKind: 'provider_failure' });
+  const analysis = judgeContrast.analyzeJudgeContrast(f);
+  const report = judgeContrast.renderJudgeContrastReport(analysis, { ...metadata, candidate: 'HY4-capped' });
+  assert.equal(analysis.adopted, false);
+  assert.equal(analysis.usage.requestedOutputTokens, 1700);
+  assert.match(report, /1\/18 real sends lack an observed allowance/);
+  assert.match(report, /1\/18 sent plan-firsts lack elapsed time/);
+  assert.match(report, /\| explicit provider refusal \/ content filter \| 1 \| 0 \|/);
+  assert.match(report, /\| provider_failure \| 1 \| 0 \|/);
+  assert.match(report, /\| R1-student-score-cards \| unsettled-send \| yes \|/);
+  assert.doesNotMatch(report, /\[unsettled-send\]/);
 });

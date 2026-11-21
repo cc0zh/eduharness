@@ -12,6 +12,8 @@ import { binaryQuestions } from '../contracts/judge/binary.mjs';
 import { runCellBatch } from '../src/cell-batch.mjs';
 import { startRunReceipt } from '../src/run-receipts.mjs';
 import { budget, evaluationIdentity, executeCell, frozenDialogue } from '../src/run.mjs';
+import { gradeBinary } from '../src/binary-judge.mjs';
+import { binaryOfflineResponses } from '../src/offline.mjs';
 
 const scratch = resolve(process.env.RUNNER_EVIDENCE_DIR ?? '.tmp/scratch/runner-concurrency');
 const variantOrder = ['normal', 'answer_dump', 'lecture', 'sycophant_close', 'no_teach'];
@@ -360,6 +362,61 @@ test('a complete run with a failed direction check does not redraw on resume', t
   assert.equal(resumed.status, 0, resumed.stderr);
   assert.deepEqual(JSON.parse(resumed.stdout), JSON.parse(first.stdout));
   assert.equal(f.verify('low').budget.attempts, 15);
+});
+
+test('the registered judge contrast shares the two same-kind retries across cells and resumes without redrawing verdicts', async t => {
+  const f = fixture(t);
+  const id = 'contrast', mode = 'offline', scenario = 'S1-judge-contrast';
+  const extra = ['A2-assigned-multiplier', 'R0-still-learner-origin', 'R1-student-score-cards'];
+  const queue = [...planned, ...extra].map(folder => {
+    const [repetition, condition] = folder.split('/');
+    return { id: folder, ...(condition && { repetition, condition }), sourceRunId: 'source',
+      archive: `source/${condition ?? 'normal'}`, transcriptSha256: hash(readFileSync(f.file(`source/${condition ?? 'normal'}/transcript.json`))) };
+  });
+  const source = { prior: [] };
+  const limits = { maxAttempts: 26, maxRequestedOutputTokens: 212_992 };
+  const ceiling = { typicalCalls: 18, maxCalls: 26, maxOutputTokens: 212_992 };
+  const { judgeCandidates } = await import('../config/judge-contrast.mjs');
+  const judgePolicy = 'qwen-parasail';
+  const identity = { ...evaluationIdentity({ mode, limits, provenance: source }), version: 'evaluation-identity-v4',
+    ruler: 'e1-binary-v2', judgeOutputContract: 'judge-output-v4', policy: judgeCandidates[judgePolicy].policy, judgePolicy, planned: queue };
+  let recorder;
+  const openRun = options => (recorder = startRunReceipt({ root: f.root, id, mode,
+    argv: ['--scenario', scenario, '--judge-policy', judgePolicy, '--concurrency', '1'], ...options }));
+  const called = [];
+  const run = async resume => {
+    const result = await runCellBatch({ root: f.root, id, resume, openRun }, {
+      id, scenario, taskId, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, planned: queue, source,
+    }, (folder, context) => {
+      called.push(folder);
+      const row = queue.find(entry => entry.id === folder);
+      const bytes = readFileSync(f.file(`${row.archive}/transcript.json`));
+      const fixtures = binaryOfflineResponses('no_teach');
+      if (!resume && ['r1/answer_dump', 'r1/lecture', 'r1/sycophant_close'].includes(folder)) {
+        const [good] = fixtures;
+        fixtures.unshift({ ...good, content: [{ type: 'text', text: '{' }] });
+      }
+      return executeCell({ ...context, id, mode, variant: row.condition ?? row.id, coordinate: row.repetition && { repetition: row.repetition },
+        frozen: JSON.parse(bytes), frozenBytes: bytes, judgeOnly: row.sourceRunId, grader: gradeBinary, fixtures });
+    });
+    recorder.finish({ exitCode: result.acceptance ? 0 : 1, acceptance: result.acceptance });
+    return result;
+  };
+  assert.equal((await run(false)).acceptance, false);
+  let proof = f.verify(id);
+  assert.equal(proof.verified, true, JSON.stringify(proof));
+  assert.equal(proof.processes[0].stop.kind, 'failure_kind_retries_exhausted');
+  assert.equal(proof.processes[0].stop.failureKind, 'judge_partial_failure');
+  assert.equal(proof.budget.attempts, 6);
+  const preserved = readFileSync(f.file(`${id}/r1/normal/judge.json`));
+  called.length = 0;
+  assert.equal((await run(true)).acceptance, false);
+  assert.deepEqual(called, ['r1/sycophant_close']);
+  assert.deepEqual(readFileSync(f.file(`${id}/r1/normal/judge.json`)), preserved);
+  proof = f.verify(id);
+  assert.equal(proof.verified, true, JSON.stringify(proof));
+  assert.equal(proof.processes[1].requestCount, 0);
+  assert.equal(proof.budget.attempts, 6);
 });
 
 test('CLI accepts concurrency only in the inclusive range 1..5 and requires an explicit resume ID', t => {

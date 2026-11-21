@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { filenames } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
-import { batchFolders, batchPolicy, batchVersion, callIdFor, cellRow, covers, numericScores, projectResult, replayJudge } from './cell-batch-plan.mjs';
+import { attemptStop, batchFolders, batchPolicy, batchVersion, callIdFor, cellRow, covers, numericScores, projectResult, replayJudge, retryClass, retryStop } from './cell-batch-plan.mjs';
 import { cellArtifacts } from './cell-batch-journal.mjs';
 import { evidenceFor, readBatch } from './cell-batch-verification.mjs';
 import { checkSnapshot } from './real-preflight.mjs';
@@ -51,6 +51,8 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
   mkdirSync(dir, { recursive: true });
   const selected = history?.selected ?? new Map();
   const used = history?.used ?? { attempts: 0, requestedOutputTokens: 0 };
+  const retries = history?.retries ?? new Map();
+  const lastAttempt = history?.lastAttempt ?? new Map();
   const folders = batchFolders(manifest);
   const pending = folders.filter(folder => !selected.has(folder) || selected.get(folder).row.failure);
   const running = new Set(), active = new Map(), waiters = new Set();
@@ -82,11 +84,20 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
     const meters = [];
     const control = {
       judgeReasoningOff: Boolean(policy.judge.reasoning),
+      judgePolicy: manifest.identity.judgePolicy,
       async before(scope, limit) {
         if (meters.at(-1)?.meter.rateLimited && !stop && !fatal) await new Promise(resolve => setTimeout(resolve, 100));
         while (!stop && !fatal && active.size >= activeLimit) await new Promise(resolve => waiters.add(resolve));
         const callId = callIdFor(folder, scope);
         if (stop || fatal) throw stopFailure({ ...scope, callId });
+        const previous = lastAttempt.get(folder);
+        const retry = retryStop(policy, previous, retries, callId);
+        if (retry) {
+          append({ type: 'retry_stop', folder, scope, limit, ...retry });
+          stop = retry;
+          wake();
+          throw failure(retry.failureKind, { ...scope, callId }, 'run-wide retry limit for this failure kind');
+        }
         if (!covers(manifest.limits, used, limit)) {
           append({ type: 'budget_stop', callId, folder, scope, limit });
           stop = { kind: 'budget_exhausted', callId };
@@ -94,6 +105,8 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
           throw failure(stop.kind, { ...scope, callId }, 'remaining request budget cannot cover the next attempt');
         }
         append({ type: 'reserve', callId, folder, scope, limit, inFlight: active.size + 1 });
+        const kind = retryClass(policy, previous);
+        if (kind) retries.set(kind, (retries.get(kind) ?? 0) + 1);
         used.attempts++;
         used.requestedOutputTokens += limit;
         active.set(callId, { folder });
@@ -103,8 +116,9 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
         const bytes = readFileSync(join(dir, meter.attemptPath));
         const sha256 = hash(bytes);
         const downshift = meter.rateLimited && activeLimit > 1 ? { from: activeLimit, to: activeLimit - 1, callId } : undefined;
-        const exhausted = !stop && meter.failureKind && !meter.rateLimited && meter.retryCount === policy.retries
-          ? { kind: 'call_retries_exhausted', callId } : undefined;
+        const finished = manifest.mode === 'offline' || active.get(callId)?.sent;
+        if (policy.retriesPerKind !== undefined && finished) lastAttempt.set(folder, meter);
+        const exhausted = !stop ? attemptStop(policy, meter, retries) : undefined;
         meters.push({ meter, sha256 });
         let judgement, cell;
         if (meter.role === 'judge' && !meter.failureKind) {

@@ -4,7 +4,8 @@ import { isDeepStrictEqual as same } from 'node:util';
 import { rounds } from '../config/e1.mjs';
 import { filenames } from '../contracts/artifacts/schema.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
-import { attemptFile, batchFolders, callIdFor, cellRow, covers, numericScores, replayJudge, verifyDialogue } from './cell-batch-plan.mjs';
+import { attemptFile, attemptStop, batchFolders, callIdFor, cellRow, covers, numericScores, replayJudge, retryClass, retryStop, verifyDialogue } from './cell-batch-plan.mjs';
+import { judgeContrastScenario } from './judge-contrast-plan.mjs';
 
 export const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 export const amount = (n, min, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(n) && n >= min && n <= max;
@@ -55,7 +56,7 @@ export function verifyCell(dir, manifest, { folder, artifacts, row }, attempts) 
   return { judgement, messages };
 }
 
-export function replayBatchJournal({ dir, events, start, end, manifest, manifestSha256, processIndex, used, selected, artifactPaths }) {
+export function replayBatchJournal({ dir, events, start, end, manifest, manifestSha256, processIndex, used, retries, lastAttempt, selected, artifactPaths }) {
   const { policy } = manifest.identity;
   const origin = events[0];
   requireThat(origin?.type === 'batch_start' && origin.startHash === hash(start) && origin.manifestSha256 === manifestSha256 && amount(origin.concurrency, 1, 5)
@@ -90,7 +91,7 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
       requireThat(!stop && active.size < activeLimit && next < order.length && event.folder === order[next] && !active.has(event.folder), `cell launch out of order or after stop at ${label}`);
       next++;
       active.set(event.folder, []);
-    } else if (event.type === 'reserve' || event.type === 'budget_stop') {
+    } else if (['reserve', 'budget_stop', 'retry_stop'].includes(event.type)) {
       const { scope, limit, folder } = event;
       const { role, turn, call, attempt } = scope ?? {};
       const canonical = role === 'teacher' || role === 'learner' || role === 'judge';
@@ -101,12 +102,22 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
       const retry = last && last.scope.role === role && last.scope.turn === turn && last.scope.call === call;
       const expectedRetryCount = retry ? last.meter.retryCount + Number(!last.meter.rateLimited) : 0;
       requireThat(retry ? last.meter.failureKind && attempt === last.scope.attempt + 1 : attempt === 1 && !last?.meter.failureKind, `attempt sequence differs at ${label}`);
+      const previous = lastAttempt.get(folder);
+      const exhausted = retryStop(policy, previous, retries, event.callId);
+      if (event.type === 'retry_stop') {
+        requireThat(exhausted && event.kind === exhausted.kind && event.failureKind === exhausted.failureKind, `retry stop with retries available at ${label}`);
+        stop = exhausted;
+        continue;
+      }
+      requireThat(!exhausted, `reservation after failure-kind retry limit at ${label}`);
       if (event.type === 'budget_stop') {
         requireThat(!covers(manifest.limits, used, limit), `budget stop with available balance at ${label}`);
         stop = { kind: 'budget_exhausted', callId: event.callId };
         continue;
       }
       requireThat(covers(manifest.limits, used, limit) && !group.some(prior => prior.callId === event.callId) && event.inFlight === running.size + 1, `reservation exceeds budget or concurrency at ${label}`);
+      const kind = retryClass(policy, previous);
+      if (kind) retries.set(kind, (retries.get(kind) ?? 0) + 1);
       used.attempts++;
       used.requestedOutputTokens += limit;
       const reserved = { ...event, expectedRetryCount, settled: false };
@@ -131,13 +142,22 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
       const [repetition, condition] = a.folder.split('/');
       requireThat(Object.entries(a.scope).every(([key, value]) => raw[key] === value) && (condition === undefined || raw.repetition === repetition && meter.repetition === repetition)
         && (manifest.mode !== 'real' || meter.failureKind || a.sent) && (!raw.outbound || a.sent || stop), `attempt original or request log disagrees at ${label}`);
+      if (manifest.scenario === judgeContrastScenario && manifest.mode === 'real') {
+        const phase = meter.phaseMs;
+        requireThat(meter.timeoutMs === policy.judge.timeoutMs && phase && amount(phase.ended, 0, meter.elapsedMs)
+          && (a.sent ? amount(phase.requestSent, 0, phase.ended) : phase.requestSent === null)
+          && ['headersReceived', 'firstByte', 'firstReasoning', 'lastReasoning', 'firstVisible'].every(key => phase[key] === null || a.sent && amount(phase[key], phase.requestSent, phase.ended))
+          && (phase.firstReasoning === null ? phase.lastReasoning === null : amount(phase.lastReasoning, phase.firstReasoning, phase.ended))
+          && (meter.reasoningTokens === null || amount(meter.reasoningTokens, 0))
+          && (meter.reportedOutputTokens === null || meter.reportedOutputTokens === meter.usage?.output), `invalid judge timing or usage at ${label}`);
+      }
       requireThat((a.ended?.status === 429 || meter.httpStatus === 429) ? meter.rateLimited === true : !meter.rateLimited || meter.failureKind === 'provider_failure', `rate-limit evidence differs at ${label}`);
       const expectedShift = meter.rateLimited && activeLimit > 1 ? { from: activeLimit, to: activeLimit - 1, callId: a.callId } : undefined;
-      const expectedStop = !stop && meter.failureKind && !meter.rateLimited && meter.retryCount === policy.retries
-        ? { kind: 'call_retries_exhausted', callId: a.callId } : undefined;
+      const expectedStop = !stop ? attemptStop(policy, meter, retries) : undefined;
       requireThat(same(event.downshift, expectedShift) && same(event.stop, expectedStop), `retry stop or downshift differs at ${label}`);
       if (expectedShift) { activeLimit--; downshifts.push(expectedShift); }
       stop ??= expectedStop ?? null;
+      if (policy.retriesPerKind !== undefined && (manifest.mode === 'offline' || a.sent)) lastAttempt.set(a.folder, meter);
       Object.assign(a, { meter, raw, sha256: sha, settled: true });
       running.delete(a.folder);
       if (meter.role === 'judge' && !meter.failureKind) {

@@ -12,6 +12,10 @@ export function cellResult(id, scores, error) {
 }
 export function binaryCellResult(id, scoring, error) {
   requireThat(cellIds.includes(id), 'unknown cell');
+  return binaryRulingResult(id, scoring, error);
+}
+export function binaryRulingResult(id, scoring, error) {
+  requireThat(nonblank(id), 'missing binary ruling ID');
   if (error) return { id, recorded: true, status: infraFailure, scored: false, validTotal: false, rate: null, failure: error };
   const { rate } = scoring;
   const validTotal = rate !== null;

@@ -137,6 +137,60 @@ test('the normal judge policy still sends the existing numeric reasoning cap', a
   assert.equal(rows[0].reasoningLimit, 16_384);
 });
 
+test('Qwen requests pin Parasail FP8 and omit reasoning on every strict JSON attempt', async t => {
+  const payloads = [];
+  const qwen = (content, finish, report = false) => (_signal, payload) => {
+    payloads.push(payload);
+    return new Response(sse({ provider: 'Parasail', model: 'qwen/qwen3-235b-a22b-2507',
+      choices: [{ index: 0, delta: { content }, finish_reason: finish }] })
+      + (report ? sse({ choices: [], usage: { prompt_tokens: 13, completion_tokens: 6, total_tokens: 19,
+        completion_tokens_details: { reasoning_tokens: 0 } } }) : '') + done, { headers });
+  };
+  const { judge, rows, originals } = setup(t, [qwen('{', 'length'), qwen(' ', 'stop'), qwen('{"answer":true} extra', 'stop'),
+    qwen('{"answer":true}', 'stop', true)], { judgePolicy: 'qwen-parasail' });
+  await assert.rejects(judge(), error => error.failure?.kind === 'judge_partial_failure' && error.failure.detail === 'invalid JSON document');
+  assert.deepEqual((await judge()).value, { answer: true });
+  assert.deepEqual(rows.map(row => row.failureKind), ['output_truncated', 'empty_unconfirmed', 'judge_partial_failure', null]);
+  for (const payload of payloads) {
+    assert.equal(payload.model, 'qwen/qwen3-235b-a22b-2507');
+    assert.deepEqual(payload.provider, { only: ['parasail/fp8'], order: ['parasail/fp8'], allow_fallbacks: false, require_parameters: true });
+    for (const forbidden of ['reasoning', 'reasoning_effort', 'include_reasoning', 'thinking', 'extra_body', 'models', 'route']) {
+      assert.equal(Object.hasOwn(payload, forbidden), false);
+    }
+    assert.equal(payload.max_tokens ?? payload.max_completion_tokens, 8_192);
+    assert.equal(payload.response_format.type, 'json_schema');
+    assert.equal(payload.response_format.json_schema.strict, true);
+    assert.deepEqual(payload.response_format.json_schema.schema, schema);
+  }
+  assert.deepEqual(originals.at(-1).outbound.provider, payloads.at(-1).provider);
+  assert.equal(rows.at(-1).policyVersion, 'e1-call-policy-v6-qwen-parasail');
+  assert.equal(rows.at(-1).reportedProvider, 'Parasail');
+  assert.equal(rows.at(-1).reasoningTokens, 0);
+  assert.equal(rows.at(-1).phaseMs.firstReasoning, null);
+});
+
+test('a response that names a different Qwen provider cannot publish a judgement', async t => {
+  const other = () => new Response(sse({ provider: 'Venice', model: 'qwen/qwen3-235b-a22b-2507',
+    choices: [{ index: 0, delta: { content: '{"answer":true}' }, finish_reason: 'stop' }] }) + done, { headers });
+  const { judge, rows } = setup(t, [other], { judgePolicy: 'qwen-parasail' });
+  await assert.rejects(judge(), error => error.failure?.kind === 'configuration' && error.failure.detail === 'response judge route mismatch');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].reportedProvider, 'Venice');
+});
+
+test('Qwen fails closed for a mixed role, a text-only call, or a serialized routing override', async t => {
+  assert.throws(() => new Models({ mode: 'offline', roles: ['judge', 'learner'], responses: [], judgePolicy: 'qwen-parasail' }),
+    error => error.failure?.kind === 'configuration');
+  const { judge, judgeWithoutSchema, events } = setup(t, [], { judgePolicy: 'qwen-parasail' });
+  await assert.rejects(judgeWithoutSchema(), error => error.failure?.kind === 'configuration');
+  const stringify = JSON.stringify;
+  t.mock.method(JSON, 'stringify', (value, ...args) => stringify(
+    value?.model === 'qwen/qwen3-235b-a22b-2507' && Array.isArray(value.messages)
+      ? { ...value, provider: { ...value.provider, allow_fallbacks: true }, reasoning: { enabled: false } } : value, ...args));
+  await assert.rejects(judge(), error => error.failure?.kind === 'configuration' && error.failure.detail === 'outbound judge budget or schema mismatch');
+  assert.deepEqual(events, []);
+});
+
 test('the off policy fails before transport outside structured, judge-only calls', async t => {
   assert.throws(() => new Models({ mode: 'offline', roles: ['judge', 'learner'], responses: [], judgeReasoningOff: true }),
     error => error.failure?.kind === 'configuration');
