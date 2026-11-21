@@ -113,6 +113,24 @@ test('fidelity replays fixed nine-message histories, binds each audit and detect
   assert.ok(rejected.body.invalid.some(message => message.includes(changed)));
 });
 
+test('the formal matrix sends the validated audit prompt and the clarified pretender rules', t => {
+  const root = sandbox(t);
+  const call = invoke(root, '--scenario', 'hard-learner-fidelity', '--id', 'validated');
+  assert.equal(call.status, 0, call.stderr);
+  const manifest = read(root, 'validated/manifest.json');
+  const audit = read(root, 'validated/r1/S0-01/pretender/calls/fidelity_audit-4-1-1.json');
+  assert.equal(hash(audit.context.systemPrompt), 'c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0');
+  const profile = condition => read(root, `validated/r2/S0-06/pretender/${condition}/calls/learner-4-1-1.json`).context.systemPrompt;
+  assert.match(profile('answer'), /say that you follow the reasoning in your own words/);
+  assert.doesNotMatch(profile('answer'), /or tells you an answer, briefly act as if you follow it: agree or echo/);
+  assert.match(profile('independent'), /name the gap in your original reasoning and leave that gap unresolved/);
+  assert.match(profile('independent'), /Choose an initial step that leaves your original misconception unresolved/);
+  assert.match(profile('targeted'), /If the tutor gives a targeted contrast, work through it/);
+  assert.equal(manifest.identity.learners.stubborn, '9a5b8e7256c3885d004eca0ff4ed028448ca42f67b6dfb64ddb4db34c7be1b37');
+  assert.equal(manifest.identity.learners['answer-seeker'], 'a0d26c5fb22f753c9be92f905775b408ab06fa0b2ddd31b542cf06b572650f6e');
+  assert.notEqual(manifest.identity.learners.pretender, 'd9dab8e5440f362d0faeb46c6a9ba9f75647bc49f7b200998bd587acae930c41');
+});
+
 test('fidelity keeps the planned denominators and valid receipts when the shared budget stops the batch', t => {
   const root = sandbox(t);
   const call = invoke(root, '--scenario', 'hard-learner-fidelity', '--id', 'capped', '--max-attempts', '2');
