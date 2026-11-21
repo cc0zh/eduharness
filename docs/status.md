@@ -1,5 +1,15 @@
 # 当前状态
 
+<a name="round2-reasoning-off"></a>
+
+## 第二轮 ①d HY4 关推理小对照（20261121）
+
+**策略已实现，真实对照未启动。** `da95e66` 增加显式选用的 `e1-call-policy-v5-reasoning-off`。按 [OpenRouter 文档](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)向 `tencent/hy4-flash` 发送 `reasoning.enabled:false`，保留 strict JSON Schema、`e1-binary-v2` 题面和提示。默认 v4 未变。传输测试确认实际出站开关，未证明下游遵守。实报推理缺失不当作零。工作区只剩用户的 `AGENTS.md` 和 `docs/plans/roadmap.md`，clean-tree 检查未放行，也没有当前 HEAD 的干净检查收据。
+
+预登记真实 ID `round2-reasoning-off-01`，固定 S1 五格三遍和三份曾超时的输入，一进程串行，180 秒截止。SHA256 `f2e1de0db60bff27331d888607a6295cba297a4aa046305f1da8793bf782a46f`。预检 0 请求，硬上限 26 次、1,703,936 请求输出 token。离线 18/18 有判决、0 外部请求，逐原件验真通过，PID `46280` 一致。这个实验须用 `node scripts/reasoning-off.mjs --verify-run <id> --report` 完整回放；项目通用命令对此实验只核对进程收据，不能替代原件验真。[预登记](../.tmp/scratch/reasoning-off/preregistration.md) · [预检与未测报告](../.tmp/scratch/reasoning-off/reasoning-off-report.md) · [离线复核](../runs/round2-reasoning-off-faux-01/verify-run.json)
+
+**(a)–(e) 均未实测，暂不切换裁判。** 预计真实身份与开推理分开，不能合并判决。小对照只决定是否采用关推理，不用于冻结尺子；断点续跑和受控并发由另一会话负责。评测身份包含编排、收据及裁判源码哈希。两项合入后，S1 和定向复测需用最终身份重跑。
+
 <a name="round2-perturbation-v2"></a>
 
 ## 第二轮 ①c 学生证据与定向复测（20261121）
