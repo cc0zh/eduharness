@@ -2,9 +2,9 @@ import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { exact, hash, message, requireThat } from '../core/schema.mjs';
 
-export const binaryRuler = 'e1-binary-v1';
-export const binaryOutputContract = 'judge-output-v3';
-export const binaryIdentityVersion = 'evaluation-identity-v3';
+export const binaryRuler = 'e1-binary-v2';
+export const binaryOutputContract = 'judge-output-v4';
+export const binaryIdentityVersion = 'evaluation-identity-v4';
 export const notApplicable = 'N/A';
 
 const L = 'learner', T = 'teacher';
@@ -18,8 +18,8 @@ export const binaryQuestions = {
   S1: question('Earlier help failed at a specific step. The tutor then offers more concrete support on that same step and still leaves a step to attempt. A first hint, generic encouragement, or a complete solution does not qualify.', { initial: T, blocked: L, escalation: T }),
   S2: question('After a learner success, the tutor reduces support by returning a substantive decision and does not take over that decision on later related opportunities. Cite the earlier support, success, fading, and related learner follow-up.', { prior: T, progress: L, fading: T, followup: L }),
   S3: question('The first substantive tutor response gives the complete worked solution to the original problem. Confirming the result alone is insufficient.', { opening: T }),
-  A1: question('After the opening learner message, the learner carries out a new substantive reasoning step or check. Echoing, arithmetic on an already supplied expression, and merely proposing to try do not qualify. If carrying out a choice made in the preceding learner message, cite that choice too. If both occur in one message, leave choice null.', { step: L, choice: L }, ['choice']),
-  A2: question('The learner chooses a consequential method, candidate answer, or check and states their own reason or the consequence. Asking why, proposing that the tutor perform it, or following a specified operation does not qualify. The code checks timing and matches the citation to A1.', { choice: L }),
+  A1: question('After the opening learner message, the learner carries out a new substantive reasoning step or check in their own message. A derivation or setup in the original problem counts here if the learner supplies a substantive inference. It is not a new case for V1 or V2. A correct guess, bare conclusion, echo, arithmetic on an already supplied expression, or proposal without execution does not qualify. If carrying out a choice made in the preceding learner message, cite that choice too. If both occur in one message, leave choice null. Example: The learner guesses x and later only computes from the supplied equation. No.', { step: L, choice: L }, ['choice']),
+  A2: question('The learner originates a consequential method or check and states their own reason or the consequence in the cited message. Merely endorsing a method supplied by the tutor, doing an assigned operation, naming a candidate answer, or asking which method to use does not qualify. Cite the proposal, not a later endorsement. Example: The learner was assigned to multiply by z and says it might be useful for comparing terms. No.', { choice: L }),
   P0: question('The learner presents a substantive task, explanation, or check still to do and the tutor has a turn to leave a step to try. A guessed answer can still leave reasoning to do.', { task: L }),
   P1: question('The first substantive tutor response states the original final answer as settled or gives the complete solution. Confirming a learner guess as final qualifies. Confirming a substep while keeping the original question open does not.', { opening: T }),
   P2: question('The tutor gives a targeted hint for the learner’s obstacle or incorrect attempt and the learner actually attempts the step the tutor left open. An attempt may be wrong. Generic encouragement cannot count as the hint.', { stuck: L, hint: T, attempt: L }),
@@ -27,8 +27,8 @@ export const binaryQuestions = {
   R0: question('The tutor actually uses a representation, the learner explicitly remains stuck on the relation that representation addressed, and the tutor has another turn. A failed representation introduced only by the learner does not qualify.', { oldFrame: T, blocked: L }),
   R1: question('After the R0 obstacle, the tutor changes to a substantively different representation for the same relation. Rewording, changing numbers, or repeating a worked solution is insufficient. A genuinely different representation can still occur after the full answer.', { oldFrame: T, blocked: L, newFrame: T }),
   R2: question('The learner uses the R1 representation to explain that relation, derive a new result, or identify a concrete flaw in the mapping. Repeating or agreeing with the tutor’s mapping is insufficient.', { newFrame: T, uptake: L }),
-  V1: question('The tutor asks the learner to explain a concept or solve a new case, leaving the relevant explanation or result for the learner. Asking whether they understand, doing the check for them, and claiming they checked do not qualify.', { prompt: T }),
-  V2: question('After a tutor turn, the learner independently gives a correct conceptual reason or carries through a new case without being given the key reasoning. Echoing or completing a specified arithmetic operation is insufficient. Cite the tutor prompt if answering a specific check. Leave it null for spontaneous checks.', { response: L, prompt: T }, ['prompt']),
+  V1: question('The tutor asks the learner to explain why a concept applies or to solve a new problem with a changed condition (near transfer). The tutor must leave the key explanation or reasoning to the learner. Asking for only an answer, a setup or another step within the original problem, or whether the learner understands does not qualify. Doing the check or claiming it happened does not qualify. Example: The tutor asks for the BE equation in the original problem. No.', { prompt: T }),
+  V2: question('After a tutor turn, the learner gives a correct conceptual reason in their own message or solves a new problem with a changed condition (near transfer), without having been given the key reasoning by the tutor. A bare answer, number, conclusion, or guess is not an explanation. Repeating a tutor-given fact without saying how it supports the answer is not a reason. Continuing or setting up the original problem is not a new case. Cite the tutor prompt if answering a specific check. Leave it null for spontaneous checks. Examples: The learner guesses x without saying why. No. The learner writes the original BE equation without a conceptual explanation. No.', { response: L, prompt: T }, ['prompt']),
 };
 
 export const binaryGates = {
@@ -102,6 +102,7 @@ function validateAnswers(answers, messages) {
   requireThat(!yes('A1') || ref('A1', 'choice') === null || ref('A1', 'choice') === ref('A1', 'step') - 2, 'A1: choice must be in the preceding learner message');
   requireThat(!yes('A2') || ref('A2', 'choice') > Math.floor(messages.length * 2 / 3), 'A2: choice outside the final third');
   requireThat(!yes('V2') || ref('V2', 'response') > 1, 'V2: response must follow a tutor turn');
+  requireThat(!yes('V2') || !yes('V1') || ref('V2', 'response') > ref('V1', 'prompt'), 'V2: response must follow the V1 prompt');
 }
 
 export function parseBinaryJudgement(text, view, schema = binaryJudgementSchema(view)) {

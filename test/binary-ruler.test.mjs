@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import examples from './fixtures/binary-ruler-examples.json' with { type: 'json' };
 import * as artifacts from '../contracts/artifacts/schema.mjs';
+import { gradeBinary } from '../src/binary-judge.mjs';
 
 const loadRuler = () => import('../contracts/judge/binary.mjs').catch(error => {
   assert.notEqual(error.code, 'ERR_MODULE_NOT_FOUND', 'the binary ruling contract must exist');
@@ -65,11 +66,60 @@ test('N/A does not count in a cell or a pair, and missing scored evidence is sep
   assert.equal(compareBinary(normal, bad, 'productive_struggle').targetDelta, 2);
   assert.equal(compareBinary(normal, null, 'productive_struggle').pairedRateDelta, null);
   assert.throws(() => compareBinary(normal, { ...bad, ruler: 'e1-numbered-evidence-v3' }, 'productive_struggle'), /ruler/i);
+  assert.throws(() => compareBinary(normal, { ...bad, ruler: 'e1-binary-v1' }, 'productive_struggle'), /ruler/i);
   const allNA = summarizeBinary(Object.fromEntries(dimensionNames.map(key => [key, 'N/A'])));
   assert.deepEqual([allNA.points, allNA.possible, allNA.rate], [0, 0, null]);
   assert.equal(compareBinary(normal, allNA, 'productive_struggle').commonPossible, 0);
   assert.equal(compareBinary(normal, allNA, 'productive_struggle').pairedRateDelta, null);
   assert.throws(() => summarizeBinary({ ...allNA.scores, productive_struggle: null }), /score/i);
+});
+
+test('four questions and the outgoing prompt require substantive student evidence', async t => {
+  const { binaryQuestions } = await loadRuler();
+  let outgoing;
+  await gradeBinary({ usesStructuredJudgement: () => true, complete(_scope, context, validate) {
+    outgoing = context.systemPrompt;
+    return { value: validate(json()) };
+  } }, numberedView, { turn: 4, runId: 'prompt-check', cell: 'normal' });
+  const rules = {
+    V1: [/explain why/i, /new problem with a changed condition/i, /leave.*(?:reasoning|explanation)/i],
+    V2: [/in (?:their|the learner's) own message/i, /(?:gives|states) a correct conceptual reason/i, /new problem with a changed condition/i, /(?:bare|only).*\b(?:number|answer|conclusion)\b/i],
+    A1: [/carries out.*substantive reasoning/i, /original problem.*(?:counts here|A1)/i, /guess.*(?:not qualify|do not count)/i],
+    A2: [/originates.*method/i, /reason or (?:the )?consequence/i, /merely (?:accepting|endorsing|agreeing)/i],
+  };
+  const negatives = {
+    V1: /asks.*\bBE equation\b.*original problem.*No/i,
+    V2: /guesses x.*without saying why.*No.*writes.*original.*BE equation.*No/i,
+    A1: /guesses x.*No/i,
+    A2: /assigned.*multiply.*by z.*might be useful.*No/i,
+  };
+  const superseded = /explain a concept or solve a new case|carries through a new case|chooses a consequential method, candidate answer/i;
+  for (const [id, criteria] of Object.entries(rules)) await t.test(id, () => {
+    const line = outgoing.split('\n').find(line => line.startsWith(`${id}:`));
+    assert.ok(line);
+    for (const criterion of criteria) {
+      assert.match(binaryQuestions[id].text, criterion);
+      assert.match(line, criterion);
+    }
+    assert.match(line, negatives[id]);
+    assert.doesNotMatch(line, superseded);
+  });
+});
+
+test('V2 cites a learner response after V1 when both are Yes, even with separate anchors', async () => {
+  const { bindBinary, parseBinaryJudgement } = await loadRuler();
+  const view = bindBinary(numberedView);
+  const parse = yes => parseBinaryJudgement(json(yes), view);
+  for (const yes of [{ V1: [6], V2: [5, 4] }, { V1: [6], V2: [5] }]) {
+    assert.throws(() => parse(yes), /V2.*V1/i);
+  }
+  assert.throws(() => parse({ V1: [4], V2: [6, 4] }), /role/i);
+  assert.throws(() => parse({ V1: [4], V2: [5, 6] }), /order/i);
+  const same = parse({ V1: [4], V2: [5, 4] });
+  assert.equal(same.messageIds.V2.response, numberedView[4].id);
+  assert.equal(same.scoring.scores.verification_or_transfer, 2);
+  assert.equal(parse({ V1: [4], V2: [7, 6] }).scoring.scores.verification_or_transfer, 1);
+  assert.equal(parse({ V2: [5] }).scoring.scores.verification_or_transfer, 0);
 });
 
 test('binary cell receipts distinguish a complete ruling, zero opportunities, and a technical failure', async () => {

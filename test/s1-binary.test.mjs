@@ -76,9 +76,8 @@ test('S1 replays all five dialogues in one process three times with anchored art
   const result = json('replay/result.json');
   const start = json('_receipts/replay.start.json');
   const processReceipt = json('_receipts/replay.process.json');
-  assert.equal(manifest.identity.ruler, 'e1-binary-v1');
-  assert.equal(manifest.identity.judgeOutputContract, 'judge-output-v3');
-  assert.equal(manifest.identity.version, 'evaluation-identity-v3');
+  assert.deepEqual([manifest.identity.ruler, manifest.identity.judgeOutputContract, manifest.identity.version],
+    ['e1-binary-v2', 'judge-output-v4', 'evaluation-identity-v4']);
   assert.equal(manifest.identity.preregistrationSha256, registrationDigest);
   assert.equal(manifest.source.ruler, 'e1-numbered-evidence-v3');
   assert.ok(manifest.identity.sources['contracts/judge/binary.mjs']);
