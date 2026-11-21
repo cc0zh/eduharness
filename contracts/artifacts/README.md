@@ -10,6 +10,10 @@
 
 `node src/cli.mjs --verify-run <id>` 只读这三类进程原件，以及存在时的评测收据和关联产物。缺原件、字段不完整、请求起止不配对或收据字段矛盾时返回非零并列出缺失项。测试评测收据按有效总分格同时锚定对话与裁判 JSON 字节哈希。历史运行没有这些新原件时如实报告缺失，不回填。
 
+`cell-batch-v1` 用于 E1、E2 和 S1。首个进程沿用 `<id>.start.json`、`<id>.process.json`、`<id>.requests.jsonl`。初次启动原子登记 ID 和 manifest，防止强杀后没有原身份可核对。第 `N` 个进程使用 `<id>.pN` 前缀，启动记录绑定上一进程的原件哈希。每个进程的评测收据为 `<id>.pN.evaluation.json`；`<id>.json` 是最新发布的评测收据。manifest 的 `writer` 只指初次启动，格子和调用另记 `processIndex`。同一 `callId` 可能出现在一次失败及其补跑中，须与 `processIndex` 一起定位。
+
+每个进程的格子原件放在 `<run>/_processes/N/`。日志记录格子启动、发送前预留、请求起止、结算与故障格提交。一笔预留只允许一次出站请求。SDK 内部重试关闭；若仍尝试重复发送，运行器在第二次发送前拒绝。成功裁判的结算同时提交格子原件摘要，包含对话、遥测、教师事件、调用及判决。`<run>/result.json` 及顶层格子目录是最新视图，不是续跑的依据。进程评测收据按计划排序，标记各格来源和累计硬额度。初次停线或被强杀时保留已提交的判决；未结算预留也占预算。只有进程确已中断时才允许存在未配对的请求；最终复核仍须核对所有进程及已结算原件。缺结算不表示请求未送达。旧收据不迁移。
+
 OpenRouter 裁判的 `telemetry.json` 另记 `phaseMs`。各值是相对尝试 `startedAt` 的单调毫秒偏移：`requestSent` 发起 fetch，`headersReceived` 收到响应头，`firstByte` 收到首个非空响应体块，`firstReasoning`、`lastReasoning` 是首末推理载荷，`firstVisible` 是首个非空白正文 delta，`ended` 是调用完成或中止（解析判决前）。未观察到的阶段为 `null`。这些值是客户端观察，不是供应商内部生成时刻。`reasoningTokens` 和 `reportedOutputTokens` 是实报计数；未上报不补零。后者含推理 token。
 
 ## 评测身份
@@ -20,4 +24,4 @@ OpenRouter 裁判的 `telemetry.json` 另记 `phaseMs`。各值是相对尝试 `
 
 同一尺子的对照须锁定其余评测条件。改进对照预登记允许变动的 harness 源码和资产，逐字段核对两侧 manifest，只放行这些变化及其派生哈希。当前 `identityId` 包含教师源码哈希，变更 harness 后应保留两侧各自的身份。要纳入新提示文件或工具配置，应证明其内容已进入来源证据。历史 v6 的运行锁、学生变化排除快照及端点指纹不能从现行字段推定。
 
-`S1-binary` 使用 `evaluation-identity-v4`，绑定候选尺子源码、预登记哈希、源 manifest 和五份对话哈希。格子坐标为 `<遍次>/<条件>`。格子的 `scoring` 记录逐维分数和适用集合、`points`、`possible` 与 `rate`。裁判故障格无 `scoring`。运行的 `acceptance` 表示拿齐计划内有效分率；`assessment.passed` 才是预登记方向判线，另存于评测收据的 `passed`。`--verify-run` 核对启动、进程、manifest 和遥测 PID，锚定并重放判决、调用和各格对话。旧 `evaluation-identity-v3` 的二元判决用其运行提交复核。[二元尺子契约](../judge/binary.md)
+`S1-binary` 使用 `evaluation-identity-v4`，绑定候选尺子源码、预登记哈希、源 manifest 和五份对话哈希。格子坐标为 `<遍次>/<条件>`。格子的 `scoring` 记录逐维分数和适用集合、`points`、`possible` 与 `rate`。裁判故障格无 `scoring`。运行的 `acceptance` 表示拿齐计划内有效分率；`assessment.passed` 才是预登记方向判线，另存于评测收据的 `passed`。`--verify-run` 按格所属进程核对 PID，锚定并重放判决、调用和各格对话。旧 `evaluation-identity-v3` 的二元判决用其运行提交复核。[二元尺子契约](../judge/binary.md)

@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
+import { failure } from '../contracts/core/schema.mjs';
+import { verifyBatchRun } from './cell-batch-verification.mjs';
 import { checkSnapshot, checkout } from './real-preflight.mjs';
+import { atomicBytes, atomicJson, readRequestEvents, receiptPaths } from './receipt-files.mjs';
 import { s1Scenario } from './s1-binary-plan.mjs';
 import { verifyS1Artifacts } from './s1-binary-verification.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256']);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--concurrency']);
 const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario]);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
@@ -21,12 +24,12 @@ function parameterSummary(argv) {
   for (let index = 0; index < argv.length; index++) {
     const [name, inline] = argv[index].split('=', 2);
     if (!name.startsWith('--')) continue;
-    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost', '--generate-only'].includes(name) ? name : '<unknown>');
+    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost', '--generate-only', '--resume'].includes(name) ? name : '<unknown>');
     if (!safeOptions.has(name)) continue;
     const value = inline ?? (argv[index + 1]?.startsWith('--') ? undefined : argv[++index]);
     if (value === undefined) continue;
     const safe = ['--mode', '--scenario', '--phase', '--harness'].includes(name) && safeValues.has(value)
-      || name.startsWith('--max-') && /^\d+$/.test(value)
+      || (name.startsWith('--max-') || name === '--concurrency') && /^\d+$/.test(value)
       || name === '--freeze' && /^[a-f0-9]{40}$/.test(value)
       || name === '--preregistration-sha256' && sha256(value);
     values[name.slice(2).replaceAll('-', '_')] = safe ? value : '<redacted>';
@@ -34,55 +37,58 @@ function parameterSummary(argv) {
   return { flags: [...new Set(flags)].sort(), values };
 }
 
-function atomicJson(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
-  const fd = openSync(temporary, 'wx');
-  try {
-    writeFileSync(fd, bytes);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try { linkSync(temporary, path); }
-  finally { unlinkSync(temporary); }
-  return digestBytes(bytes);
-}
-
-export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv = process.argv.slice(2) }) {
-  const receiptRoot = resolve(root, '_receipts');
-  const startPath = pathFor(resolve(root), id, 'start');
-  const requestPath = join(receiptRoot, `${id}.requests.jsonl`);
-  const processPath = pathFor(resolve(root), id, 'process');
-  for (const path of [join(resolve(root), id), join(receiptRoot, `${id}.json`), requestPath, processPath]) {
+export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv = process.argv.slice(2), resume, manifest }) {
+  root = resolve(root);
+  const processIndex = resume?.processIndex ?? 1;
+  const paths = receiptPaths(root, id, processIndex);
+  const { start: startPath, journal: requestPath, process: processPath } = paths;
+  for (const path of [requestPath, processPath, ...(resume ? [] : [join(root, id), paths.latest])]) {
     if (existsSync(path)) throw Object.assign(new Error(`run ID already in use: ${id}`), { code: 'EEXIST' });
   }
   const snapshot = checkSnapshot(checkout);
+  if (resume && (snapshot.head !== resume.head || mode === 'real' && !snapshot.clean)) throw Error('resume HEAD or worktree changed before claiming the process');
+  if (manifest && mode === 'real' && (!snapshot.clean || snapshot.head !== manifest.checkReceipt?.head)) throw failure('preflight_failed', {}, 'checkout changed before claiming the run');
+  const writer = { pid: process.pid, startedAt: isoNow() };
   const start = {
     runId: id,
     head: snapshot.head,
     clean: snapshot.clean,
     mode: ['offline', 'real'].includes(mode) ? mode : 'unknown',
     parameters: parameterSummary(argv),
-    pid: process.pid,
-    startedAt: isoNow(),
+    ...writer,
+    ...(manifest && { batchManifest: { ...manifest, writer } }),
+    ...(resume && { resume: { processIndex, previousSha256: resume.previousSha256 } }),
   };
   atomicJson(startPath, start);
   writeFileSync(requestPath, '', { flag: 'wx' });
-  let evaluationSha256;
-  return {
+  let evaluationSha256, batchJournal;
+  const recorder = {
     start,
     startPath,
     requestPath,
     processPath,
+    processIndex,
+    beginBatch(manifestSha256, concurrency) {
+      batchJournal = '';
+      recorder.append({ type: 'batch_start', manifestSha256, concurrency, startHash: digest(start) });
+    },
     publishEvaluation(evaluation) {
-      evaluationSha256 = atomicJson(join(receiptRoot, `${id}.json`), evaluation);
+      if (batchJournal !== undefined) {
+        evaluationSha256 = atomicJson(paths.evaluation, evaluation);
+        atomicJson(paths.latest, evaluation, true);
+      } else evaluationSha256 = atomicJson(paths.latest, evaluation);
     },
     append(event) {
+      const line = `${JSON.stringify({ ...event, timestamp: isoNow() })}\n`;
+      if (batchJournal !== undefined) {
+        const next = batchJournal + line;
+        atomicBytes(requestPath, Buffer.from(next), true);
+        batchJournal = next;
+        return;
+      }
       const fd = openSync(requestPath, 'a');
       try {
-        appendFileSync(fd, `${JSON.stringify({ ...event, timestamp: isoNow() })}\n`);
+        appendFileSync(fd, line);
         fsyncSync(fd);
       } finally { closeSync(fd); }
     },
@@ -97,11 +103,13 @@ export function startRunReceipt({ root = 'runs', id = randomUUID(), mode, argv =
         endedAt: isoNow(),
         requestCount: requests.filter(event => event.type === 'request_start').length,
         acceptance,
+        ...((batchJournal !== undefined || manifest || resume) && { processIndex, journalSha256: digestBytes(readFileSync(requestPath)) }),
         ...(evaluationSha256 && { evaluationSha256 }),
         ...(error && { error }),
       });
     },
   };
+  return recorder;
 }
 
 export function installRunReceiptHandlers(recorder, getAcceptance = () => null) {
@@ -147,15 +155,10 @@ export function trackedFetch(fetchImpl, recorder, callId) {
   };
 }
 
-function readRequestEvents(path) {
-  const text = readFileSync(path, 'utf8');
-  if (!text) return [];
-  if (!text.endsWith('\n')) throw Error('request log is truncated');
-  return text.slice(0, -1).split('\n').map(line => JSON.parse(line));
-}
-
 export function verifyRun(root, id) {
   root = resolve(root);
+  const batch = verifyBatchRun(root, id);
+  if (batch) return batch;
   const missing = [], invalid = [];
   const load = (path, label, expectedHash) => {
     if (!existsSync(path)) {

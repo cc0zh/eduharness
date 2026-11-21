@@ -1,5 +1,23 @@
 # 当前状态
 
+<a name="round2-runner-merge"></a>
+
+## 第二轮 ①f runner 本地合并（20261121）
+
+`main` 合入 `f8fd2db`。`src/cli.mjs` 的续跑和格级并发使用默认 `e1-call-policy-v4`。①d 的关推理对照由 `scripts/reasoning-off.mjs` 串行执行。关推理与并发预留的组合在共享批执行层用离线传输夹具验证，出站和回放都核对批身份中的策略。
+
+| 离线场景 | `--verify-run` 已核对 |
+| --- | --- |
+| 强杀后同 ID 续跑 | 首进程保留 1 个合规判决，第二进程补 14 格，共预留 16 次。首格原件 SHA256 相同。 |
+| 并发 3 的次数和 token 上限 | 两个独立场景均拦住第 3 次预留，各结算 2 次，预留 131,072 输出 token。关推理组合也通过。 |
+| 模拟 429 | 并发从 3 降至 2，保留两次普通重试。 |
+
+未筛选套件的 `npm run check` 在禁止访问受保护输入时，38 个导入边界通过，TAP 116 项通过、15 项因数据隔离失败。正式检查收据尚缺。组合测试从 0/1 转为 1/1，①d 仓库用例 15/15、离线入口 1/1，①e 原 12 条均通过。原件和操作记录见本机 `.tmp/scratch/merge-runner/progress.md`。
+
+S1 参考 `identityId` 为 `9d65170405bb20bd2935341e56029144f490783b8e31a1003ea95014c245252a`。计算采用合并后源码、`S1-binary` 真实模式、`e1-binary-v2`、默认 v4、冻结源 `e2-real-20261119-06`、45 次与 2,949,120 输出 token 上限，以及历史预登记摘要 `2ed20c5803aaa3d4c01773cbe2f8531083b22693ab05cad5522685aa1c15cf13`。实际启动前须为最终配置重新登记并计算身份。S1 和定向复测都须在最终 runner 上按各自登记身份重跑，结果通过后才可冻结尺子。
+
+DeepSeek V4.1 Flash 独立审查确认可以本地合并。关推理与并发的证据覆盖两项预留上限及遥测回放。①d 历史预登记和原件用记录提交的源码复核。
+
 <a name="round2-reasoning-off"></a>
 
 ## 第二轮 ①d HY4 关推理小对照（20261121）
@@ -17,6 +35,16 @@
 用户文档由 `19e47bb` 原样提交，真实运行用该干净 HEAD 的 [136 项检查收据](../runs/_receipts/check-19e47bb22f7e48789e3560dc91893f880cdae55d.json)。预登记绑定源码而不是 HEAD，SHA256 `f2e1de0db60bff27331d888607a6295cba297a4aa046305f1da8793bf782a46f` 不变，真实身份 `cd892f897e2f6be085cc76d24fbe6e11f00a2d781a293f8aa1616b30d49b4a8b` 与预检一致。运行退出 1；专用 `--verify-run` 退出 0，启动、进程、manifest 与三条遥测 PID `45888` 一致。请求 3/26 次，出站额度 196,608/1,703,936 token，实报 8,883 token，无缺报。[预登记](../runs/round2-reasoning-off-01/preregistration.md) · [逐原件验真](../runs/round2-reasoning-off-01/verify-run.json)
 
 默认 v4 不变。备选 Qwen3 235B Instruct / Parasail，本次不切换。此小对照只决定是否采用关推理，不用于冻结尺子。评测身份包含编排、收据与裁判源码哈希；续跑和并发合入后，S1 与定向复测需用最终身份重跑。
+
+<a name="round2-runner-resume-concurrency"></a>
+
+## 第二轮 ①e 断点续跑与格级并发（20261121）
+
+**E1、E2、S1 的离线原件通过复核。** `--resume` 验证原身份、预登记、HEAD、源码和历史原件后才补格。`--concurrency` 默认 1，最多 5。同一 run 所有进程共用次数和请求输出额度，尚无结算的预留也占预算。`ruler-expand` 保留原串行入口及门槛。[操作](runbook.md#格级并发和断点续跑) · [收据契约](../contracts/artifacts/README.md#运行收据)
+
+强杀演示中，进程 1 的一个合规低分判决原样保留；进程 2 补 14 格，累计扣 16 次。并发 3 的独立次数、token 上限演示分别在第 3 次预留前停线，两条已开始的调用照常结算。模拟 429 使并发从 3 降为 2，且仍有两次普通重试。三场都是 faux，未作真实评测。测试和原件见本机 `.tmp/scratch/runner-concurrency/`；分支检查未跑受保护题集，不作为真实模式检查收据。
+
+**合入会改变评测身份。** `evaluationIdentity()` 已把 `src/run.mjs`、`src/run-receipts.mjs` 等 runner 源码哈希写入 `identity.sources`；S1 还绑定专用入口和复核源码。合入后，S1 和定向复测须用最终身份各自重跑，再冻结尺子。既有 ①b、①c 的历史结论和原件不回填，也不能换身份沿用 run ID。
 
 <a name="round2-perturbation-v2"></a>
 

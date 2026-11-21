@@ -1,15 +1,15 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { policy, routes, taskId } from '../config/e1.mjs';
-import { binaryCellResult, cellIds, filenames } from '../contracts/artifacts/schema.mjs';
-import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
+import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
+import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { binaryIdentityVersion, binaryOutputContract, binaryRuler } from '../contracts/judge/binary.mjs';
 import { gradeBinary } from './binary-judge.mjs';
-import { attemptBudget } from './models.mjs';
+import { runCellBatch } from './cell-batch.mjs';
 import { binaryOfflineResponses } from './offline.mjs';
 import { verifyRun } from './run-receipts.mjs';
-import { evaluationIdentity, executeCell, frozenDialogue, write } from './run.mjs';
-import { assessS1, constructExpectations, requireRegisteredSource, s1Path, s1Plan, s1PreregistrationFile, s1Scenario, s1SourceId, s1Targets } from './s1-binary-plan.mjs';
+import { evaluationIdentity, executeCell, frozenDialogue } from './run.mjs';
+import { constructExpectations, requireRegisteredSource, s1Plan, s1Scenario, s1SourceId, s1Targets } from './s1-binary-plan.mjs';
 
 export function s1Budget() {
   const typicalCalls = s1Plan.length;
@@ -39,13 +39,9 @@ export function prepareS1({ root, mode, judgeOnly, registration, registrationDig
   return { frozen, source, dataset: manifest.identity.dataset, preregistration, registrationDigest };
 }
 
-export async function runS1({ id, root, mode, judgeOnly, limits, checkReceipt, recorder }, prepared) {
+export async function runS1(config, prepared) {
+  const { id, mode, judgeOnly, limits, checkReceipt } = config;
   const { frozen, source, dataset, preregistration, registrationDigest: preregistrationSha256 } = prepared;
-  const { pid, startedAt } = recorder.start;
-  const writer = { pid, startedAt };
-  const runDir = join(root, id);
-  mkdirSync(runDir);
-  if (preregistration) writeFileSync(join(runDir, s1PreregistrationFile), preregistration);
   const identity = Object.assign(evaluationIdentity({ mode, limits, dataset, provenance: source, sources: [
     'contracts/judge/binary.mjs', 'src/binary-judge.mjs', 'src/s1-binary.mjs', 'src/s1-binary-plan.mjs', 'src/s1-binary-verification.mjs', 'config/e2.mjs', 'scripts/s1-binary-report.mjs',
   ] }), {
@@ -54,39 +50,10 @@ export async function runS1({ id, root, mode, judgeOnly, limits, checkReceipt, r
   });
   const scenario = s1Scenario;
   const identityId = hash({ mode, scenario, identity });
-  const manifestPath = join(runDir, filenames.manifest), resultPath = join(runDir, filenames.result);
-  write(manifestPath, { id, scenario, taskId, mode, identity, identityId, budget: s1Budget(), limits, planned: s1Plan, writer, checkReceipt, source });
-  const reserve = attemptBudget(limits);
-  const cells = [], artifacts = [];
-  const result = { id, scenario, taskId, mode, runDir, acceptance: false, cells };
-  for (const coordinate of s1Plan) {
-    const { repetition, condition } = coordinate;
+  return runCellBatch(config, { id, scenario, taskId, mode, identity, identityId, budget: s1Budget(), limits, planned: s1Plan, checkReceipt, source }, (folder, context) => {
+    const [repetition, condition] = folder.split('/');
     const { messages, bytes } = frozen.get(condition);
-    const folder = s1Path(coordinate);
-    const digestFile = filename => hash(readFileSync(join(runDir, folder, filename)));
-    let judged;
-    try {
-      judged = await executeCell({ runDir, id, variant: condition, coordinate: { repetition }, mode, reserve, recorder, writer,
-        frozen: messages, frozenBytes: bytes, judgeOnly, grader: gradeBinary, fixtures: mode === 'offline' ? binaryOfflineResponses(condition) : undefined,
-      });
-      const telemetry = JSON.parse(readFileSync(join(runDir, folder, filenames.telemetry)));
-      artifacts.push({ ...coordinate, transcriptSha256: digestFile(filenames.transcript), telemetrySha256: digestFile(filenames.telemetry),
-        ...(!judged.failure && { judgeSha256: digestFile(filenames.judge) }),
-        attempts: telemetry.map(row => ({ path: row.attemptPath, sha256: hash(readFileSync(join(runDir, row.attemptPath))) })),
-      });
-    } catch (error) {
-      judged = { failure: failure('artifact_io', { repetition, condition }, error.message).failure };
-    }
-    const scoring = judged.verdict?.scoring;
-    cells.push({ repetition, ...binaryCellResult(condition, scoring, judged.failure) });
-    write(resultPath, result);
-    if (judged.failure) break;
-  }
-  result.acceptance = cells.length === s1Plan.length && cells.every(row => row.validTotal);
-  result.assessment = assessS1(cells);
-  write(resultPath, result);
-  recorder.publishEvaluation({ id, scenario, mode, acceptance: result.acceptance, passed: result.assessment.passed, identityId, manifestSha256: hash(readFileSync(manifestPath)),
-    resultSha256: hash(readFileSync(resultPath)), preregistrationSha256, cells: artifacts,
-  });
-  return result;
+    return executeCell({ ...context, id, variant: condition, coordinate: { repetition }, mode,
+      frozen: messages, frozenBytes: bytes, judgeOnly, grader: gradeBinary, fixtures: mode === 'offline' ? binaryOfflineResponses(condition) : undefined });
+  }, preregistration);
 }

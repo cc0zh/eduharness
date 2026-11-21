@@ -11,6 +11,6 @@ npm ci
 node src/cli.mjs --mode offline --run-root runs --id e1-first
 ```
 
-从 stdout 读取结果 JSON，或打开 `runs/e1-first/result.json`。对照每格的 `judge.json` 和 `transcript.json`，用消息 ID 查原文。离线通过只说明运行和证据链可重跑，不代表真实评估通过。再次运行时使用新的 ID。
+从 stdout 读取结果 JSON，或打开 `runs/e1-first/result.json`。对照每格的 `judge.json` 和 `transcript.json`，用消息 ID 查原文。离线通过只说明运行和证据链可重跑，不代表真实评估通过。重新试跑用新 ID；补原批次见[断点续跑](docs/runbook.md#格级并发和断点续跑)。
 
 `npm run check` 运行本地测试和契约导入边界检查。真实运行及原件回读见[运行手册](docs/runbook.md)。各维度、分档、有效总分和坏教师目标见[裁判契约](contracts/judge/README.md)。
