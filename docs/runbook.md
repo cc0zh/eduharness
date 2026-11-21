@@ -31,6 +31,21 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 
 按授权额度启动时用 `--mode real --confirm-cost --preregistration <文件> --preregistration-sha256 <摘要> --id <已登记 ID>`，加预检的 `--max-attempts` 和 `--max-requested-output-tokens`。每格目录为 `r1/normal` 等。完成后执行 `node src/cli.mjs --verify-run <ID>`，再运行 `node scripts/s1-binary-report.mjs <ID>` 生成分数、引用和构造矩阵。以报告的逐遍适用分率及目标维方向检查预登记判线。
 
+## 导出离线 HTML 回读报告
+
+在含 `runs/<run-id>/` 的工作目录执行：
+
+```sh
+node src/cli.mjs --export-report s1-binary-round2-01
+node src/cli.mjs --export-report e2-real-20261119-06 --out e2-review.html
+```
+
+默认写到 `runs/<run-id>/report.html`。`--out <path.html>` 可选，父目录须已存在，导出不会覆盖同名文件。用浏览器打开报告，不需要网络。当前支持公开的 S1 二元 v1/v2 和 E1/E2 六维 v3 产物，不读取扩展题集、原始调用或 run 外的收据。
+
+先看判线、验真和用量，再点矩阵里的判定或 `#n` 回读原对话。也可以点列标题中的“查看对话”。没有可验证引用的判定只打开该格观察窗口。红字给出不一致的原件、字段或证据序号；无法安全绑定的引用不会跳到其他消息。
+
+导出不重算分数或用量。验真只读本 run 下已保存的 `verify-run.json`，没有就显示「未验真」。没有判线时不把 `acceptance` 当判线。历史 run 如果没有保存请求总数或用量汇总，报告标明缺项，并列出已有的逐次遥测。
+
 ## 扩展题集
 
 补尺子训练使用 `--scenario ruler-expand --phase train`。用 `--generate-only` 生成锁定训练清单的对话。用 `--judge-only <生成 run ID>` 评分。评分前会核对源进程和评测收据及每段对话的字节哈希与消息顺序。测试入口在尺子冻结前拒绝请求。每次先以新 ID 加 `--estimate-only` 预检，再登记实际使用的 run ID。
