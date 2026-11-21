@@ -1,8 +1,10 @@
+import { isDeepStrictEqual } from 'node:util';
 import { createAssistantMessageEventStream, createModels, fauxProvider } from '@earendil-works/pi-ai';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
 import { policy, routes } from '../config/e1.mjs';
+import { conflictingReasoningKeys, reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -75,13 +77,18 @@ export class Models {
   #reserve;
   #recorder;
   #cell;
+  #policy;
   #judgeTimeoutMs;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false }) {
     if (judgeTimeoutMs !== undefined && (roles.length !== 1 || roles[0] !== 'judge'
       || !Number.isSafeInteger(judgeTimeoutMs) || judgeTimeoutMs < 1 || judgeTimeoutMs > 2_147_483_647)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'positive judge timeout override requires a judge-only run');
     }
+    if (typeof judgeReasoningOff !== 'boolean' || judgeReasoningOff && (roles.length !== 1 || roles[0] !== 'judge')) {
+      throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'reasoning-off requires a judge-only run');
+    }
+    this.#policy = judgeReasoningOff ? reasoningOffPolicy : policy;
     this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
@@ -146,12 +153,17 @@ export class Models {
   async #invoke(scope, context, agentOptions, parse, stream, schema) {
     const { role, turn, call } = scope;
     const canonical = roleConfig(role);
-    const config = policy[canonical];
+    const callPolicy = this.#policy;
+    const config = callPolicy[canonical];
     const model = this.model(role);
+    if (config.reasoning && model.provider === routes.judge.provider && !schema) {
+      throw failure('configuration', { role, turn, call }, 'reasoning-off requires a structured OpenRouter judgement');
+    }
+    const reasoning = config.reasoning ?? { max_tokens: config.reasoningMaxTokens };
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
-    const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? policy.timeoutMs;
+    const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? callPolicy.timeoutMs;
     let priorValidation;
-    for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
+    for (let attempt = 1; attempt <= callPolicy.retries + 1; attempt++) {
       const coordinates = { role, turn, call, attempt };
       this.#reserve?.(coordinates, config.maxTokens);
       const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
@@ -168,14 +180,17 @@ export class Models {
       const fetch = schema ? (input, init) => {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
-        if (body.reasoning?.max_tokens !== config.reasoningMaxTokens || !Number.isInteger(cap) || cap - config.reasoningMaxTokens < config.minVisibleTokens || cap > config.maxTokens || body.provider?.require_parameters !== true || body.response_format?.json_schema?.strict !== true) {
+        const offMismatch = config.reasoning && (conflictingReasoningKeys.some(key => Object.hasOwn(body, key))
+          || body.model !== routes.judge.id || body.response_format?.type !== 'json_schema');
+        if (offMismatch || !isDeepStrictEqual(body.reasoning, reasoning) || !Number.isInteger(cap) || cap - (reasoning.max_tokens ?? 0) < config.minVisibleTokens || cap > config.maxTokens || body.provider?.require_parameters !== true || body.response_format?.json_schema?.strict !== true) {
           outboundRejection = 'outbound judge budget or schema mismatch';
           throw new Error(outboundRejection);
         }
         raw.outbound = {
           model: routes.judge.id,
           ...(body.max_tokens === undefined ? {max_completion_tokens:cap} : {max_tokens:cap}),
-          reasoning: { max_tokens: body.reasoning.max_tokens },
+          reasoning: body.reasoning,
+          ...(config.reasoning && { parameterNames: Object.keys(body).sort() }),
           provider: { require_parameters: true },
           response_format: { type: body.response_format.type, json_schema: { strict: true, schema: '[redacted]' } },
           messages: '[redacted]',
@@ -194,7 +209,7 @@ export class Models {
           requestLimit = sent;
           if (schema) return {
             ...payload,
-            reasoning: { max_tokens: config.reasoningMaxTokens },
+            reasoning,
             provider: { ...payload.provider, require_parameters: true },
             response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
           };
@@ -241,11 +256,11 @@ export class Models {
       const attemptPath = this.#save({
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
       }, {
-        ...coordinates, ...this.identity(role), policyVersion: policy.version, requestLimit, finish_reason, httpStatus,
+        ...coordinates, ...this.identity(role), policyVersion: callPolicy.version, requestLimit, finish_reason, httpStatus,
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
-        ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens }),
+        ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens ?? null }),
         ...(scope.binding && { binding:scope.binding }),
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
@@ -258,7 +273,7 @@ export class Models {
         }
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
-      if (attempt > policy.retries || agentOptions.signal?.aborted) throw failure(failureKind, { ...coordinates, attemptPath }, detail);
+      if (attempt > callPolicy.retries || agentOptions.signal?.aborted) throw failure(failureKind, { ...coordinates, attemptPath }, detail);
       priorValidation = canonical === 'judge' && failureKind === contractFailure ? detail : undefined;
     }
   }
