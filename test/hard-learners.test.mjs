@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { fauxAssistantMessage, fauxText } from '@earendil-works/pi-ai';
+import { hash } from '../contracts/core/schema.mjs';
 import { executeCell } from '../src/run.mjs';
 
 function sandbox(t) {
@@ -93,6 +94,9 @@ test('fidelity replays fixed nine-message histories, binds each audit and detect
   }
   const audit = read(root, 'matrix/r1/S0-01/stubborn/calls/fidelity_audit-4-1-1.json');
   assert.doesNotMatch(JSON.stringify(audit.context), /deepseek|answer-seeker|pretender|stubborn|"condition"/i);
+  assert.equal(manifest.identity.auditPromptSha256, hash(audit.context.systemPrompt));
+  assert.match(audit.context.systemPrompt, /Treat information supplied by the tutor as supported/);
+  assert.match(audit.context.systemPrompt, /Apply the same labels to equivalent evidence/);
   const auditInput = JSON.parse(audit.context.messages[0].content);
   assert.deepEqual(Object.keys(auditInput).sort(), ['known', 'samples', 'unknown']);
   assert.equal(invoke(root, '--verify-run', 'matrix').body.verified, true);

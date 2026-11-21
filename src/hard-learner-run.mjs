@@ -41,7 +41,7 @@ export async function runHardLearners({ id, root, mode, limits, checkReceipt, re
     learners: Object.fromEntries(hardProfileIds.map(id => [id, hardProfileIdentity(id)])),
     calls: { learner: policy.learner, fidelity_audit: fidelityPolicy, timeoutMs: policy.timeoutMs, retries: policy.retries, temperature: 0 },
     routes: mode === 'real' ? { learner: routes.learner, fidelity_audit: fidelityRoute } : 'pi-ai-faux',
-    planned: fidelityPlan, preregistrationSha256: registrationDigest, limits,
+    planned: fidelityPlan, auditPromptSha256: hash(fidelityAuditPrompt), preregistrationSha256: registrationDigest, limits,
     sources: Object.fromEntries(sources.map(path => [path, hash(readFileSync(new URL(`../${path}`, import.meta.url)))])),
   };
   const identityId = hash({ mode, scenario, identity });
