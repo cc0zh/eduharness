@@ -34,8 +34,13 @@ export function matchesJudgeParameters({ model, max_tokens, max_completion_token
   const count = expected.reasoning?.max_tokens ?? 0;
   const temperatureMatches = !Object.hasOwn(route, 'temperature')
     || (route.temperature === null ? temperature === undefined : temperature === route.temperature);
+  const formatMatches = route.responseFormat === null
+    ? response_format === undefined
+    : response_format?.type === 'json_schema' && response_format.json_schema?.strict === true;
+  const fieldMatches = !route.maxTokensField || names?.includes(route.maxTokensField)
+    && !names.includes(route.maxTokensField === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens');
   return model === route.id && Number.isInteger(cap) && cap - count >= config.minVisibleTokens && cap <= config.maxTokens
-    && same(reasoning, expected.reasoning) && response_format?.type === 'json_schema' && response_format.json_schema?.strict === true
+    && same(reasoning, expected.reasoning) && formatMatches && fieldMatches
     && temperatureMatches
     && (config.reasoning ? names?.includes('reasoning') && !conflictingReasoningKeys.some(key => names.includes(key)) : true)
     && (route.routing ? same(provider, expected.provider) && Array.isArray(names)
@@ -45,6 +50,7 @@ export function matchesJudgeParameters({ model, max_tokens, max_completion_token
 
 export function matchesReportedRoute(route, provider, model) {
   if (!route.routing) return true;
+  if (!route.routing.only?.length) return model == null || model === route.id;
   const [endpoint] = route.routing.only;
   const slug = endpoint.split('/')[0];
   const aliases = route.providerAliases ?? [slug, endpoint];

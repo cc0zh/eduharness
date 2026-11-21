@@ -17,7 +17,7 @@ import { offlineResponses } from './offline.mjs';
 import { createTeacher } from './teacher/session.mjs';
 
 export const source = name => readFileSync(new URL(`../${name}`, import.meta.url));
-const identityFiles = ['package-lock.json', 'config/e1.mjs', 'config/judge-reasoning-off.mjs', 'config/judge-contrast.mjs', 'src/judge-transport.mjs', 'src/judge-contrast-plan.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/models.mjs', 'src/run.mjs',
+const identityFiles = ['package-lock.json', 'config/e1.mjs', 'config/judge-reasoning-off.mjs', 'config/judge-contrast.mjs', 'src/judge-transport.mjs', 'src/judge-contrast-plan.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/provider-response-diagnostics.mjs', 'src/models.mjs', 'src/run.mjs',
   'src/cell-batch.mjs', 'src/cell-batch-plan.mjs', 'src/cell-batch-journal.mjs', 'src/cell-batch-verification.mjs', 'src/receipt-files.mjs',
   'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
 export const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');

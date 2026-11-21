@@ -3,10 +3,12 @@ import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
 import { policy, routes } from '../config/e1.mjs';
+import { make403Probe } from '../config/judge-bakeoff-probe.mjs';
 import { judgeModelMetadata, splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
 import { judgeParameters, matchesJudgeParameters, matchesReportedRoute, retryFeedbackCode, retryFeedbackCodes, splitRetryPrompt } from './judge-transport.mjs';
+import { captureProviderResponse } from './provider-response-diagnostics.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -86,13 +88,16 @@ export class Models {
   #judgeRoute;
   #judgeTimeoutMs;
   #split;
+  #probe;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, judgePolicy, beforeAttempt }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, judgePolicy, judgeProbeStep, beforeAttempt }) {
+    const probe = judgeProbeStep === undefined ? undefined : make403Probe(judgePolicy, judgeProbeStep);
     const split = Object.hasOwn(splitJudgeCandidates, judgePolicy) ? splitJudgeCandidates[judgePolicy] : undefined;
-    const candidate = split ?? (Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined);
+    const candidate = probe ?? split ?? (Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined);
     if (judgePolicy !== undefined && (!candidate || judgeReasoningOff || roles.length !== 1 || roles[0] !== 'judge' || judgeTimeoutMs !== undefined)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'judge policy requires a judge-only run with its registered deadline');
     }
+    if (probe && mode !== 'real') throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, '403 probe requires a real judge-only request');
     if (judgeTimeoutMs !== undefined && (roles.length !== 1 || roles[0] !== 'judge'
       || !Number.isSafeInteger(judgeTimeoutMs) || judgeTimeoutMs < 1 || judgeTimeoutMs > 2_147_483_647)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'positive judge timeout override requires a judge-only run');
@@ -102,7 +107,8 @@ export class Models {
     }
     this.#policy = candidate?.policy ?? (judgeReasoningOff ? reasoningOffPolicy : policy);
     this.#judgeRoute = candidate?.route ?? routes.judge;
-    this.#split = Boolean(split);
+    this.#split = Boolean(split || probe);
+    this.#probe = probe;
     this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
@@ -175,11 +181,13 @@ export class Models {
     const model = this.model(role);
     const route = this.#judgeRoute;
     const split = this.#split;
+    const probe = this.#probe;
     const nextAttempt = scope.nextAttempt;
     const initialFeedback = scope.retryFeedback;
+    const maxAttempts = callPolicy.maxAttemptsPerCall ?? 3;
     if (split) {
-      if (nextAttempt !== undefined && (!Number.isSafeInteger(nextAttempt) || nextAttempt < 1 || nextAttempt > 3)) {
-        throw failure('configuration', { role, turn, call }, 'split judge recovery attempt must be 1..3');
+      if (nextAttempt !== undefined && (!Number.isSafeInteger(nextAttempt) || nextAttempt < 1 || nextAttempt > maxAttempts)) {
+        throw failure('configuration', { role, turn, call }, `split judge recovery attempt must be 1..${maxAttempts}`);
       }
       if (initialFeedback !== undefined && initialFeedback !== null && !scopeFeedbackCodes.includes(initialFeedback)) {
         throw failure('configuration', { role, turn, call }, 'split judge retry feedback must be a known code');
@@ -187,7 +195,7 @@ export class Models {
     } else if (nextAttempt !== undefined || initialFeedback !== undefined) {
       throw failure('configuration', { role, turn, call }, 'retry scope requires a split judge policy');
     }
-    if ((split || config.reasoning || callPolicy.retriesPerKind !== undefined) && model.provider === route.provider && !schema) {
+    if (!probe && (split || config.reasoning || callPolicy.retriesPerKind !== undefined) && model.provider === route.provider && !schema) {
       throw failure('configuration', { role, turn, call }, 'judge policy requires a structured OpenRouter judgement');
     }
     const { reasoning, provider } = judgeParameters(route, config);
@@ -211,8 +219,13 @@ export class Models {
       const signal = AbortSignal.timeout(timeoutMs);
       const transport = observation?.fetch ?? globalThis.fetch;
       const send = this.#recorder ? trackedFetch(transport, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : transport;
+      const diagnosticFetch = async (input, init) => {
+        const response = await send(input, init);
+        if (!response.ok || probe) raw.providerResponsePending = captureProviderResponse(response);
+        return response;
+      };
       let outboundRejection, responseRouteMismatch, reportedProvider = null, reportedModel = null;
-      const fetch = schema ? (input, init) => {
+      const fetch = schema || probe ? (input, init) => {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
         const names = Object.keys(body).sort();
@@ -227,11 +240,12 @@ export class Models {
           ...((config.reasoning || route.routing) && { parameterNames: names }),
           ...(split && body.temperature !== undefined && { temperature: body.temperature }),
           provider,
-          response_format: { type: body.response_format.type, json_schema: { strict: true, schema: '[redacted]' } },
+          ...(body.response_format && { response_format: { type: body.response_format.type,
+            ...(body.response_format.json_schema && { json_schema: { strict: body.response_format.json_schema.strict, schema: '[redacted]' } }) } }),
           messages: '[redacted]',
         };
-        return send(input, init);
-      } : this.#recorder || observation ? send : undefined;
+        return diagnosticFetch(input, init);
+      } : this.#recorder || observation ? diagnosticFetch : undefined;
       const options = {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
         ...(fetch && { fetch }),
@@ -242,13 +256,20 @@ export class Models {
           const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
           if (!Number.isInteger(sent) || sent <= 0 || sent > config.maxTokens) throw new Error('provider request output cap invalid');
           requestLimit = sent;
-          if (schema) {
+          if (schema || probe) {
             const next = {
               ...payload,
               reasoning,
               provider: route.routing ? provider : { ...payload.provider, ...provider },
-              response_format: { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } },
             };
+            if (probe) {
+              delete next.max_tokens;
+              delete next.max_completion_tokens;
+              next[probe.route.maxTokensField] = sent;
+            }
+            if (route.responseFormat === 'json_schema') {
+              next.response_format = { type: 'json_schema', json_schema: { name: 'teacharena_judgement', strict: true, schema } };
+            } else delete next.response_format;
             if (split) delete next.thinking;
             return next;
           }
@@ -279,6 +300,10 @@ export class Models {
         providerError = error?.code ?? error?.message;
       }
       const timing = observation?.finish();
+      if (raw.providerResponsePending) {
+        raw.providerResponse = await raw.providerResponsePending;
+        delete raw.providerResponsePending;
+      }
       const text = response ? textOf(response) : '';
       if (response) {
         failureKind = stopFailure(response, text, reasoningTokens, requestLimit, finish_reason);
@@ -334,7 +359,7 @@ export class Models {
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
       const stop = split
-        ? failureKind === 'configuration' || agentOptions.signal?.aborted || attempt >= 3
+        ? failureKind === 'configuration' || agentOptions.signal?.aborted || attempt >= maxAttempts
         : callPolicy.retriesPerKind !== undefined && failureKind === 'configuration'
           || !rateLimited && retries++ >= callPolicy.retries || agentOptions.signal?.aborted;
       if (stop) {

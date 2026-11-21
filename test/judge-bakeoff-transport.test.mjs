@@ -3,6 +3,7 @@ import test from 'node:test';
 import { Models } from '../src/models.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { judgeModelMetadata, judgeModelMetadataVersion, splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
+import { make403Probe, probeSteps } from '../config/judge-bakeoff-probe.mjs';
 import { matchesReportedRoute, retryFeedbackCode, retryFeedbackCodes, splitRetryPrompt } from '../src/judge-transport.mjs';
 
 const schema = Object.freeze({
@@ -264,6 +265,85 @@ test('a plain JSON termination error maps to the generic retry category', async 
   assert.match(originals[0].validationDetail, /JSON generation did not terminate normally/);
   assert.equal(rows[1].retryFeedback, 'generic');
   assert.match(originals[1].context.systemPrompt, /failed local validation/);
+});
+
+test('non-2xx body and diagnostic headers are saved to each attempt after redaction', async t => {
+  const body = JSON.stringify({ error: { message: 'Bearer body-secret-123 rejected' }, metadata: {
+    provider_name: 'Anthropic', raw: 'sk-or-v1-abcdefghijklmnopqrstuvwxyz', api_key: 'metadata-secret',
+  } });
+  const response = () => new Response(body, { status: 403, headers: {
+    'content-type': 'application/json',
+    'x-openrouter-error': 'provider unavailable',
+    'x-openrouter-request-id': 'req-403',
+    'x-openrouter-api-key': 'header-secret',
+    authorization: 'Bearer header-secret',
+    'set-cookie': 'session=secret',
+  } });
+  const { models, originals, rows } = setup(t, 'haiku', [response, response, response]);
+  await assert.rejects(models.complete(scope, context, parseOutput, schema),
+    error => error.failure?.kind === 'provider_failure' && error.failure.attempt === 3);
+  assert.equal(originals.length, 3);
+  for (const raw of originals) {
+    assert.deepEqual(raw.providerResponse, {
+      status: 403,
+      headers: {
+        'content-type': 'application/json',
+        'x-openrouter-error': 'provider unavailable',
+        'x-openrouter-request-id': 'req-403',
+      },
+      body: JSON.stringify({ error: { message: 'Bearer [REDACTED] rejected' }, metadata: {
+        provider_name: 'Anthropic', raw: '[REDACTED]', api_key: '[REDACTED]',
+      } }),
+      bodyTruncated: false,
+    });
+    assert.doesNotMatch(JSON.stringify(raw), /body-secret|abcdefghijklmnopqrstuvwxyz|metadata-secret|header-secret|session=secret/);
+  }
+  assert.ok(rows.every(row => row.httpStatus === 403 && row.usage === null));
+});
+
+test('Models sends only the preregistered A-D changes with one 64-token attempt per step', async t => {
+  for (const [key, provider] of [['haiku', 'Amazon Bedrock'], ['gemini', 'Google AI Studio']]) {
+    for (const step of probeSteps) {
+      const prior = process.env.OPENROUTER_API_KEY;
+      process.env.OPENROUTER_API_KEY = 'unit-test-credential';
+      t.after(() => {
+        if (prior === undefined) delete process.env.OPENROUTER_API_KEY;
+        else process.env.OPENROUTER_API_KEY = prior;
+      });
+      const payloads = [], originals = [], rows = [];
+      const spec = make403Probe(key, step);
+      t.mock.method(globalThis, 'fetch', async (_input, init) => {
+        const payload = JSON.parse(init.body);
+        payloads.push(payload);
+        return openaiResponse({ provider: step === 'D' ? provider : (key === 'haiku' ? 'Anthropic' : 'Google AI Studio'),
+          model: spec.route.id });
+      });
+      const models = new Models({ mode: 'real', roles: ['judge'], judgePolicy: key, judgeProbeStep: step,
+        save: (raw, row) => { originals.push(raw); rows.push(row); return `probe-${key}-${step}.json`; } });
+      const requestSchema = ['A', 'B'].includes(step) ? schema : undefined;
+      const result = await models.complete({ role: 'judge', turn: 1, call: 1, binding: { probeStep: step } }, context, parseOutput, requestSchema);
+      assert.deepEqual(result.value, { ok: true });
+      assert.equal(payloads.length, 1);
+      const [payload] = payloads;
+      const capField = step === 'A' ? 'max_completion_tokens' : 'max_tokens';
+      assert.equal(payload[capField], 64);
+      assert.equal(Object.hasOwn(payload, capField === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens'), false);
+      assert.deepEqual(payload.reasoning, { effort: 'low' });
+      if (key === 'haiku') assert.equal(Object.hasOwn(payload, 'temperature'), false);
+      else assert.equal(payload.temperature, 0);
+      assert.equal(payload.response_format?.type, ['A', 'B'].includes(step) ? 'json_schema' : undefined);
+      assert.equal(payload.response_format?.json_schema?.strict, ['A', 'B'].includes(step) ? true : undefined);
+      assert.equal(payload.provider.only?.[0], ['A', 'B', 'C'].includes(step) ? spec.route.routing.only?.[0] : undefined);
+      assert.equal(payload.provider.require_parameters, ['A', 'B'].includes(step));
+      assert.equal(payload.provider.allow_fallbacks, false);
+      if (step === 'D') assert.equal(Object.hasOwn(payload.provider, 'order'), false);
+      assert.equal(rows[0].requestLimit, 64);
+      assert.equal(rows[0].attempt, 1);
+      assert.equal(rows[0].retryCount, 0);
+      assert.equal(originals[0].outbound.max_tokens ?? originals[0].outbound.max_completion_tokens, 64);
+      assert.equal(originals[0].binding.probeStep, step);
+    }
+  }
 });
 
 test('split retry prompts are stable, distinct and free of truth directions or answer examples', () => {
