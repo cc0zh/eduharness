@@ -22,6 +22,7 @@
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
 | 2026-11 | [推理为零、正文及时，仍须校验证据锚](2026-11/20261121-reasoning-off-binding-failure.md) | 第二轮 ①d `round2-reasoning-off-01` 的 `r1/normal`，三次 M2 锚不匹配 |
 | 2026-11 | [判决与格提交要在同一条结算记录](2026-11/20261121-atomic-ruling-commit.md) | 第二轮 ①e 强杀和同 ID 续跑 |
+| 2026-11 | [压低总输出上限仍会被推理占满](2026-11/20261121-capped-output-reasoning-exhaustion.md) | 第二轮 ①g `round2-hy4-capped-01`，五次 `length` |
 
 ## 目录与命名
 

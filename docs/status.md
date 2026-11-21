@@ -1,5 +1,46 @@
 # 当前状态
 
+<a name="round2-judge-contrast"></a>
+
+## 第二轮 ①g 两种裁判策略均未达采用线（20261121）
+
+**Qwen 和限额 HY4 均不采用。** `e1-binary-v2` 的最终裁判尚未选定。两个批次复用 ①d 的 18 格及 (b)–(e)。两侧的 (a) 均要求计划首尝试在 180 秒内出现非空白正文且无推理 delta。实报推理 token 单列。小样覆盖 S1 五个极端条件和三个历史超时输入，冻结前还须完成正式复测。
+
+| 候选 | OpenRouter 固定端点 | 调用策略 | 单次输出上限 |
+| --- | --- | --- | ---: |
+| Qwen3 235B Instruct 2507，省略推理参数 | `qwen/qwen3-235b-a22b-2507` / `parasail/fp8` | `e1-call-policy-v6-qwen-parasail` | 8,192 |
+| HY4 Flash，开推理，请求推理上限 16,384 | `tencent/hy4-flash` / `tencent/fp8` | `e1-call-policy-v7-hy4-capped` | 32,768 |
+
+两侧均使用 `json_schema.strict:true`、`provider.require_parameters:true` 和 `provider.allow_fallbacks:false`。常规入口默认策略为 `e1-call-policy-v4`。
+
+| 固定采用线 | Qwen | 限额 HY4 |
+| --- | --- | --- |
+| (a) 18/18 首尝试 180 秒内见正文且无推理 delta | 13/18，未达 | 0/18，未达 |
+| (b) S1 至少 14/15 格有合规判决 | 11/15，未达 | 6/15，未达 |
+| (c) 3/3 遍四个坏教师的适用分率均严格低于同遍 `normal` | 1/3，未达 | 0/3，未达 |
+| (d) 试错、主动权、验证或迁移、误解修复各至少 2/3 遍严格低于同遍 `normal` | 1/3、2/3、2/3、2/3，未达 | 0/3、2/3、1/3、1/3，未达 |
+| (e) 确定项假阳加假阴不超过 2，缺判另列 | 10 假阳 + 0 假阴，缺 35/99，未达 | 0 假阳 + 0 假阴，缺 68/99，计数达线。仅观察到 31 个确定项，均为预期 No |
+
+Qwen 的 15 次请求均有正文且实报推理为 0。`r1:answer_dump:judge:4:1:1`、`r1:answer_dump:judge:4:1:3`、`r3:answer_dump:judge:4:1:1` 的 P3 同样违反时序，`prior=#2`、`pending=#1`、`rescue=#2`。`r1:answer_dump:judge:4:1:2` 的 R2 为 No，却引用 `newFrame=#4`。同类重试耗尽后停线。通过本地校验的判决仍有 10 个假阳，分布在 S1（4）、S3（2）、P2（4）。[逐题、引用差异及拒收原件](../runs/round2-qwen-judge-01/qwen-judge-report.md)
+
+HY4 的 11 次请求均出现推理 delta，7 次实报推理超过 16,384。5 次返回 `length` 且无正文，推理和总输出均为 32,768 token，耗时 121.997 至 135.254 秒。`r1:answer_dump:judge:4:1:2` 再次耗尽，触发全批两次同类重试停线。[逐题、引用差异及耗尽原件](../runs/round2-hy4-capped-01/hy4-capped-report.md)
+
+| Run | PID | 已发首尝试耗时 p50 / p90 | 请求 / 上限 | 出站输出额度 / 上限 | 实报合计，其中推理 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `round2-qwen-judge-01` | 40744 | 18.708 / 25.896 秒，13 条 | 15/26 | 122,880/212,992 | 67,770，0 |
+| `round2-hy4-capped-01` | 21172 | 129.250 / 153.843 秒，9 条 | 11/26 | 360,448/851,968 | 280,850，239,530 |
+
+两批均按并发 4 从单个进程启动，业务退出 1，`--verify-run` 退出 0，启动、进程、manifest 和遥测 PID 一致。两批 token 用量无缺报。两组耗时含失败首尝试，各有 5 格和 9 格未发。
+
+汇总 `v1Agreement` 的逐题计数，Qwen 与开推理 v1 的 15 道未改题一致 135/165 位，HY4 一致 83/90 位。Qwen 三遍题级一致 35/38 位，HY4 没有三遍都合规的格，一致率无分母。[Qwen 逐题计数](../runs/round2-qwen-judge-01/qwen-judge-summary.json) · [HY4 逐题计数](../runs/round2-hy4-capped-01/hy4-capped-summary.json)
+
+- Qwen 预登记 SHA256 `ab178183a97c64cf1f563bce5681bda8ada894e305270c1fadf89a4aecae5745`。身份 `fc1e1c9482aa67bf825cdf1d17a37f7cfbeb8e2542541dbcf3ea966ab2d7a484`。干净 `d9f946f` 标准检查 157/157。[预登记](../runs/round2-qwen-judge-01/preregistration.md) · [验真](../runs/round2-qwen-judge-01/verify-run.json) · [PID](../runs/round2-qwen-judge-01/pid-check.json) · [检查收据](../runs/_receipts/check-d9f946f3085e56d0b65facea7b6ebead0935e16e.json)
+- HY4 预登记 SHA256 `e70072dd771a4275bfbecd3b913068622ac77e924c6ed92ea4a453d91d03ea3e`。身份 `b7ea5cb7f06d424ca2c1fe1cf2194fa4ffc10277ec081439ae7a130ccc1fa4b6`。干净 `14a0d91` 标准检查 158/158。[预登记](../runs/round2-hy4-capped-01/preregistration.md) · [验真](../runs/round2-hy4-capped-01/verify-run.json) · [PID](../runs/round2-hy4-capped-01/pid-check.json) · [检查收据](../runs/_receipts/check-14a0d910323179d493c467ed93848288a16db780.json)
+
+**停在候选选择。** 本机调研 `%TEMP%\teacharena\round2\judge-model\survey.md` 列出的未实测候选包括 Qwen3-Next 80B Instruct（DeepInfra FP8）、Mistral Small 4（Mistral ZDR）、Gemini 2.5 Flash-Lite（AI Studio）。[Qwen3-Next 端点](https://openrouter.ai/api/v1/models/qwen/qwen3-next-80b-a3b-instruct/endpoints) · [Mistral 端点](https://openrouter.ai/api/v1/models/mistralai/mistral-small-2603/endpoints) · [Gemini 端点](https://openrouter.ai/api/v1/models/google/gemini-2.5-flash-lite/endpoints)
+
+裁判选定后，用最终身份重跑 S1 与 V1/V2/A1/A2 的定向扰动，另复核 `normal` 的 V2 #4/#5 疑点。两项均通过后冻结。
+
 <a name="round2-runner-merge"></a>
 
 ## 第二轮 ①f runner 本地合并（20261121）
