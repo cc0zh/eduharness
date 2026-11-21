@@ -22,6 +22,7 @@
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
 | 2026-11 | [模型目录能解析不等于审核路由可访问](2026-11/20261121-auditor-catalog-not-access.md) | 阶段 2a `stage2a-hard-learners-01`，三次 HTTP 403 |
 | 2026-11 | [原字引文匹配不等于找对知识来源](2026-11/20261121-quote-match-not-knowledge-source.md) | 阶段 2a `stage2a-hard-learners-02`，#8/#9 和审核标签对照 |
+| 2026-11 | [JSON mode 仍需有界本地校验](2026-11/20261121-json-mode-needs-bounded-repair.md) | 阶段 2a `stage2a-hard-learners-04/05`，裸文本、LaTeX 反斜线与 JSON mode 重跑 |
 
 ## 目录与命名
 

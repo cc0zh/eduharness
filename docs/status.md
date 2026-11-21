@@ -1,5 +1,23 @@
 # 当前状态
 
+<a name="stage2a-json-mode-rerun"></a>
+
+## 阶段 2a JSON mode 正式续跑（20261121）
+
+**`stage2a-hard-learners-05` 收齐 48/48 条生成和审核。** 本轮只更换学生 JSON 输出协议及技术停线，不动画像、条件、行为判线或审核第 2 版。学生输出评测身份为 `hard-learner-fidelity-v2`：DeepSeek `json_object`、有界清理、歧义转义拒绝；三类画像哈希与正式审核提示 SHA256 `c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0` 沿用原值。预登记合并 SHA256 `aa1bd23f82d2c92923034008daaab57ef56fca9f49a95b899e5d5d787027f2b1`。[预登记](../.tmp/scratch/hard-learners/preregistration-json-mode.md) · [逐条报告和第三轮对照](../runs/stage2a-hard-learners-05/hard-learner-fidelity-report.md)
+
+| 画像 | 重复 | 给答案 | 针对错因 | 独立解释 | 两题可教性 | 跃迁／泄漏 | 机器判线 | 本轮使用结论 |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |
+| 顽固误解型 | 3/4 | 4/4 | 4/4 | 3/4 | 2/2、2/2 | 0／0 | 能用 | 能用 |
+| 伸手要答案型 | 4/4 | 2/4 | 4/4 | 3/4 | 2/2、2/2 | 0／0 | 需改 | 不可用 |
+| 假装懂了型 | 4/4 | 4/4 | 4/4 | 2/4 | 2/2、2/2 | 0／0 | 需改 | 不可用 |
+
+逐条分母为已审核有效回复，均为 4；每类已审 16/16。失败回复 0，审核故障 0，格式清理 0。只有机器判线完整达到「能用」的画像可用；其余按本次预登记记为不可用，不把失败或未审核项当作行为反例。本次到此停止，不续改画像。
+
+与第三轮的逐条件、两题可教性和行为例见报告；三轮后有假装懂了型澄清和审核第 2 版变化，本轮再增加 JSON 输出身份，比较仅作描述性结果。第三轮机器结论为 `需改 / 需改 / 需改`；本轮为 `能用 / 需改 / 需改`。
+
+运行于干净 HEAD `a5ad7cb8808aa6818f8997350625a0172a965b79`，范围检查 33/33，预检 0 请求。正式进程 PID `34236`，exit 0、60 请求、`acceptance=true`、`--verify-run verified=true`。硬上限 180 次和 737,280 请求输出 token；实际 60 次、245,760 请求输出额度，实报输出 17,430、实报总量 84,372 token，无缺报、无重试。[范围收据](../runs/_receipts/check-hard-learners-a5ad7cb8808aa6818f8997350625a0172a965b79.json) · [零请求预检](../runs/_receipts/stage2a-hard-learners-estimate-06.process.json) · [正式复核](../runs/stage2a-hard-learners-05/verify-run.json)
+
 <a name="stage2a-audit-validation-rerun"></a>
 
 ## 阶段 2a 审核验证与正式重跑停线（20261121）
