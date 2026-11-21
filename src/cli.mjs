@@ -55,6 +55,12 @@ if (option('--verify-run') >= 0) {
       try { openRun(); } catch (error) { if (!recorder) console.error(`startup receipt write failed: ${error.message}`); }
     }
   };
+  const rejectInput = error => {
+    recordRejection();
+    console.error(error.message);
+    emit({ failure: failure('invalid_input', {}, error.message).failure });
+    process.exitCode = 2;
+  };
   const { budget, run, scenarioName } = await import('./run.mjs');
 
   let config, estimate, rulerRunner, s1Runner, ceiling;
@@ -118,20 +124,20 @@ if (option('--verify-run') >= 0) {
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
     if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
-    if (config.phase === 'test' || config.phase === 'ab') config.prepared = rulerRunner.prepareRulerRun(config, { estimate });
   } catch (error) {
-    recordRejection();
-    console.error(error.message);
-    emit({ failure: failure('invalid_input', {}, error.message).failure });
-    process.exitCode = 2;
+    rejectInput(error);
   }
 
   if (config && !process.exitCode) {
     try {
       if (estimate || rulerRunner) config.recorder = openRun();
-      if (estimate) emit({ scenario: s1Runner ? s1Scenario : scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens,
+      if (config.phase === 'test' || config.phase === 'ab') {
+        try { config.prepared = rulerRunner.prepareRulerRun(config, { estimate }); }
+        catch (error) { rejectInput(error); }
+      }
+      if (!process.exitCode && estimate) emit({ scenario: s1Runner ? s1Scenario : scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens,
         ...(s1Runner && { source: config.prepared.source }), ...rulerRunner?.holdoutEstimate(config.prepared) });
-      else {
+      else if (!process.exitCode) {
         const prepared = config.prepared ?? rulerRunner?.prepareRulerRun(config);
         if (config.mode === 'real') {
           config.checkReceipt = requireCheckReceipt(checkout, recorder ? [recorder.startPath, recorder.requestPath] : []);
