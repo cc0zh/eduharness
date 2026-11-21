@@ -20,6 +20,7 @@
 | 2026-11 | [构造矩阵零错不代表学生证据充分](2026-11/20261121-construction-truth-coverage.md) | 第二轮 S1 `b0fc4d3`、`s1-binary-round2-01` |
 | 2026-11 | [定向扰动后要核对裁判是否换了引用](2026-11/20261121-counterfactual-anchor-switch.md) | 第二轮 ①b `round2-perturbation-01`，`normal` #4–#7 |
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
+| 2026-11 | [模型目录能解析不等于审核路由可访问](2026-11/20261121-auditor-catalog-not-access.md) | 阶段 2a `stage2a-hard-learners-01`，三次 HTTP 403 |
 
 ## 目录与命名
 

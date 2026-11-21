@@ -1,5 +1,17 @@
 # 当前状态
 
+<a name="stage2a-hard-learners"></a>
+
+## 阶段 2a 高压学生保真（20261121）
+
+**实现已提交，三类画像均不可用于考教师。** `stubborn` 须在针对错因的反例或换表征后才修正；`answer-seeker` 在教师把具体任务还给自己时尝试；`pretender` 在独立检查时露出卡点，再用针对性对照局部修正。省略 `learnerVariant` 时旧提示逐字不变。公共九条与 #7 边界不变。[学生契约](../contracts/learner/README.md)
+
+`stage2a-hard-learners-01` 只在 S0-01 第一遍顽固误解型生成了四条 #9（4/48）。计划用 GPT-4.1 mini 跨家族审核 DeepSeek Flash。第一组审核三次均为 HTTP 403，两次重试后停，0/48 条获得审核。三类均为 **不可用，证据不足**，不是实测证明不符合画像。没有测教师、改判线或改尺子。[保真报告和片段](../runs/stage2a-hard-learners-01/hard-learner-fidelity-report.md) · [预登记](../runs/stage2a-hard-learners-01/preregistration.md)
+
+已生成原话中，针对性提示后学生 #9 算出 `u+u²=-1`；独立解释条件的 #9 自行代入 `z=1` 并动摇原误解，是潜在反例。两者只是执行者 AI 回读，不计入判线。两道题的可教性、弱刺激保持和跃迁判线均未判定。未复测。先核实审核路由的实际访问，再另登记；不要改变此批证据或拿画像去考教师。
+
+预登记 SHA256 `5a922f226af0834fa4fded7d4c0f5c0c95c7bf7b832a427f435cde32ac02616e`。干净 `e1e0f15` 的 `npm run check -- --scope=hard-learners` 19/19；默认全量检查会读混合题库，未启动。[预检](../runs/_receipts/stage2a-hard-learners-estimate-02.process.json) 0 请求。实跑退出 1，`acceptance=false`；`--verify-run` 通过，启动、进程、[manifest](../runs/stage2a-hard-learners-01/manifest.json) 和全部尝试的 PID 为 `45288`。实用 7/62 次和 28,672/253,952 请求输出 token，实报 3,715 token，审核的三次用量未知。[逐原件复核](../runs/stage2a-hard-learners-01/verify-run.json) · [检查收据](../runs/_receipts/check-hard-learners-e1e0f156630709f2e51685b166a0a176dfdbfd52.json)
+
 <a name="round2-perturbation-v2"></a>
 
 ## 第二轮 ①c 学生证据与定向复测（20261121）
