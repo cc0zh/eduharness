@@ -20,7 +20,16 @@ const optionValue = name => {
   return next?.startsWith('-') ? undefined : next;
 };
 
-if (option('--verify-run') >= 0) {
+if (option('--export-report') >= 0) {
+  try {
+    const { values } = parseArgs({ options: { 'export-report': { type: 'string' }, out: { type: 'string' } } });
+    const { exportReport } = await import('./html-report.mjs');
+    emit(exportReport(values['export-report'], values.out));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 2;
+  }
+} else if (option('--verify-run') >= 0) {
   try {
     const { values } = parseArgs({ options: { 'run-root': { type: 'string', default: 'runs' }, 'verify-run': { type: 'string' } } });
     const result = verifyRun(values['run-root'], runId(values['verify-run']));
