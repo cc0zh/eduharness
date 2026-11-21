@@ -34,16 +34,27 @@ if (option('--verify-run') >= 0) {
 } else {
   const id = (() => { try { return runId(optionValue('--id') ?? randomUUID()); } catch { return randomUUID(); } })();
   const root = resolve(optionValue('--run-root')?.trim() ? optionValue('--run-root') : 'runs');
-  const start = id => startRunReceipt({ root, id, mode: optionValue('--mode') ?? 'offline', argv });
-  let recorder, conflict = false;
-  try { recorder = start(id); }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    conflict = true;
-    recorder = start(randomUUID());
-  }
+  const start = (id, extra) => startRunReceipt({ root, id, mode: optionValue('--mode') ?? 'offline', argv, ...extra });
+  let recorder;
   let acceptance = null;
-  installRunReceiptHandlers(recorder, () => acceptance);
+  const openRun = (extra = {}) => {
+    try { recorder = start(id, extra); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (!extra.resume) {
+        recorder = start(randomUUID());
+        installRunReceiptHandlers(recorder, () => acceptance);
+      }
+      throw failure('run_conflict', {}, `run ${id} was claimed by another process or already exists`);
+    }
+    installRunReceiptHandlers(recorder, () => acceptance);
+    return recorder;
+  };
+  const recordRejection = () => {
+    if (!recorder && option('--resume') < 0) {
+      try { openRun(); } catch (error) { if (!recorder) console.error(`startup receipt write failed: ${error.message}`); }
+    }
+  };
   const { budget, run, scenarioName } = await import('./run.mjs');
 
   let config, estimate, rulerRunner, s1Runner, ceiling;
@@ -51,6 +62,7 @@ if (option('--verify-run') >= 0) {
     const { values } = parseArgs({ options: {
       mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
       id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
+      resume: { type: 'boolean' }, concurrency: { type: 'string' },
       'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
       phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
@@ -66,7 +78,10 @@ if (option('--verify-run') >= 0) {
     if ((values.harness !== undefined || values['source-root'] !== undefined) && (values.scenario !== 'ruler-expand' || values.phase !== 'ab')) throw new Error('--harness and --source-root require ruler-expand --phase ab');
     if ((values.preregistration !== undefined || values['preregistration-sha256'] !== undefined) && values.scenario !== s1Scenario) throw new Error('preregistration flags require S1-binary');
     estimate = values['estimate-only'];
-    config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined, judgeCell, recorder };
+    if (values.resume && (!values.id || estimate)) throw new Error('--resume requires --id and cannot be combined with --estimate-only');
+    if (values.scenario === 'ruler-expand' && (values.resume || values.concurrency !== undefined)) throw new Error('--resume and --concurrency are not supported for ruler-expand');
+    config = { mode: values.mode, scenario: values.scenario, root, id: runId(values.id ?? id), judgeOnly: hasJudgeSource ? runId(values['judge-only']) : undefined,
+      judgeCell, openRun, resume: values.resume };
     if (values.scenario === s1Scenario) {
       if (!config.judgeOnly || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('S1-binary only admits --judge-only <frozen E2 run ID>');
       s1Runner = await import('./s1-binary.mjs');
@@ -94,16 +109,18 @@ if (option('--verify-run') >= 0) {
       if (values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('--phase, --freeze and --generate-only require --scenario ruler-expand');
       ceiling = budget(config);
     }
-    function limit(flag, maximum) {
-      const value = values[flag] ?? String(maximum);
+    function limit(flag, maximum, fallback = maximum) {
+      const value = values[flag] ?? String(fallback);
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > maximum) throw new Error(`invalid --${flag}; expected 1 through ${maximum}`);
       return Number(value);
     }
+    config.concurrency = limit('concurrency', 5, 1);
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
     if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
     if (config.phase === 'test' || config.phase === 'ab') config.prepared = rulerRunner.prepareRulerRun(config, { estimate });
   } catch (error) {
+    recordRejection();
     console.error(error.message);
     emit({ failure: failure('invalid_input', {}, error.message).failure });
     process.exitCode = 2;
@@ -111,28 +128,30 @@ if (option('--verify-run') >= 0) {
 
   if (config && !process.exitCode) {
     try {
-      if (conflict) throw failure('run_conflict', {}, `run ID ${id} already has a startup record; this launch was recorded as ${recorder.start.runId}`);
+      if (estimate || rulerRunner) config.recorder = openRun();
       if (estimate) emit({ scenario: s1Runner ? s1Scenario : scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens,
         ...(s1Runner && { source: config.prepared.source }), ...rulerRunner?.holdoutEstimate(config.prepared) });
       else {
         const prepared = config.prepared ?? rulerRunner?.prepareRulerRun(config);
         if (config.mode === 'real') {
-          config.checkReceipt = requireCheckReceipt(checkout, [recorder.startPath, recorder.requestPath]);
-          if (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head) throw failure('preflight_failed', {}, 'checkout changed after startup');
+          config.checkReceipt = requireCheckReceipt(checkout, recorder ? [recorder.startPath, recorder.requestPath] : []);
+          if (recorder && (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head)) throw failure('preflight_failed', {}, 'checkout changed after startup');
           loadCredentials(config.judgeOnly ? ['judge'] : config.phase === 'train' ? ['teacher', 'learner'] : undefined);
         }
         const result = s1Runner ? await s1Runner.runS1(config, prepared) : rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
         acceptance = result.acceptance;
         emit(rulerRunner ? rulerRunner.publicRulerResult(result) : result);
         if (!result.acceptance) {
-          const problem = result.cells.find(cell => cell.failure)?.failure;
-          if (s1Runner) console.error(problem ? `${problem.kind} at ${result.cells.at(-1).repetition}/${result.cells.at(-1).id}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
+          const failed = result.cells.find(cell => cell.failure);
+          const problem = failed?.failure;
+          if (s1Runner) console.error(problem ? `${problem.kind} at ${failed.repetition}/${failed.id}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
           else if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
           else console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);
           process.exitCode = 1;
         }
       }
     } catch (error) {
+      recordRejection();
       console.error(error.message);
       emit({ failure: error.failure ?? failure('artifact_io', {}, error.message).failure });
       process.exitCode = 1;

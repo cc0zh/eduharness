@@ -19,6 +19,7 @@
 | 验收通过 `acceptance` | 证据覆盖对应场景卡的全部要求。 | 单有离线 `acceptance: true` 或 `goal-complete` 不足。 | 逐栏核对对应卡的证据。`result.acceptance` 记录当前模式的机器判断。 | artifacts（运行字段）、[场景卡](scenarios.md)（验收） |
 | 启动记录 `start record` | CLI 本次启动在首次外部请求前写入的进程快照。 | 不是评测 `manifest.json`，也不证明进程正常结束。 | `runs/_receipts/<id>.start.json` 的 run ID、HEAD、工作区状态、模式、参数摘要、PID 和开始时间。 | [artifacts](../contracts/artifacts/README.md#运行收据) |
 | 收据 `process receipt` | CLI 进程结束时记录退出码、请求数和验收状态的原件。 | 不是工具回执，也不能单独证明每次请求都可回读。 | `runs/_receipts/<id>.process.json` 与启动记录及请求日志通过 `--verify-run <id>` 一致性检查。 | [artifacts](../contracts/artifacts/README.md#运行收据) |
+| 进程序号 `processIndex` | 同一 run 的第几次启动，从 1 开始。 | 不是 PID，不是格内尝试序号。 | `--verify-run` 的 `processes`，结合请求 `callId` 和格子原件目录。 | [artifacts](../contracts/artifacts/README.md#运行收据) |
 
 以下术语用于验收场景。学生变化沿用历史名称。
 

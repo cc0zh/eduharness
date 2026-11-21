@@ -4,7 +4,7 @@
 
 付费运行按用户另行确认的额度执行。
 
-重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 传入剩余额度。同一 run 的各格共享这一上限，每次尝试在发送前预留额度；预算不足报 `budget_exhausted`。已有目录报 `run_conflict`，不会写入。manifest 的 `writer.pid` 对应每条调用遥测的 `pid`。
+使用新 ID 重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 限定本次额度。已有 ID 默认报 `run_conflict`。补跑原批次请用下述 `--resume`，不要把剩余额度填成新的硬上限。
 
 E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与真实运行命令](plans/e2.md)。在 `result.json` 的 `comparisons` 对照每个目标维度的原始分档、证据序号和轮次。用同格 `judge.json` 查证据分组与机会窗口，再用 `transcript.json` 回读消息 ID。任一格发生基础设施故障时，保留已有比较并停止后续格子。缺少任一侧的分档时，该比较的差异值为 `null`。
 
@@ -16,9 +16,18 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 
 使用 `--scenario E2 --judge-only <源 run ID> --judge-cell all` 可用当前尺子补评冻结五格。真实模式要求真实源 run。新 manifest 保存源评测身份、源 manifest 哈希和每格对话哈希，结果对照使用本次裁判给出的分档。OpenRouter 结构化裁判的调用原件保存脱敏 `outbound` 请求字段。将 `reasoning.max_tokens` 与遥测的 `reasoningTokens` 核对。超限时记录「路由未执行上限」，用量缺失时记录未知。
 
+## 格级并发和断点续跑
+
+- `E1`、`E2`、`S1-binary` 支持 `--concurrency N`，默认 `1`，可设 `1` 到 `5`。只并发格子，格内依旧串行。`ruler-expand` 保留原来的阶段门槛、停线和串行顺序，不接收这两个选项。
+- 中断后确认原进程已退出，再给原命令加 `--resume --id <原 ID>`。保留原模式、场景、输入、预登记文件和两个硬上限。并发可另设。真实续跑仍走费用确认与干净 HEAD 检查。若 HEAD、源码哈希、评测身份或预登记 SHA256 不符，命令拒绝续跑。旧格式的 run 不能补写为新格式。
+- 原件校验通过的裁判判决一律保留，包括低分或未过预登记判线的判决。只补没有完成判决的格子。若已提交的原件损坏，先恢复原件；不能重抽一份代替。
+- 每次尝试先原子记下一次及该角色的最大请求输出额度，再调用模型。所有进程共用硬上限。中断留下的预留也扣减，因为无法确认请求没送达。续跑不退还这笔额度，也不以供应商实报 token 补预算。
+- 收到 HTTP 429 或供应商限流时，本进程并发降一档，最低为 `1`。限流等待后再尝试，占用硬额度，不占两次普通重试。一次调用的初次尝试加两次普通重试仍未成功即停线。停线后不再发新请求或重试；已经发出的调用可以结束，结果和耗费仍落盘。预算不足时也不再发放新预留，已预留的调用照常结算。
+- 用 `node src/cli.mjs --verify-run <原 ID> --run-root <原根>` 回读。`processes` 列出各进程、各自补上的格子、降档和停线，`budget` 是累计预留。`result.json` 和评测收据按计划次序输出，不按完成先后排序。`verified` 只表示原件一致，不能代替 `acceptance` 或判线。
+
 ## 第二轮 S1 五格复判
 
-`--scenario S1-binary --judge-only e2-real-20261119-06` 用[二元尺子](../contracts/judge/binary.md)串行复判同一组五格三遍。先在干净 HEAD 运行 `npm run check`。以新的预检 ID 加 `--mode real --estimate-only` 核对源对话及预算。登记实际 run ID、预检上限、判线和构造预期答案，计算预登记文件 SHA256。
+`--scenario S1-binary --judge-only e2-real-20261119-06` 用[二元尺子](../contracts/judge/binary.md)复判同一组五格三遍。先在干净 HEAD 运行 `npm run check`。以新的预检 ID 加 `--mode real --estimate-only` 核对源对话及预算。登记实际 run ID、预检上限、判线和构造预期答案，计算预登记文件 SHA256。
 
 按授权额度启动时用 `--mode real --confirm-cost --preregistration <文件> --preregistration-sha256 <摘要> --id <已登记 ID>`，加预检的 `--max-attempts` 和 `--max-requested-output-tokens`。每格目录为 `r1/normal` 等。完成后执行 `node src/cli.mjs --verify-run <ID>`，再运行 `node scripts/s1-binary-report.mjs <ID>` 生成分数、引用和构造矩阵。以报告的逐遍适用分率及目标维方向检查预登记判线。
 

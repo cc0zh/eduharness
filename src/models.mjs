@@ -73,11 +73,12 @@ export class Models {
   #keys;
   #save;
   #reserve;
+  #beforeAttempt;
   #recorder;
   #cell;
   #judgeTimeoutMs;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, beforeAttempt }) {
     if (judgeTimeoutMs !== undefined && (roles.length !== 1 || roles[0] !== 'judge'
       || !Number.isSafeInteger(judgeTimeoutMs) || judgeTimeoutMs < 1 || judgeTimeoutMs > 2_147_483_647)) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'positive judge timeout override requires a judge-only run');
@@ -85,6 +86,7 @@ export class Models {
     this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
+    this.#beforeAttempt = beforeAttempt;
     this.#recorder = mode === 'real' ? recorder : undefined;
     this.#cell = cell;
     if (mode === 'offline') {
@@ -150,10 +152,11 @@ export class Models {
     const model = this.model(role);
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? policy.timeoutMs;
-    let priorValidation;
-    for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
+    let priorValidation, retries = 0;
+    for (let attempt = 1; ; attempt++) {
       const coordinates = { role, turn, call, attempt };
-      this.#reserve?.(coordinates, config.maxTokens);
+      if (this.#beforeAttempt) await this.#beforeAttempt(coordinates, config.maxTokens);
+      else this.#reserve?.(coordinates, config.maxTokens);
       const request = priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
       const raw = { ...coordinates, context: request, ...(scope.binding && { binding:scope.binding }) };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
@@ -206,7 +209,7 @@ export class Models {
           reasoningTokens = chunk.usage?.completion_tokens_details?.reasoning_tokens ?? reasoningTokens;
         },
       };
-      let response, failureKind, parsed, detail;
+      let response, failureKind, parsed, detail, providerError;
       const events = [], originalOrder = [];
       try {
         if (stream) {
@@ -217,6 +220,7 @@ export class Models {
       } catch (error) {
         failureKind = 'provider_failure';
         httpStatus = Number.isInteger(error?.status) ? error.status : httpStatus;
+        providerError = error?.code ?? error?.message;
       }
       const timing = observation?.finish();
       const text = response ? textOf(response) : '';
@@ -238,6 +242,8 @@ export class Models {
         detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
       }
       const usage = failureKind === 'provider_failure' && !response?.usage?.totalTokens ? null : response?.usage ?? null;
+      const rateLimited = Boolean(this.#beforeAttempt && failureKind === 'provider_failure' && (httpStatus === 429
+        || /(?:\brate[_ -]?limit(?:ed|ing)?(?=\W|_|$)|\btoo many requests\b)/i.test(response?.errorMessage ?? providerError ?? '')));
       const attemptPath = this.#save({
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
       }, {
@@ -247,10 +253,10 @@ export class Models {
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
         ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens }),
         ...(scope.binding && { binding:scope.binding }),
-        stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
+        stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: retries,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
         failureKind: failureKind ?? null, detail: detail ?? null,
-      });
+      }, rateLimited);
       if (!failureKind) {
         if (stream) {
           for (const event of events) stream.push(event);
@@ -258,7 +264,7 @@ export class Models {
         }
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
-      if (attempt > policy.retries || agentOptions.signal?.aborted) throw failure(failureKind, { ...coordinates, attemptPath }, detail);
+      if ((!rateLimited && retries++ >= policy.retries) || agentOptions.signal?.aborted) throw failure(failureKind, { ...coordinates, attemptPath }, detail);
       priorValidation = canonical === 'judge' && failureKind === contractFailure ? detail : undefined;
     }
   }

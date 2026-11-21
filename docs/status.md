@@ -1,5 +1,15 @@
 # 当前状态
 
+<a name="round2-runner-resume-concurrency"></a>
+
+## 第二轮 ①e 断点续跑与格级并发（20261121）
+
+**E1、E2、S1 的离线原件通过复核。** `--resume` 验证原身份、预登记、HEAD、源码和历史原件后才补格。`--concurrency` 默认 1，最多 5。同一 run 所有进程共用次数和请求输出额度，尚无结算的预留也占预算。`ruler-expand` 保留原串行入口及门槛。[操作](runbook.md#格级并发和断点续跑) · [收据契约](../contracts/artifacts/README.md#运行收据)
+
+强杀演示中，进程 1 的一个合规低分判决原样保留；进程 2 补 14 格，累计扣 16 次。并发 3 的独立次数、token 上限演示分别在第 3 次预留前停线，两条已开始的调用照常结算。模拟 429 使并发从 3 降为 2，且仍有两次普通重试。三场都是 faux，未作真实评测。测试和原件见本机 `.tmp/scratch/runner-concurrency/`；分支检查未跑受保护题集，不作为真实模式检查收据。
+
+**合入会改变评测身份。** `evaluationIdentity()` 已把 `src/run.mjs`、`src/run-receipts.mjs` 等 runner 源码哈希写入 `identity.sources`；S1 还绑定专用入口和复核源码。合入后，S1 和定向复测须用最终身份各自重跑，再冻结尺子。既有 ①b、①c 的历史结论和原件不回填，也不能换身份沿用 run ID。
+
 <a name="round2-perturbation-v2"></a>
 
 ## 第二轮 ①c 学生证据与定向复测（20261121）

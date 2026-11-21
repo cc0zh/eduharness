@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { cellIds, runId } from '../contracts/artifacts/schema.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { binaryDimensions, binaryGates, binaryQuestions, notApplicable } from '../contracts/judge/binary.mjs';
+import { batchVersion } from '../src/cell-batch-plan.mjs';
+import { readBatch } from '../src/cell-batch-verification.mjs';
 import { verifyRun } from '../src/run-receipts.mjs';
 import { constructExpectations, s1Path, s1Plan, s1PreregistrationFile, s1Repetitions, s1Scenario } from '../src/s1-binary-plan.mjs';
 
@@ -36,19 +38,21 @@ function repeatAgreement(samples, fields, get) {
 
 export const agreement = samples => repeatAgreement(samples, binaryDimensions, (sample, key) => sample?.scoring?.scores[key]);
 
-function usageSummary(rows, manifest, verification) {
-  const sent = rows.filter(row => Number.isInteger(row.reasoningLimit));
-  const known = sent.filter(row => row.usage !== null);
+function usageSummary(rows, manifest, verification, history) {
+  const sent = history ? history.attempts.filter(row => row.sent).map(row => row.meter) : rows.filter(row => Number.isInteger(row.reasoningLimit));
+  if (history) rows = history.attempts.flatMap(row => row.meter ? [row.meter] : []);
+  const known = sent.filter(row => row?.usage);
   const usage = ['input', 'cacheRead', 'output', 'totalTokens'].reduce((sum, key) => Object.assign(sum, {
     [key]: known.reduce((total, row) => total + row.usage[key], 0),
   }), {});
   requireThat(verification.requestCount === sent.length, 'provider attempts do not match request receipt');
   return {
-    pid: manifest.writer.pid, attempts: rows.length, requests: sent.length, retries: sent.filter(row => row.attempt > 1).length,
-    requestedOutputTokens: sent.reduce((sum, row) => sum + row.requestLimit, 0),
+    pid: manifest.writer.pid, attempts: history?.used.attempts ?? rows.length, requests: sent.length, retries: sent.filter(row => row?.retryCount > 0).length,
+    requestedOutputTokens: history?.used.requestedOutputTokens ?? sent.reduce((sum, row) => sum + row.requestLimit, 0),
+    ...(history && { processes: history.processes.map(({ processIndex, pid, interrupted }) => ({ processIndex, pid, interrupted })) }),
     limits: manifest.limits, usage, missingUsage: sent.length - known.length,
-    reasoningAboveRequested: sent.filter(row => row.reasoningTokens > row.reasoningLimit).map(row => ({ attemptPath: row.attemptPath, limit: row.reasoningLimit, used: row.reasoningTokens })),
-    failures: rows.filter(row => row.failureKind).map(({ attemptPath, failureKind, detail }) => ({ attemptPath, failureKind, detail })),
+    reasoningAboveRequested: sent.filter(row => row?.reasoningTokens > row?.reasoningLimit).map(row => ({ attemptPath: row.attemptPath, processIndex: row.processIndex, limit: row.reasoningLimit, used: row.reasoningTokens })),
+    failures: rows.filter(row => row.failureKind).map(({ processIndex, callId, attemptPath, failureKind, detail }) => ({ processIndex, callId, attemptPath, failureKind, detail })),
   };
 }
 
@@ -64,6 +68,7 @@ export function writeS1Report(root, id) {
   requireThat(ver.verified, `S1 receipt verification failed: ${[...ver.missing, ...ver.invalid].join(', ')}`);
   const read = path => JSON.parse(readFileSync(join(dir, path)));
   const manifest = read('manifest.json'), result = read('result.json');
+  const history = manifest.batch === batchVersion ? readBatch(root, id) : undefined;
   requireThat(manifest.scenario === s1Scenario, 'expected an S1 binary run');
   const preregistration = readFileSync(join(dir, s1PreregistrationFile));
   const expected = constructExpectations(preregistration.toString('utf8'));
@@ -83,7 +88,7 @@ export function writeS1Report(root, id) {
   const dimAgreement = agreement(samples);
   const bitAgreement = repeatAgreement(samples, Object.keys(binaryQuestions), (sample, key) => sample?.answers?.[key]?.answer);
   const matrix = confusion(expected, samples);
-  const usage = usageSummary(telemetry, manifest, ver);
+  const usage = usageSummary(telemetry, manifest, ver, history);
   const summary = { verification: ver, preregistrationSha256: hash(preregistration), ...result.assessment, dimensionAgreement: dimAgreement, questionAgreement: bitAgreement, matrix, gatedOpeningDumps, usage };
 
   const dimensionHeads = ['遍次', '条件', ...binaryDimensions.map(key => ({ misconception_repair: 'M', support_escalation_and_fading: 'S', agency_handoff: 'A', productive_struggle: 'P', representation_pivot: 'R', verification_or_transfer: 'V' })[key]), '得分 / 适用满分', '状态'];
@@ -122,7 +127,7 @@ export function writeS1Report(root, id) {
     `## 构造真值混淆矩阵\n\n计入预登记为 Yes 或 No 的坏教师格，每格计划三次。不定格排除，技术缺失另列。召回率为预期 Yes 中判 Yes 的次数，特异度为预期 No 中判 No 的次数。分母为相应预期下有合规判决的样本数。真值来自有明确约束的极端坏教师构造。准确度只覆盖这些易判条件。\n\n${matrixTable}\n\n### 门控和 N/A\n\n门控 No 等价于本维 N/A。\n\n${gatesTable}`,
     `## 各格逐题回答\n\nYes 后的 #n 是同列对话消息号。No 表示查完对应公开视图仍无合格证据。空格符号表示没有发布裁判判决。\n\n${answersTable}`,
     `## v3 口径\n\n源运行 v3 直接判六维的 0–2，固定满分 12，旧表征无机会记 0。新版先回答 19 题，代码按机会门、红线和同一证据链算分。表征机会只来自教师实际使用后遇阻的讲法。同题配对用共同适用维。两表各用原口径，禁止跨版相减。\n\n${v3}`,
-    `## 收据和用量\n\n- --verify-run 为 ${ver.verified}，进程退出 ${ver.exitCode}，机器收齐判决 ${ver.acceptance}。manifest、启动、进程及所有遥测的 PID 为 ${usage.pid}。\n- 计划 15 次常规裁判。记录尝试 ${usage.attempts}，发请求 ${usage.requests}/${usage.limits.maxAttempts}，其中重试 ${usage.retries}。出站请求输出额度 ${usage.requestedOutputTokens}/${usage.limits.maxRequestedOutputTokens} token。\n- 供应商实报输入 ${usage.usage.input}，缓存读入 ${usage.usage.cacheRead}，输出 ${usage.usage.output}，合计 ${usage.usage.totalTokens} token。${usage.missingUsage} 次缺报。实报推理超过出站参数 ${usage.reasoningAboveRequested.length} 次。\n- 尝试故障 ${usage.failures.length} 次。详见 [复算 JSON](s1-binary-summary.json) · [启动](../_receipts/${id}.start.json) · [进程](../_receipts/${id}.process.json) · [请求日志](../_receipts/${id}.requests.jsonl)。`,
+    `## 收据和用量\n\n- --verify-run 为 ${ver.verified}，最后进程退出 ${ver.exitCode}，机器收齐判决 ${ver.acceptance}。${usage.processes ? `进程 ${usage.processes.map(p => `${p.processIndex} 的 PID 为 ${p.pid}${p.interrupted ? '（中断）' : ''}`).join('，')}。` : `manifest、启动、进程及所有遥测的 PID 为 ${usage.pid}。`}\n- 计划 15 次常规裁判。记录尝试 ${usage.attempts}，发请求 ${usage.requests}/${usage.limits.maxAttempts}，其中重试 ${usage.retries}。${history ? '预留输出额度' : '出站请求输出额度'} ${usage.requestedOutputTokens}/${usage.limits.maxRequestedOutputTokens} token。\n- 供应商实报输入 ${usage.usage.input}，缓存读入 ${usage.usage.cacheRead}，输出 ${usage.usage.output}，合计 ${usage.usage.totalTokens} token。${usage.missingUsage} 次缺报。实报推理超过出站参数 ${usage.reasoningAboveRequested.length} 次。\n- 尝试故障 ${usage.failures.length} 次。详见 [复算 JSON](s1-binary-summary.json) · [初次启动](../_receipts/${id}.start.json) · [评测收据](../_receipts/${id}.json) · [初次日志](../_receipts/${id}.requests.jsonl)。`,
   ].join('\n\n');
   writeFileSync(join(dir, 's1-binary-summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
   writeFileSync(join(dir, 's1-binary-report.md'), `${report}\n`);
