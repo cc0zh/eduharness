@@ -18,6 +18,7 @@
 | 2026-11 | [选 A/B 目标维先核对同批基线的上升空间](2026-11/20261121-ab-baseline-headroom.md) | A/B `32ed5be`、`harness-ab-v1` |
 | 2026-11 | [预登记判线挡住只看部分指标的判优](2026-11/20261121-preregistered-adoption-gate.md) | A/B `d373cbe`、`32ed5be` |
 | 2026-11 | [构造矩阵零错不代表学生证据充分](2026-11/20261121-construction-truth-coverage.md) | 第二轮 S1 `b0fc4d3`、`s1-binary-round2-01` |
+| 2026-11 | [定向扰动后要核对裁判是否换了引用](2026-11/20261121-counterfactual-anchor-switch.md) | 第二轮 ①b `round2-perturbation-01`，`normal` #4–#7 |
 
 ## 目录与命名
 

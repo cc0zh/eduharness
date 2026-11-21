@@ -19,6 +19,18 @@
 
 实际请求 17/45 次，仅裁判，含 2 次恢复性重试；累计请求输出额度 1,114,112/2,949,120 token。供应商实报 246,695 token，1 次缺报。三次 `normal` 实报推理超过出站参数 16,384。[请求日志](../runs/_receipts/s1-binary-round2-01.requests.jsonl) · [进程收据](../runs/_receipts/s1-binary-round2-01.process.json)
 
+<a name="round2-perturbation"></a>
+
+## 第二轮 ①b 最小扰动诊断（20261121）
+
+**真实运行提前停止，19 题均为「证据不足」。** `round2-perturbation-01` 同批重判 13/13 份原对话。78 个预登记扰动中成对完成 36 个，分为 Yes→No 10/10、No→Yes 15/19、教师话术 8/41、其他边界 3/8。预选第二遍 0/10。P0 缺少保持对话连贯的单点负例。评级沿用预登记判线，尺子保持候选状态。
+
+`R1-student-score-cards` 的请求命中本地 180 秒截止，遥测归为 `provider_failure`。此前同类超时已重试两次。正式进程退出 1，`acceptance=false`。项目 `--verify-run` 和逐判决回放均通过，`missing: []` 记录的是原件校验结果。启动、进程、manifest 和尝试遥测同为 PID `36112`。实际请求 54/109 次，出站请求输出额度 3,538,944/7,143,424 token。供应商实报 820,144 token，有 3 次缺报，13 次实报推理超过出站参数。预登记 SHA256 `06ede0df7584381112813187b44b841f6b1d7e0f66f8c01ad2607e309eb3565e`。[预登记](../runs/round2-perturbation-01/preregistration.md) · [矩阵和原字回读](../runs/round2-perturbation-01/perturbation-report.md) · [复核](../runs/round2-perturbation-01/verify-run.json) · [进程收据](../runs/_receipts/round2-perturbation-01.process.json)
+
+**`normal` 的原文基线复现 S1 的满档，按预登记是 V2 误报。** #5 猜 x，教师 #6 补出垂距依据。补足 #5 独立理由的格与原文都判 2。弱化 #5、追加教师宣称的两格也判 2，V1/V2 改引 #6/#7 的原题设式。话术对照中已见学生相关题翻位 4/71（3/8 个对照），总分或适用满分变化 3/8。缺少第二遍，话术与裁判波动的影响待区分。
+
+待用户决定是否修改：优先审议 V2，并核对 V1 是否把原题流程当检查。再复核 A1 对猜测的引用、A2 对指定操作后追问的引用。三题主矩阵的特异度分别为 V2 0/2、A1 0/1、A2 0/1，都不是正式「需改」结论。此次证据不用于 harness A/B 判优或留出验收。
+
 ## 首轮收尾（20261120）
 
 **这次 harness 改动没有被证明更好，预登记的判线挡住了一个仅看部分行为指标就可能被误判为「更好」的改动。** 首轮到此结束，不再改 harness 或尺子。
