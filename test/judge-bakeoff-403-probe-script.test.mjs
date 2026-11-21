@@ -62,7 +62,8 @@ test('probe worker requires explicit cost authorization and an exact plan SHA be
   t.mock.method(globalThis, 'fetch', async () => { fetchCount++; throw Error('unexpected fetch in gate test'); });
   await assert.rejects(script.runProbeCandidate({ candidateKey: 'haiku', root, plan, planSha256 }), /--confirm-cost/);
   await assert.rejects(script.runProbeCandidate({ candidateKey: 'haiku', root, plan, planSha256: '0'.repeat(64), confirmCost: true }), /SHA256 mismatch/);
-  await assert.rejects(script.runProbeCandidate({ candidateKey: 'haiku', root, plan, planSha256, confirmCost: true }), /clean checkout|plan, source hashes, HEAD or check receipt changed/);
+  await assert.rejects(script.runProbeCandidate({ candidateKey: 'haiku', root, plan, planSha256, confirmCost: true }),
+    /clean checkout|plan, source hashes, HEAD or check receipt changed|run npm run check/);
   assert.deepEqual(readdirSync(root), []);
   assert.equal(fetchCount, 0);
 });
