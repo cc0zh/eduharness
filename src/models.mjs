@@ -2,12 +2,26 @@ import { createAssistantMessageEventStream, createModels, fauxProvider } from '@
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { failure } from '../contracts/core/schema.mjs';
+import { fidelityAuditSchema } from '../contracts/learner/fidelity.mjs';
 import { fidelityPolicy, fidelityRoute, policy, routes } from '../config/e1.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
 const roleConfig = role => role === 'regrade' ? 'judge' : role;
 const nonempty = text => typeof text === 'string' && text.length > 0;
+const auditProvider = { require_parameters: true, only: [fidelityRoute.endpoint], allow_fallbacks: false };
+const auditUpstreamName = value => typeof value === 'string' && value.toLowerCase() === fidelityRoute.endpoint.split('/')[0] ? value : undefined;
+
+async function auditErrorFields(response) {
+  const { error } = await response.clone().json().catch(() => ({})) ?? {};
+  const type = error?.metadata?.error_type;
+  const kind = ['permission', 'rate_limit', 'content_filter', 'moderation', 'invalid_request', 'unavailable', 'server'].includes(type) ? type : undefined;
+  const provider = auditUpstreamName(error?.metadata?.provider_name);
+  return {
+    code: Number.isInteger(error?.code) ? error.code : response.status,
+    hasMessage: typeof error?.message === 'string', ...(kind && { kind }), ...(provider && { provider }),
+  };
+}
 
 function observeJudge(elapsed) {
   const phaseMs = { requestSent: null, headersReceived: null, firstByte: null, firstReasoning: null, lastReasoning: null, firstVisible: null, ended: null };
@@ -148,6 +162,7 @@ export class Models {
     const canonical = roleConfig(role);
     const config = canonical === 'fidelity_audit' ? fidelityPolicy : policy[canonical];
     const model = this.model(role);
+    const strictAudit = canonical === 'fidelity_audit' && model.provider === fidelityRoute.provider;
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure', fidelity_audit: 'fidelity_audit_contract' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? policy.timeoutMs;
     let priorValidation;
@@ -164,8 +179,26 @@ export class Models {
       const signal = AbortSignal.timeout(timeoutMs);
       const transport = observation?.fetch ?? globalThis.fetch;
       const send = this.#recorder ? trackedFetch(transport, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : transport;
-      let outboundRejection;
-      const fetch = schema ? (input, init) => {
+      let outboundRejection, auditError, auditUpstream;
+      const fetch = strictAudit ? async (input, init) => {
+        const body = JSON.parse(init.body);
+        const cap = body.max_tokens ?? body.max_completion_tokens;
+        const format = body.response_format;
+        if (body.model !== fidelityRoute.id || !Number.isSafeInteger(cap) || cap < 1 || cap > config.maxTokens
+          || body.reasoning !== undefined || body.provider?.require_parameters !== true || body.provider.allow_fallbacks !== false
+          || body.provider.only?.length !== 1 || body.provider.only[0] !== fidelityRoute.endpoint
+          || format?.type !== 'json_schema' || format.json_schema?.strict !== true) {
+          outboundRejection = 'outbound fidelity audit route, budget or schema mismatch';
+          throw new Error(outboundRejection);
+        }
+        raw.outbound = {
+          model: body.model, ...(body.max_tokens === undefined ? { max_completion_tokens: cap } : { max_tokens: cap }),
+          provider: auditProvider, response_format: { type: format.type, json_schema: { strict: true, schema: '[redacted]' } },
+        };
+        const response = await send(input, init);
+        if (!response.ok) auditError = await auditErrorFields(response);
+        return response;
+      } : schema ? (input, init) => {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
         if (body.reasoning?.max_tokens !== config.reasoningMaxTokens || !Number.isInteger(cap) || cap - config.reasoningMaxTokens < config.minVisibleTokens || cap > config.maxTokens || body.provider?.require_parameters !== true || body.response_format?.json_schema?.strict !== true) {
@@ -192,6 +225,11 @@ export class Models {
           const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
           if (!Number.isInteger(sent) || sent <= 0 || sent > config.maxTokens) throw new Error('provider request output cap invalid');
           requestLimit = sent;
+          if (strictAudit) {
+            const { reasoning, ...request } = payload;
+            return { ...request, provider: auditProvider,
+              response_format: { type: 'json_schema', json_schema: { name: 'teacharena_fidelity', strict: true, schema: fidelityAuditSchema } } };
+          }
           if (schema) return {
             ...payload,
             reasoning: { max_tokens: config.reasoningMaxTokens },
@@ -202,6 +240,7 @@ export class Models {
         onResponse({ status }) { httpStatus = status; },
         onProviderStreamEvent(chunk) {
           observation?.event(chunk);
+          if (strictAudit) auditUpstream ??= auditUpstreamName(chunk.provider);
           finish_reason = chunk.choices?.[0]?.finish_reason ?? finish_reason;
           reasoningTokens = chunk.usage?.completion_tokens_details?.reasoning_tokens ?? reasoningTokens;
         },
@@ -245,7 +284,8 @@ export class Models {
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
-        ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens }),
+        ...(raw.outbound?.reasoning && { reasoningLimit: raw.outbound.reasoning.max_tokens }),
+        ...(strictAudit && { auditMode: 'json_schema', ...(auditError && { auditError }), ...(auditUpstream && { auditUpstream }) }),
         ...(scope.binding && { binding:scope.binding }),
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: attempt - 1,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,

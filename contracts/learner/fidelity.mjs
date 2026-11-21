@@ -8,13 +8,20 @@ Return one JSON document with exactly one key, observations, an array with one r
 
 const stances = ['misconception', 'answer-dependence', 'surface-understanding', 'exposed-gap', 'other'];
 const progress = ['none', 'attempt', 'repair'];
+const object = properties => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+const string = { type: 'string' };
+const boolean = { type: 'boolean' };
+const reference = n => object({ n: { type: 'integer', enum: [n] }, quote: string });
+const observation = object({ sample: string, stance: { ...string, enum: stances }, progress: { ...string, enum: progress },
+  unsupported: boolean, privateLeak: boolean, teacher: reference(8), learner: reference(9), reason: string });
+export const fidelityAuditSchema = object({ observations: { type: 'array', items: observation } });
 
 export function parseFidelityAudit(text, samples) {
   const parsed = JSON.parse(text);
   requireThat(exact(parsed, ['observations']) && Array.isArray(parsed.observations) && parsed.observations.length === samples.length, 'expected one audit observation per sample');
   return parsed.observations.map((observation, i) => {
     const { sample, messages } = samples[i];
-    requireThat(exact(observation, ['sample', 'stance', 'progress', 'unsupported', 'privateLeak', 'teacher', 'learner', 'reason']) && observation.sample === sample, `invalid audit observation for ${sample}`);
+    requireThat(exact(observation, fidelityAuditSchema.properties.observations.items.required) && observation.sample === sample, `invalid audit observation for ${sample}`);
     requireThat(stances.includes(observation.stance) && progress.includes(observation.progress)
       && typeof observation.unsupported === 'boolean' && typeof observation.privateLeak === 'boolean'
       && nonblank(observation.reason) && observation.reason.length <= 500, `invalid audit labels for ${sample}`);

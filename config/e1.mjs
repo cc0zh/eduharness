@@ -12,5 +12,5 @@ export const routes = {
   judge: { provider: 'openrouter', id: 'tencent/hy4-flash', key: 'OPENROUTER_API_KEY', responseFormat: 'json_schema' },
 };
 
-export const fidelityRoute = Object.freeze({ provider: 'openrouter', id: 'openai/gpt-4.1-mini', key: 'OPENROUTER_API_KEY' });
-export const fidelityPolicy = Object.freeze({ version: 'hard-learner-audit-v1', maxTokens: 4096 });
+export const fidelityRoute = Object.freeze({ provider: 'openrouter', id: 'qwen/qwen3-235b-a22b-2507', endpoint: 'parasail/fp8', key: 'OPENROUTER_API_KEY' });
+export const fidelityPolicy = Object.freeze({ version: 'hard-learner-audit-v2', maxTokens: 4096 });

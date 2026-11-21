@@ -32,9 +32,15 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
     requireThat(same(manifest.writer, { pid: start.pid, startedAt: start.startedAt }), 'manifest writer PID or start time mismatch');
     requireThat(identity.version === fidelityIdentityVersion && identityId === evaluation.identityId && identityId === hash({ mode, scenario, identity })
       && same(identity.planned, fidelityPlan) && same(identity.limits, limits), 'identity or plan mismatch');
-    if (mode === 'real') requireThat(start.clean && manifest.checkReceipt?.head === start.head
-      && manifest.checkReceipt.scope === hardLearnerCheckScope && start.parameters.flags.includes('--confirm-cost')
-      && identity.preregistrationSha256, 'real fidelity provenance mismatch');
+    const auditRoute = identity.routes?.fidelity_audit;
+    const legacyAudit = identity.calls?.fidelity_audit?.version === 'hard-learner-audit-v1' && auditRoute?.id === 'openai/gpt-4.1-mini';
+    if (mode === 'real') {
+      requireThat(start.clean && manifest.checkReceipt?.head === start.head
+        && manifest.checkReceipt.scope === hardLearnerCheckScope && start.parameters.flags.includes('--confirm-cost')
+        && identity.preregistrationSha256, 'real fidelity provenance mismatch');
+      requireThat(auditRoute?.provider === 'openrouter' && typeof auditRoute.id === 'string'
+        && (legacyAudit || typeof auditRoute.endpoint === 'string' && auditRoute.endpoint.length > 0), 'missing audit route identity');
+    }
     if (identity.preregistrationSha256) requireThat(hash(read(registrationFile)) === identity.preregistrationSha256
       && identity.preregistrationSha256 === start.parameters.values.preregistration_sha256, 'preregistration mismatch');
 
@@ -57,6 +63,13 @@ export function verifyHardLearnerArtifacts({ id, start, receipt, evaluation, req
         requireThat(Number.isSafeInteger(row.requestLimit) && row.requestLimit > 0 && row.requestLimit <= limit, `bad output limit at ${attemptPath}`);
         requireThat(raw.context.systemPrompt === expectedPrompt && same(JSON.parse(raw.context.messages[0].content), expectedView), `request evidence differs at ${attemptPath}`);
         const callId = `${folder}:${role}:${rounds}:1:${i + 1}`;
+        if (role === 'fidelity_audit' && mode === 'real' && !legacyAudit && sent.includes(callId)) {
+          const { model, max_tokens, max_completion_tokens, provider, response_format, reasoning } = raw.outbound ?? {};
+          requireThat(row.model === auditRoute.id && row.provider === auditRoute.provider && model === auditRoute.id && row.auditMode === 'json_schema'
+            && (max_tokens ?? max_completion_tokens) === row.requestLimit && reasoning === undefined
+            && same(provider, { require_parameters: true, only: [auditRoute.endpoint], allow_fallbacks: false })
+            && response_format?.type === 'json_schema' && response_format.json_schema?.strict === true, `bad audit outbound at ${attemptPath}`);
+        }
         attempts.push(callId);
         outputTokens += limit;
         if (!row.failureKind) {
