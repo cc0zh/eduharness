@@ -191,6 +191,32 @@ test('Qwen fails closed for a mixed role, a text-only call, or a serialized rout
   assert.deepEqual(events, []);
 });
 
+test('the capped HY4 contrast sends thinking with a 32768 total cap and records reasoning exhaustion', async t => {
+  const outgoing = [];
+  const response = (content, finish, reasoningTokens, completionTokens) => (_signal, payload) => {
+    outgoing.push(payload);
+    const chunk = { provider: 'Tencent', model: 'tencent/hy4-flash', choices: [{ index: 0, delta: content, finish_reason: finish }] };
+    return new Response(sse(chunk) + sse({ choices: [], usage: { prompt_tokens: 13, completion_tokens: completionTokens,
+      total_tokens: completionTokens + 13, completion_tokens_details: { reasoning_tokens: reasoningTokens } } }) + done, { headers });
+  };
+  const { judge, rows, originals } = setup(t, [response({ reasoning_content: 'continuing' }, 'length', 32768, 32768),
+    response({ content: '{"answer":true}' }, 'stop', 9, 15)], { judgePolicy: 'hy4-capped' });
+  assert.deepEqual((await judge()).value, { answer: true });
+  for (const body of outgoing) {
+    assert.equal(body.model, 'tencent/hy4-flash');
+    assert.deepEqual(body.reasoning, { max_tokens: 16_384 });
+    assert.equal(body.max_tokens ?? body.max_completion_tokens, 32_768);
+    assert.deepEqual(body.provider, { only: ['tencent/fp8'], order: ['tencent/fp8'], allow_fallbacks: false, require_parameters: true });
+    assert.equal(body.response_format.json_schema.strict, true);
+  }
+  assert.equal(rows[0].policyVersion, 'e1-call-policy-v7-hy4-capped');
+  assert.equal(rows[0].timeoutMs, 180_000);
+  assert.equal(rows[0].failureKind, 'reasoning_exhausted_empty');
+  assert.deepEqual([rows[0].reasoningTokens, rows[0].reportedOutputTokens, rows[0].phaseMs.firstVisible], [32_768, 32_768, null]);
+  assert.ok(Number.isInteger(rows[0].phaseMs.firstReasoning));
+  assert.deepEqual(originals[0].outbound.provider, outgoing[0].provider);
+});
+
 test('the off policy fails before transport outside structured, judge-only calls', async t => {
   assert.throws(() => new Models({ mode: 'offline', roles: ['judge', 'learner'], responses: [], judgeReasoningOff: true }),
     error => error.failure?.kind === 'configuration');

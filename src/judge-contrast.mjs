@@ -38,13 +38,13 @@ export function makeContrastRegistration(judgePolicy) {
   const plan = { runId, ruler: binaryRuler, judgePolicy, policyVersion: policy.version, route, typicalCalls, concurrency, limits,
     retriesPerKind: policy.retriesPerKind, timeoutMs, adoption: { firstAttempt: 'visible-no-reasoning-delta', ...unchangedAdoption },
     unchangedQuestions, priorRegistrationSha256, prior: previous.prior, sources: evaluationIdentity({ mode: 'real', sources }).sources, queue };
-  const routing = route.routing ? `唯一端点 \`${route.routing.only[0]}\`，\`provider.allow_fallbacks:false\`，省略推理参数。` :
+  const reasoning = policy.judge.reasoningMaxTokens === null ? '省略推理参数。' :
     `打开推理，发送 \`reasoning.max_tokens:${policy.judge.reasoningMaxTokens}\`。用总输出上限约束请求，实报推理另读遥测。`;
   const markdown = `# 第二轮 ①g ${candidate.label} 预登记
 
 登记 run ID \`${runId}\`。一个 Node 进程，格级并发 ${concurrency}。冻结 S1 五格各三遍，再评三份 ①b 曾超时的公开对话，各一次。样本哈希与 ①d 一致，三份诊断取 ①c 的第一遍归档。
 
-尺子 \`${binaryRuler}\`。题面、提示及本地证据验证沿用 ①d。OpenRouter \`${route.id}\`，\`json_schema.strict:true\` 与 \`provider.require_parameters:true\`。${routing} 策略 \`${policy.version}\`。
+尺子 \`${binaryRuler}\`。题面、提示及本地证据验证沿用 ①d。OpenRouter \`${route.id}\`，\`json_schema.strict:true\` 与 \`provider.require_parameters:true\`。唯一端点 \`${route.routing.only[0]}\`，\`provider.allow_fallbacks:false\`。${reasoning} 策略 \`${policy.version}\`。
 
 常规 ${typicalCalls} 次，每次最多 ${policy.judge.maxTokens} 请求输出 token，本地截止 ${timeoutMs / 1000} 秒。全批预留硬上限 **${maxCalls} 次、${maxOutputTokens} 请求输出 token**，含最多 8 次额外。429 按现行调度降一档，最低 1。按故障类跨格及跨进程最多 ${policy.retriesPerKind} 次重试，限流和本地超时各为一类。每次逻辑调用最多 ${policy.retries} 次普通重试。失败达到停线后停止发新请求，结算已发请求。授权范围内同 ID 续跑时，保留已经提交的判决和所有已预留额度。
 
