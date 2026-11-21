@@ -7,4 +7,4 @@
 - 改对话、分数或产物先看 [术语](docs/glossary.md) 和 `contracts/<owner>/`。教师不读取数据集或裁判契约。离线测试和真实运行走同一编排。不用兜底分数、也不把尺子用于排名。
 - 用 `node --test`。先写测试并看到它失败，再写实现让它通过。不要先 mock 被修改的函数再对 mock 做断言。坏输入、截断、空正文、JSON 后跟多余文本都要测。汇报贴红、绿输出；真实模式只接受干净 HEAD 的 `npm run check` 收据，提交后先重跑检查。
 - 排障见 [runbook](docs/runbook.md)。产物放 `runs/`，收据放 `runs/_receipts/`。临时文件放 `.tmp/scratch/<任务名>/`，用后清理。`runs/`、`.tmp/` 不进 Git。
-- 交接看 [计划](docs/plans/e1.md) 和 [历史](docs/history.md)。提交前独立审查。离线证据不能代替真实验收。
+- 交接看 [计划](docs/plans/roadmap.md) 和 [历史](docs/history.md)。提交前独立审查。离线证据不能代替真实验收。
