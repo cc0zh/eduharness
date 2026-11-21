@@ -10,6 +10,8 @@
 
 `node src/cli.mjs --verify-run <id>` 只读这三类进程原件，以及存在时的评测收据和关联产物。缺原件、字段不完整、请求起止不配对或收据字段矛盾时返回非零并列出缺失项。测试评测收据按有效总分格同时锚定对话与裁判 JSON 字节哈希。历史运行没有这些新原件时如实报告缺失，不回填。
 
+OpenRouter 裁判的 `telemetry.json` 另记 `phaseMs`。各值是相对尝试 `startedAt` 的单调毫秒偏移：`requestSent` 发起 fetch，`headersReceived` 收到响应头，`firstByte` 收到首个非空响应体块，`firstReasoning`、`lastReasoning` 是首末推理载荷，`firstVisible` 是首个非空白正文 delta，`ended` 是调用完成或中止（解析判决前）。未观察到的阶段为 `null`。这些值是客户端观察，不是供应商内部生成时刻。`reasoningTokens` 和 `reportedOutputTokens` 是实报计数；未上报不补零。后者含推理 token。
+
 ## 评测身份
 
 `manifest.json` 的 `identityId` 对 `{ mode, scenario, identity }` 求哈希。`identity` 包含数据修订、任务原件与部署策略哈希，尺子版本，调用策略及实际额度上限，运行器与 pi 版本，角色路由（离线为 `pi-ai-faux`），以及依赖锁、配置、编排、教师、裁判、离线提供商和各契约 schema 的源码哈希。E2 另记目标维度和其配置源码哈希。只裁判运行另记来源 run、格子及对话哈希。路由中的 `key` 是环境变量名。任务 `taskId`、run ID、写入进程和检查收据由 manifest 单列，复核时也需核对任务与产物归属。

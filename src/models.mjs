@@ -7,6 +7,42 @@ import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
 const roleConfig = role => role === 'regrade' ? 'judge' : role;
+const nonempty = text => typeof text === 'string' && text.length > 0;
+
+function observeJudge(elapsed) {
+  const phaseMs = { requestSent: null, headersReceived: null, firstByte: null, firstReasoning: null, lastReasoning: null, firstVisible: null, ended: null };
+  let reportedOutputTokens = null;
+  return {
+    async fetch(input, init) {
+      phaseMs.requestSent = elapsed();
+      const response = await globalThis.fetch(input, init);
+      phaseMs.headersReceived = elapsed();
+      if (!response.body) return response;
+      const body = response.body.pipeThrough(new TransformStream({ transform(chunk, controller) {
+        if (chunk.byteLength) phaseMs.firstByte ??= elapsed();
+        controller.enqueue(chunk);
+      } }));
+      return new Response(body, response);
+    },
+    event(chunk) {
+      const choice = chunk?.choices?.[0];
+      const output = (chunk?.usage ?? choice?.usage)?.completion_tokens;
+      if (Number.isSafeInteger(output) && output >= 0) reportedOutputTokens = output;
+      const delta = choice?.delta;
+      if (!delta) return;
+      if ([delta.reasoning_content, delta.reasoning, delta.reasoning_text].some(nonempty)
+        || Array.isArray(delta.reasoning_details) && delta.reasoning_details.some(detail => [detail?.text, detail?.summary, detail?.data].some(nonempty))) {
+        phaseMs.lastReasoning = elapsed();
+        phaseMs.firstReasoning ??= phaseMs.lastReasoning;
+      }
+      if (typeof delta.content === 'string' && delta.content.trim()) phaseMs.firstVisible ??= elapsed();
+    },
+    finish() {
+      phaseMs.ended = elapsed();
+      return { phaseMs, reportedOutputTokens };
+    },
+  };
+}
 
 export function attemptBudget({ maxAttempts, maxRequestedOutputTokens }) {
   let attempts = 0, requested = 0;
@@ -39,8 +75,14 @@ export class Models {
   #reserve;
   #recorder;
   #cell;
+  #judgeTimeoutMs;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes) }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs }) {
+    if (judgeTimeoutMs !== undefined && (roles.length !== 1 || roles[0] !== 'judge'
+      || !Number.isSafeInteger(judgeTimeoutMs) || judgeTimeoutMs < 1 || judgeTimeoutMs > 2_147_483_647)) {
+      throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'positive judge timeout override requires a judge-only run');
+    }
+    this.#judgeTimeoutMs = judgeTimeoutMs;
     this.#save = save;
     this.#reserve = reserve;
     this.#recorder = mode === 'real' ? recorder : undefined;
@@ -105,8 +147,9 @@ export class Models {
     const { role, turn, call } = scope;
     const canonical = roleConfig(role);
     const config = policy[canonical];
+    const model = this.model(role);
     const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure' }[canonical];
-    const timeoutMs = config.timeoutMs ?? policy.timeoutMs;
+    const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? policy.timeoutMs;
     let priorValidation;
     for (let attempt = 1; attempt <= policy.retries + 1; attempt++) {
       const coordinates = { role, turn, call, attempt };
@@ -116,8 +159,11 @@ export class Models {
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
       const startedAt = new Date().toISOString();
       const start = performance.now();
+      const elapsed = () => Math.round(performance.now() - start);
+      const observation = canonical === 'judge' && model.provider === routes.judge.provider ? observeJudge(elapsed) : undefined;
       const signal = AbortSignal.timeout(timeoutMs);
-      const send = this.#recorder ? trackedFetch(globalThis.fetch, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : globalThis.fetch;
+      const transport = observation?.fetch ?? globalThis.fetch;
+      const send = this.#recorder ? trackedFetch(transport, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : transport;
       let outboundRejection;
       const fetch = schema ? (input, init) => {
         const body = JSON.parse(init.body);
@@ -135,7 +181,7 @@ export class Models {
           messages: '[redacted]',
         };
         return send(input, init);
-      } : this.#recorder ? send : undefined;
+      } : this.#recorder || observation ? send : undefined;
       const options = {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
         ...(fetch && { fetch }),
@@ -155,11 +201,11 @@ export class Models {
         },
         onResponse({ status }) { httpStatus = status; },
         onProviderStreamEvent(chunk) {
+          observation?.event(chunk);
           finish_reason = chunk.choices?.[0]?.finish_reason ?? finish_reason;
           reasoningTokens = chunk.usage?.completion_tokens_details?.reasoning_tokens ?? reasoningTokens;
         },
       };
-      const model = this.model(role);
       let response, failureKind, parsed, detail;
       const events = [], originalOrder = [];
       try {
@@ -172,6 +218,7 @@ export class Models {
         failureKind = 'provider_failure';
         httpStatus = Number.isInteger(error?.status) ? error.status : httpStatus;
       }
+      const timing = observation?.finish();
       const text = response ? textOf(response) : '';
       if (response) {
         failureKind = stopFailure(response, text, reasoningTokens, requestLimit, finish_reason);
@@ -195,7 +242,7 @@ export class Models {
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
       }, {
         ...coordinates, ...this.identity(role), policyVersion: policy.version, requestLimit, finish_reason, httpStatus,
-        startedAt, elapsedMs: Math.round(performance.now()-start), timeoutMs,
+        startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
         ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning.max_tokens }),

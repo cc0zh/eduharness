@@ -95,7 +95,7 @@ export function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
   } catch (error) { throw failure('invalid_input', {}, `judge-only cannot validate the frozen ${scenario} ${cell} dialogue: ${error.message}`); }
 }
 
-export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, frozenBytes, judgeOnly, fixtures, improved, grader = grade }) {
+export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, frozenBytes, judgeOnly, fixtures, improved, grader = grade, judgeTimeoutMs }) {
   const prefix = coordinate?.taskId ?? coordinate?.repetition;
   const cell = prefix ? `${prefix}:${variant}` : variant;
   const folder = prefix ? `${prefix}/${variant}` : variant;
@@ -121,7 +121,7 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
   try {
     fixtures ??= mode === 'offline' ? offlineResponses(variant) : undefined;
     const roles = frozen ? ['judge'] : generateOnly ? ['teacher', 'learner'] : undefined;
-    const models = new Models({ mode, responses: frozen && fixtures ? fixtures.slice(-1) : fixtures, roles, save, reserve, recorder, cell });
+    const models = new Models({ mode, responses: frozen && fixtures ? fixtures.slice(-1) : fixtures, roles, save, reserve, recorder, cell, judgeTimeoutMs });
     if (!frozen) {
       const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event), improved });
       const { instructions, persona } = task.user_scenario;
