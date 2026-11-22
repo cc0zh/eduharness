@@ -34,6 +34,7 @@
 | 2026-11 | [分档稳定时仍要找出实际失分的题位](2026-11/20261122-headroom-by-question.md) | `stage2b-headroom-real-01`，交还主动权 23/24 对同档 |
 | 2026-11 | [锁原件摘要也要锁检出字节](2026-11/20261122-freeze-needs-byte-stable-checkout.md) | 阶段 3 worktree 的 `npm run check` 与 `fa6b501` 冻结 blob |
 | 2026-11 | [选中交权动作不等于真把方法交给学生](2026-11/20261122-handoff-action-is-not-learner-choice.md) | `stage3-dev-v1-real-01`，门控与 #6/#7 原话 |
+| 2026-11 | [盲核理由的长度也是覆盖条件](2026-11/20261122-blind-audit-length-is-coverage.md) | `stage3-dev-v2-real-01`，16 个必审、14 个 `reason` 契约拒收 |
 
 ## 目录与命名
 
