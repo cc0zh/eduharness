@@ -2,15 +2,19 @@
 
 ## 阶段 3 状态驱动教师
 
+### 收尾决定
+
+**不采用。** 保留线性教师 B，不申请 `sealed`。两版 dev 到此停止，不重跑或补盲核；原预登记和附录未改，未访问 `sealed` 或训练标签。[收尾文档](research/stage3/closeout.md)列出全部判线、五项归因核查、逐格证据及未验证的下一轮假设。三句固定交权模板只留作未采用的实验记录，不改默认教师，后续项目不得复用。
+
+### dev 实测记录
+
 主目标为交还主动权 A，重点为学生自己提出方法或检验并说明理由（A2）。[预登记](research/stage3/preregistration.md)已确认并[锁定 SHA256](research/stage3/preregistration.sha256)。功能分支用独立小判断员、代码门控和保守回退。三臂显式使用带边界采用的 `e1-binary-v3`，每格只判一次 A。话术侧回放基线，仅改教师 #8；跨家族盲核另判原创和独立执行。
 
 **dev 第 1 版未过线。** `stage3-dev-v1-real-01` 三臂 72/72 格验真。A 候选配对差 +0.000；A2 三臂各 0/24，两种真命中率分母均为 0。负对照 A 差 +0.000，默认画像有效暴露 0/8，整体不可判定。P、V、总适用分率防退化均过线。候选发出 19 次 `handoff` 动作，但回读未见一次把方法选择和理由留给学生。另有 31 次回退。[第 1 版报告](../runs/stage3-dev/stage3-dev-v1-real-01/report-v1.md) · [运行验真](../runs/stage3-dev/stage3-dev-v1-real-01/verify-run.json)
 
 **dev 第 2 版不放行。** `stage3-dev-v2-real-01` 的 72/72 格机判验真。候选 A 差 +0.042 未达 +0.25，V 差 −0.208 越过 −0.125；P 和总适用分率过线。按[附录 01](research/stage3/preregistration-addendum-01.md)，C 的有效暴露顽固、伸手各 1/8，不足；默认 2/8 只报告。C 均差 −0.042，确认假命中 0 格，但唯一 C 阳性缺合规盲核。全批盲核 2/16 合规，14 项因 `reason` 超长被拒收。最终记 `inconclusive`，不作通过。[第 2 版报告](../runs/stage3-dev/stage3-dev-v2-real-01/report-v2.md) · [验真](../runs/stage3-dev/stage3-dev-v2-real-01/verify-run.json)
 
-候选实际交权 18 次，出现学生自选分段复核并解释理由的合规盲核正例。仍有 22 次 `unknown`、5 次未修锚不匹配；不能用交权次数或 A2 阳性数代替 A 维和盲核判线。[匿名补充抽查包](../runs/stage3-dev/stage3-dev-v2-real-01/blind-spot-check.md)
-
-**等秘书确认。** 两版 dev 已跑完，不再改版或重跑。建议保留 B、不申请 `sealed`。原预登记和附录不改，未访问 `sealed` 或训练标签。[离线入口和验真](runbook.md#阶段-3-状态驱动教师)
+v2 候选实际交权 18 次，机判 A2 从 B 的 1/24 到 S 的 12/24。F12-B／伸手有合规盲核的独立实做正例，F09-B／伸手仍只向教师要步骤。观察器有 22 次回退，其中 5 次待修锚未对齐。交权次数和 A2 阳性数都不替代 A 维或盲核判线。[原件及盲核归档](research/stage3/closeout.md#原件与盲核抽查归档) · [离线入口和验真](runbook.md#阶段-3-状态驱动教师)
 
 ## 研究归档与阶段 1 复核补记（2026-11-22）
 
