@@ -138,8 +138,8 @@ export function prepareJudgeBakeoff(config, estimating) {
 }
 
 export function runJudgeBakeoff(config, { identity, identityId, source, preregistration, plan, inputs, ceiling }) {
-  const { id, mode, limits, checkReceipt } = config;
-  return runCellBatch(config, { id, scenario: judgeBakeoffScenario, taskId, mode, identity, identityId, budget: ceiling, limits,
+  const { id, mode, limits, checkReceipt, scenario = judgeBakeoffScenario } = config;
+  return runCellBatch(config, { id, scenario, taskId, mode, identity, identityId, budget: ceiling, limits,
     planned: plan.queue, source, checkReceipt }, (folder, context) => {
     const row = plan.queue.find(sample => sample.id === folder);
     const { messages, bytes } = inputs.get(folder);

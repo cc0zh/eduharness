@@ -11,11 +11,11 @@ import { splitBinaryIdentityVersion, splitBinaryOutputContract, splitBinaryRuler
 import { bind, directDimension, dimensions, parseNumberedJudgement, rubric } from '../contracts/judge/schema.mjs';
 import { assessS1, s1Path, s1Plan, s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, contrastFolders, judgeContrastScenario } from './judge-contrast-plan.mjs';
-import { bakeoffBudget, judgeBakeoffScenario, validateBakeoffProxyIdentity } from './judge-bakeoff-plan.mjs';
+import { bakeoffBudget, freezeSlotCount, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario, validateBakeoffProxyIdentity } from './judge-bakeoff-plan.mjs';
 import { matchesJudgeParameters, matchesReportedRoute } from './judge-transport.mjs';
 
 export const batchVersion = 'cell-batch-v1';
-export const splitScenario = scenario => scenario === judgeBakeoffScenario;
+export const splitScenario = scenario => scenario === judgeBakeoffScenario || scenario === judgeFreezeScenario;
 const binaryScenario = scenario => scenario === s1Scenario || scenario === judgeContrastScenario || splitScenario(scenario);
 export const supportedBatch = scenario => ['E1', 'E1-judge-only', 'E2', 'E2-judge-only'].includes(scenario) || binaryScenario(scenario);
 export function batchFolders({ scenario, planned }) {
@@ -45,6 +45,7 @@ export function batchPolicy({ scenario, identity, source, mode }) {
 export function validateBatchPlan(manifest) {
   const { scenario, identity, identityId, mode, planned } = manifest;
   const split = splitScenario(scenario);
+  const freeze = scenario === judgeFreezeScenario;
   const contrast = scenario === judgeContrastScenario || split;
   requireThat(supportedBatch(scenario) && manifest.taskId === taskId, 'invalid batch scenario or task');
   const expected = scenario === 'E1' ? ['normal', 'answer_dump'] : scenario === 'E1-judge-only' ? ['normal']
@@ -54,7 +55,12 @@ export function validateBatchPlan(manifest) {
   validateBakeoffProxyIdentity(manifest);
   const callPolicy = batchPolicy(manifest);
   if (contrast) {
-    requireThat(same(batchFolders(manifest), contrastFolders) && same(manifest.budget, split ? bakeoffBudget(callPolicy) : contrastBudget(callPolicy)), 'judge contrast sample plan or budget differs');
+    const folders = batchFolders(manifest);
+    const validFolders = freeze ? folders.length === freezeSlotCount && new Set(folders).size === freezeSlotCount
+      && same(folders.slice(0, s1Plan.length), s1Plan.map(s1Path))
+      && folders.slice(s1Plan.length).every(id => /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id)) : same(folders, contrastFolders);
+    requireThat(validFolders && same(manifest.budget, (freeze ? judgeFreezeBudget : split ? bakeoffBudget : contrastBudget)(callPolicy)),
+      'judge contrast sample plan or budget differs');
     for (const [i, row] of planned.entries()) {
       const coordinate = s1Plan[i];
       requireThat(row.repetition === coordinate?.repetition && row.condition === coordinate?.condition

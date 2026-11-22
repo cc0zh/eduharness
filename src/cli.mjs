@@ -9,7 +9,7 @@ import { s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, judgeContrastScenario } from './judge-contrast-plan.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
-import { bakeoffBudget, judgeBakeoffScenario } from './judge-bakeoff-plan.mjs';
+import { bakeoffBudget, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario } from './judge-bakeoff-plan.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
@@ -89,12 +89,14 @@ if (option('--export-report') >= 0) {
       'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
-    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario].includes(values.scenario)) throw new Error('unknown scenario');
-    const split = values.scenario === judgeBakeoffScenario;
+    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario].includes(values.scenario)) throw new Error('unknown scenario');
+    const freezeRetest = values.scenario === judgeFreezeScenario;
+    const split = freezeRetest || values.scenario === judgeBakeoffScenario;
     const contrast = split || values.scenario === judgeContrastScenario;
     if (values['proxy-from-env'] && (!split || values.mode !== 'real' || !['haiku', 'gemini'].includes(values['judge-policy']) || values.resume)) {
       throw new Error('--proxy-from-env is only for real Haiku or Gemini bakeoff runs without --resume');
     }
+    if (freezeRetest && !values['proxy-from-env']) throw new Error('freeze retest requires the winning proxy transport via --proxy-from-env');
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
@@ -120,7 +122,7 @@ if (option('--export-report') >= 0) {
         const { resolveOpenRouterProxySource } = await import('./openrouter-proxy.mjs');
         config.judgeProxySource = resolveOpenRouterProxySource().source;
       }
-      ceiling = (split ? bakeoffBudget : contrastBudget)(candidates[judgePolicy].policy);
+      ceiling = (freezeRetest ? judgeFreezeBudget : split ? bakeoffBudget : contrastBudget)(candidates[judgePolicy].policy);
     } else if (values.scenario === s1Scenario) {
       if (!config.judgeOnly || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('S1-binary only admits --judge-only <frozen E2 run ID>');
       s1Runner = await import('./s1-binary.mjs');
@@ -157,7 +159,8 @@ if (option('--export-report') >= 0) {
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
     if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
-    if (contrastRunner) config.prepared = (contrastRunner.prepareJudgeBakeoff ?? contrastRunner.prepareJudgeContrast)(config, estimate);
+    if (freezeRetest) config.prepared = (await import('./judge-freeze-retest.mjs')).prepareJudgeFreeze(config, estimate);
+    else if (contrastRunner) config.prepared = (contrastRunner.prepareJudgeBakeoff ?? contrastRunner.prepareJudgeContrast)(config, estimate);
   } catch (error) {
     rejectInput(error);
   }

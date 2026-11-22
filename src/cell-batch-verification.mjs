@@ -85,7 +85,8 @@ export function readBatch(root, id, { resume = false } = {}) {
           && (mode === 'offline' || same(candidate.route, identity.routes.judge)) && plan.ruler === identity.ruler
           && same(candidate.limits, manifest.limits) && same(plan.sources, identity.sources) && same(plan.prior, manifest.source.prior)
           && same(plan.queue, manifest.planned) && same(plan.stop, split.rules)
-          && same(plan.judgeTransport, identity.judgeTransport) && plan.parentRegistrationSha256 === identity.parentRegistrationSha256,
+          && same(plan.judgeTransport, identity.judgeTransport) && plan.parentRegistrationSha256 === identity.parentRegistrationSha256
+          && same(plan.freeze, identity.freeze),
         'judge bakeoff preregistration does not match the batch');
       } else if (contrast) {
         const plan = contrastRegistration(markdown);
