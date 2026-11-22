@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { hash } from '../contracts/core/schema.mjs';
@@ -77,6 +77,7 @@ test('real probe CLI requires the repository cost authorization flag before read
 
 function tempRoot(t) {
   const parent = resolve('.tmp/scratch/judge-bakeoff');
+  mkdirSync(parent, { recursive: true });
   const root = mkdtempSync(join(parent, 'probe-run-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
