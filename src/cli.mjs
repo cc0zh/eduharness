@@ -18,6 +18,40 @@ const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
 const leadingArgs = argv.includes('--') ? argv.slice(0, argv.indexOf('--')) : argv;
 const option = name => leadingArgs.findLastIndex(value => value === name || value.startsWith(`${name}=`));
+const exportReportOptions = { 'export-report': { type: 'string' }, 'run-root': { type: 'string', default: 'runs' }, out: { type: 'string' }, 'back-href': { type: 'string' } };
+const verifyRunOptions = { 'run-root': { type: 'string', default: 'runs' }, 'verify-run': { type: 'string' } };
+const runOptions = {
+  mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
+  id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
+  resume: { type: 'boolean' }, concurrency: { type: 'string' },
+  'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
+  'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
+  phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
+  harness: { type: 'string' }, 'source-root': { type: 'string' }, preregistration: { type: 'string' }, 'preregistration-sha256': { type: 'string' },
+  'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' }, 'learner-fix': { type: 'string' },
+};
+const commonOperations = [
+  { description: 'Run an offline E1 evaluation.', options: runOptions, args: { mode: 'offline', 'run-root': 'runs', id: 'e1-first' } },
+  { description: 'Verify a run receipt.', options: verifyRunOptions, args: { 'verify-run': 'e1-first' } },
+  { description: 'Export an interactive review report.', options: exportReportOptions, args: { 'export-report': 'e1-first' } },
+];
+const formatExample = ({ options, args }) => Object.entries(args).map(([name, value]) => {
+  const definition = options[name];
+  if (!definition) throw new Error(`help example uses undefined option: --${name}`);
+  return definition.type === 'boolean' ? `--${name}` : `--${name} ${value}`;
+}).join(' ');
+const makeHelpText = () => [
+  'Usage: node src/cli.mjs [options]',
+  '',
+  'Common operations:',
+  ...commonOperations.flatMap(command => [
+    `  ${command.description}`,
+    `    Example: node src/cli.mjs ${formatExample(command)}`,
+  ]),
+  '',
+  'Use --help or -h to show this usage.',
+  '',
+].join('\n');
 const optionValue = name => {
   const index = option(name);
   if (index < 0) return undefined;
@@ -27,9 +61,14 @@ const optionValue = name => {
   return next?.startsWith('-') ? undefined : next;
 };
 
+if (leadingArgs.includes('--help') || leadingArgs.includes('-h')) {
+  await new Promise((resolve, reject) => process.stdout.write(makeHelpText(), error => error ? reject(error) : resolve()));
+  process.exit(0);
+}
+
 if (option('--export-report') >= 0) {
   try {
-    const { values } = parseArgs({ options: { 'export-report': { type: 'string' }, 'run-root': { type: 'string', default: 'runs' }, out: { type: 'string' }, 'back-href': { type: 'string' } } });
+    const { values } = parseArgs({ options: exportReportOptions });
     const { exportReport } = await import('./html-report.mjs');
     emit(exportReport(values['export-report'], values.out, values['run-root'], { backHref: values['back-href'] }));
   } catch (error) {
@@ -38,7 +77,7 @@ if (option('--export-report') >= 0) {
   }
 } else if (option('--verify-run') >= 0) {
   try {
-    const { values } = parseArgs({ options: { 'run-root': { type: 'string', default: 'runs' }, 'verify-run': { type: 'string' } } });
+    const { values } = parseArgs({ options: verifyRunOptions });
     const result = verifyRun(values['run-root'], runId(values['verify-run']));
     emit(result);
     if (!result.verified) process.exitCode = 1;
@@ -99,16 +138,7 @@ if (option('--export-report') >= 0) {
 
   let config, estimate, rulerRunner, s1Runner, fidelityRunner, contrastRunner, ceiling;
   try {
-    const { values } = parseArgs({ options: {
-      mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
-      id: { type: 'string' }, 'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' },
-      resume: { type: 'boolean' }, concurrency: { type: 'string' },
-      'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
-      'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
-      phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
-      harness: { type: 'string' }, 'source-root': { type: 'string' }, preregistration: { type: 'string' }, 'preregistration-sha256': { type: 'string' },
-      'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' }, 'learner-fix': { type: 'string' },
-    } });
+    const { values } = parseArgs({ options: runOptions });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
     const scenarios = ['E1', 'E2', 'ruler-expand', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario];
     if (!scenarios.includes(values.scenario)) throw new Error(`scenario must be one of: ${scenarios.join(', ')}`);
