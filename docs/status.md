@@ -1,12 +1,20 @@
 # 当前状态
 
+<a name="stage1-closeout"></a>
+
+## 阶段 1 收口
+
+**用户决定走路线 A：`e1-binary-v3` 带边界采用。** v3 和 v4 都未通过冻结门禁。阶段 2b/3 显式使用 v3 和 Gemini 代理策略。A1 可能误报教师展开式子后的学生跟算，V1 对事后话术敏感，同一输入的单次判定会翻转。v4 的 S1 验证或迁移目标从 3/3 退至 1/3。[19 题翻转率、已知边界和评分入口](stage1-closeout.md)
+
+阶段 1 重算未发请求。v3 支持维分档有 22/89 对翻转，表征维 15/99；其余四维的这批分档对照为 0/99。离线核对 v3 复测 307 次请求，重建的完整 HTTP body 均与工作入口逐字相同。工作裁判的指纹为 `4a558e6086f8ce2a4250ee63c6133a76978d329dbceacfdc3f1679731eae0849`；回放 `identityId` 不代替 dev run 的身份。
+
 <a name="stage2a-learner-fix"></a>
 
 ## 阶段 2a 学生自证伪修复（20261122）
 
 **阶段 2a 已合入本地 `main`。** 甲组复跑的结论不变：顽固误解型、伸手要答案型能用，假装懂了型不可用。按预登记停止，不补跑或再改画像。甲组仅在高压学生场景中关闭 DeepSeek Flash 的 `thinking`，不加共享条款，三张画像哈希不变。保真审核仍用 `hard-learner-audit-v5-gemini`，提示、端点、预算和代理条件不变。[学生配置](../config/hard-learners.mjs) · [原判线](#stage2a-gemini-audit)
 
-合并改变了默认 E1/E2 的 `identityId` 和二元尺子 v4 的 `judgeFingerprint`。原因是 `src/models.mjs` 等文件的源码哈希变化，身份计算规则未改。离线固定输入下，E1/E2、S1 和二元尺子 v2/v3/v4 的 82 个出站请求体逐字一致，端点和代理选择不变。抽查的四份历史 run 验真均通过。阶段 1 下轮预登记使用合并后的身份；v4 不冻结。[本地合并复核](../.tmp/scratch/merge-stage2a/progress.md)
+合并改变了默认 E1/E2 的 `identityId` 和二元尺子 v4 的 `judgeFingerprint`。原因是 `src/models.mjs` 等文件的源码哈希变化，身份计算规则未改。离线固定输入下，E1/E2、S1 和二元尺子 v2/v3/v4 的 82 个出站请求体逐字一致，端点和代理选择不变。抽查的四份历史 run 验真均通过。后续按[阶段 1 收口决定](#stage1-closeout)采用 v3 工作评分器。[本地合并复核](../.tmp/scratch/merge-stage2a/progress.md)
 
 **四组小样。** S0-01/independent 中，只有亲自做了未指定的特例、再据此修正或动摇原误解，才计自证伪。先盲读 #9 再解盲。S0-06/targeted 每组两条，检查学生确实使用老师给的坐标。四次同条件重复复用提示、温度为 0，只用于本轮选优。
 
