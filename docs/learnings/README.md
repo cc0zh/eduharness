@@ -28,6 +28,7 @@
 | 2026-11 | [判决与格提交要在同一条结算记录](2026-11/20261121-atomic-ruling-commit.md) | 第二轮 ①e 强杀和同 ID 续跑 |
 | 2026-11 | [压低总输出上限仍会被推理占满](2026-11/20261121-capped-output-reasoning-exhaustion.md) | 第二轮 ①g `round2-hy4-capped-01`，五次 `length` |
 | 2026-11 | [构造题零错不替代冻结复测](2026-11/20261122-bakeoff-pass-is-not-freeze.md) | ①h `round2-bakeoff-gemini-proxy-01`、`round2-binary-v3-freeze-gemini-01` |
+| 2026-11 | [连续满分也可能漏掉审核边界](2026-11/20261122-audit-validation-needs-boundary-cases.md) | 阶段 2a `stage2a-audit-validation-2`、`stage2a-hard-learners-05` |
 
 ## 目录与命名
 

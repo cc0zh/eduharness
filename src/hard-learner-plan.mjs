@@ -13,17 +13,17 @@ export function initialFidelityStopState() {
   return { consecutiveProviderFailures: 0, consecutiveReplyFailures: 0, totalReplyFailures: 0 };
 }
 
-export function advanceFidelityStopState(state, outcome) {
+export function advanceFidelityStopState(state, outcome, rules = fidelityStopRules) {
   if (outcome.type === 'call') {
     const consecutiveProviderFailures = outcome.failureKind === 'provider_failure' ? state.consecutiveProviderFailures + 1 : 0;
     return { state: { ...state, consecutiveProviderFailures },
-      stopRule: consecutiveProviderFailures >= fidelityStopRules.consecutiveProviderFailures ? 'provider_failure_streak' : null };
+      stopRule: consecutiveProviderFailures >= rules.consecutiveProviderFailures ? 'provider_failure_streak' : null };
   }
   if (outcome.type === 'reply') {
     const consecutiveReplyFailures = outcome.failed ? state.consecutiveReplyFailures + 1 : 0;
     const totalReplyFailures = state.totalReplyFailures + Number(outcome.failed);
-    const stopRule = consecutiveReplyFailures >= fidelityStopRules.consecutiveReplyFailures ? 'consecutive_reply_failures'
-      : totalReplyFailures >= fidelityStopRules.totalReplyFailures ? 'total_reply_failures' : null;
+    const stopRule = consecutiveReplyFailures >= rules.consecutiveReplyFailures ? 'consecutive_reply_failures'
+      : totalReplyFailures >= rules.totalReplyFailures ? 'total_reply_failures' : null;
     return { state: { ...state, consecutiveReplyFailures, totalReplyFailures }, stopRule };
   }
   throw new TypeError('unknown fidelity stop outcome');

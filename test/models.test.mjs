@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai';
+import { ProxyAgent } from 'undici';
 import { Models, stopFailure } from '../src/models.mjs';
-import { parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
+import { fidelityAuditPrompt, fidelityAuditSchema, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
+import { hash } from '../contracts/core/schema.mjs';
 import { parseLearner } from '../contracts/learner/schema.mjs';
 
 test('model boundary preserves every failed attempt; no fourth attempt or fallback text', async () => {
@@ -145,7 +147,7 @@ test('learner JSON on toolUse cannot become a published utterance', async () => 
   assert.deepEqual(rows.map(r => r.failureKind), ['simulator_generation_contract', null]);
 });
 
-function realAudit(t, respond) {
+function realAudit(t, respond, config = {}) {
   const key = 'audit-credential-canary';
   const before = process.env.OPENROUTER_API_KEY;
   process.env.OPENROUTER_API_KEY = key;
@@ -153,14 +155,15 @@ function realAudit(t, respond) {
     if (before === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = before;
   });
-  const payloads = [], attempts = [];
+  const payloads = [], attempts = [], dispatchers = [];
   t.mock.method(globalThis, 'fetch', async (_input, init) => {
     payloads.push(JSON.parse(init.body));
+    dispatchers.push(init.dispatcher);
     return respond(key);
   });
-  const models = new Models({ mode: 'real', roles: ['fidelity_audit'], save: (raw, row) => attempts.push({ raw, row }) });
-  return { payloads, attempts, call: parse => models.complete({ role: 'fidelity_audit', turn: 4, call: 1 },
-    { messages: [{ role: 'user', timestamp: 1, content: 'Review the sample.' }] }, parse) };
+  const models = new Models({ mode: 'real', roles: ['fidelity_audit'], ...config, save: (raw, row) => attempts.push({ raw, row }) });
+  return { payloads, attempts, dispatchers, call: parse => models.complete({ role: 'fidelity_audit', turn: 4, call: 1 },
+    { systemPrompt: fidelityAuditPrompt, messages: [{ role: 'user', timestamp: 1, content: 'Review the sample.' }] }, parse) };
 }
 
 test('real audit sends a pinned non-reasoning strict JSON request and still binds the quotes locally', async t => {
@@ -194,4 +197,83 @@ test('audit HTTP errors retain diagnostic fields, not credentials or raw bodies'
   assert.equal(attempts.length, 3);
   assert.deepEqual(attempts[0].row.auditError, { code: 403, hasMessage: true, kind: 'permission', provider: 'Parasail' });
   assert.doesNotMatch(JSON.stringify(attempts), /audit-credential-canary|Bearer|Permission denied for/);
+});
+
+const geminiAudit = { fidelityAuditPolicy: 'gemini', fidelityProxySource: 'HTTPS_PROXY' };
+function auditProxy(t, value) {
+  const names = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NODE_TLS_REJECT_UNAUTHORIZED'];
+  const old = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  if (value) process.env.HTTPS_PROXY = value;
+  t.after(() => {
+    for (const [name, previous] of Object.entries(old)) {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    }
+  });
+}
+
+const auditSample = { sample: 'A', messages: [{ n: 8, text: 'Try one subtraction.' }, { n: 9, text: 'I used 12 - 7.' }] };
+const auditDocument = JSON.stringify({ observations: [{ sample: 'A', stance: 'other', stepPerformed: true, correctionWithBasis: false,
+  unexplainedClaim: '', privateLeak: false, teacher: { n: 8, quote: 'one subtraction' }, learner: { n: 9, quote: '12 - 7' }, reason: 'The learner subtracts.' }] });
+const parseAudit = text => parseFidelityEvidence(text, [auditSample]);
+const geminiStream = (content, finish_reason = 'stop', provider = 'Google AI Studio') => new Response(
+  `data: ${JSON.stringify({ id: 'fixture', model: 'google/gemini-3.8-flash', provider, choices: [{ index: 0, delta: { content }, finish_reason }] })}\n\ndata: [DONE]\n\n`,
+  { headers: { 'content-type': 'text/event-stream' } });
+
+test('Gemini fidelity audit sends the winning pinned, proxied, strict request and unchanged v2 prompt', async t => {
+  auditProxy(t, 'http://audit-user:audit-pass@127.0.0.1:9');
+  const { call, payloads, attempts, dispatchers } = realAudit(t, () => geminiStream(auditDocument), geminiAudit);
+  assert.equal((await call(parseAudit)).value[0].progress, 'attempt');
+  assert.equal(payloads.length, 1);
+  const [body] = payloads;
+  assert.equal(body.model, 'google/gemini-3.8-flash');
+  assert.deepEqual(body.reasoning, { effort: 'low' });
+  assert.equal(body.temperature, 0);
+  assert.equal(body.max_tokens ?? body.max_completion_tokens, 4096);
+  assert.deepEqual(body.provider, { only: ['google-ai-studio'], order: ['google-ai-studio'], require_parameters: true, allow_fallbacks: false });
+  assert.deepEqual(body.response_format, { type: 'json_schema', json_schema: { name: 'teacharena_fidelity', strict: true, schema: fidelityAuditSchema } });
+  assert.equal(hash(body.messages[0].content), 'c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0');
+  assert.ok(dispatchers[0] instanceof ProxyAgent);
+  assert.equal(attempts[0].row.proxySource, 'HTTPS_PROXY');
+  assert.equal(attempts[0].row.auditMode, 'json_schema');
+  assert.equal(attempts[0].row.auditUpstream, 'Google AI Studio');
+  assert.equal(attempts[0].row.timeoutMs, 120_000);
+  assert.doesNotMatch(JSON.stringify(attempts), /audit-user|audit-pass|audit-credential-canary|127\.0\.0\.1:9/);
+});
+
+test('Gemini fidelity audit refuses missing proxy opt-in or configuration before sending', t => {
+  auditProxy(t);
+  const previousKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'audit-opt-in-test';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousKey;
+  });
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () => { requests++; throw new Error('unexpected network'); });
+  for (const config of [{ fidelityAuditPolicy: 'gemini' }, geminiAudit, { ...geminiAudit, fidelityProxySource: null },
+    { fidelityProxySource: 'HTTPS_PROXY' }, { fidelityAuditPolicy: 'unknown' }, { fidelityAuditPolicy: null }]) {
+    assert.throws(() => new Models({ mode: 'real', roles: ['fidelity_audit'], ...config, save() {} }),
+      error => error.failure?.kind === 'configuration' && /proxy|policy/.test(error.message));
+  }
+  assert.equal(requests, 0);
+});
+
+test('Gemini fidelity audit does not retry through a route different from its pin', async t => {
+  auditProxy(t, 'http://127.0.0.1:9');
+  const { call, payloads, attempts } = realAudit(t, () => geminiStream(auditDocument, 'stop', 'Unexpected Provider'), geminiAudit);
+  await assert.rejects(call(parseAudit), error => error.failure?.kind === 'configuration' && error.failure.attempt === 1);
+  assert.equal(payloads.length, 1);
+  assert.equal(attempts[0].row.failureKind, 'configuration');
+});
+
+test('Gemini fidelity audit records truncation, empty body and trailing text without a fourth attempt', async t => {
+  auditProxy(t, 'http://127.0.0.1:9');
+  const responses = [geminiStream('{"observations":', 'length'), geminiStream(''), geminiStream(`${auditDocument}\nextra`)];
+  const { call, payloads, attempts } = realAudit(t, () => responses.shift(), geminiAudit);
+  await assert.rejects(call(parseAudit), error => error.failure?.kind === 'fidelity_audit_contract' && error.failure.attempt === 3);
+  assert.equal(payloads.length, 3);
+  assert.ok(payloads.every(body => body.messages[0].content === fidelityAuditPrompt));
+  assert.deepEqual(attempts.map(({ row }) => row.failureKind), ['output_truncated', 'empty_unconfirmed', 'fidelity_audit_contract']);
 });

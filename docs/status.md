@@ -1,5 +1,15 @@
 # 当前状态
 
+<a name="stage2a-gemini-audit"></a>
+
+## 阶段 2a Gemini 审核（20261122）
+
+**Gemini 仍是候选，未做真实验证。** `fidelity_audit` 的 Gemini 策略沿用 ①h 的 `google/gemini-3.8-flash` / `google-ai-studio`、`reasoning.effort: low`、温度 0、每请求 4,096 输出 token、120 秒 deadline。出站要求严格 `json_schema`、`require_parameters: true`、`allow_fallbacks: false`，真实模式须显式启用代理。审核身份 `hard-learner-audit-v5-gemini` 绑定策略、路由、传输、源码和预登记；审核提示 v2 与历史 SHA256 `c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0` 相同。默认 Qwen 与学生配置不变。[策略](../config/fidelity-audit.mjs)
+
+验证保留原 16 条，加入 24 条原创难例。四类各六条，独立复核 24/24 后冻结。Gemini 两遍各须 ≥36/40，难例各须 ≥22/24，跨遍一致须 ≥36/40；Qwen v2 在难例上的一遍只报告。计划 104 个逻辑调用，含重试的硬上限为 312 次和 1,277,952 请求输出 token。不含 run 05 重审。[本机预登记](../.tmp/scratch/hard-learners/gemini-audit/preregistration.md) · [真值冻结](../.tmp/scratch/hard-learners/audit-validation/hard-truth-review.md) · [进度与恢复点](../.tmp/scratch/hard-learners/gemini-audit/progress.md)
+
+本阶段没有向审核器发真实请求。缺本次费用授权，当前 worktree 也无可用的 `OPENROUTER_API_KEY`。因此没有 Gemini 或难例 Qwen 准确率，不能作采用判断。run 05 的 48 条未重审，历史三类画像结论保留，只对旧学生配置 DeepSeek Flash、`thinking: low` 有效。
+
 <a name="stage2a-json-mode-rerun"></a>
 
 ## 阶段 2a JSON mode 正式续跑（20261121）
