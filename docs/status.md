@@ -70,6 +70,176 @@
 
 附录合并后 SHA256 `74ea73ac0a508b2143e05ed8cdbf03fdcf116b964b4048263dddc928e6d2f6c8`。[零请求预检](../runs/_receipts/stage2a-hard-learners-estimate-03.process.json)；干净 `568e0c1` 的[范围检查收据](../runs/_receipts/check-hard-learners-568e0c1a8182f08f443ce1d8ef2bed79836ced92.json) 21/21。默认全量检查会读混合题库，未启动。实跑退出 0，`acceptance=true` 仅表示收齐。`--verify-run` 通过，同 PID `46064`。用量 62/62 请求、253,952/253,952 请求输出 token，实报 76,817 token；两次审核 429 恢复，均缺报。[逐原件复核](../runs/stage2a-hard-learners-02/verify-run.json)
 
+<a name="round2-judge-bakeoff"></a>
+
+## 第二轮 ①h 六维裁判对照与冻结复测
+
+### 代理补跑与冻结决定（20261122）
+
+**Gemini 唯一入选；`e1-binary-v3` 不冻结。** [代理补跑附录](../.tmp/scratch/judge-bakeoff/preregistration-addendum-proxy.md) SHA256 `36270ad60ad4c58297305b63f31072d79bbd11d4aa0f253c29ed31c515700b83`，与原登记使用同一样本、判线、选优和停线。两批在干净 `d2f7cce` 上以 `--proxy-from-env` 运行，每批一个进程、并发 4。原 Haiku/Gemini 直连批次标为「基础设施未通，未测到」；Qwen 沿用原批，不重跑。新身份显式绑定 `judgeTransport` 和附录 SHA。原件与遥测核对 `proxied:true`、`proxySource:HTTPS_PROXY`，不记录地址与凭据。其他策略不启用这条代理路径。
+
+| 原采用线 | Haiku 代理补跑 | Gemini 代理补跑 | 原 Qwen |
+| --- | ---: | ---: | ---: |
+| (a) 合规格，要求 18/18 | 7/18 | 18/18 | 7/18 |
+| (b) 完整 S1，要求 ≥14/15 | 7/15 | 15/15 | 7/15 |
+| (c) 四个坏教师分率均低于同遍 normal，要求 3/3 | 0/3 | 3/3 | 0/3 |
+| (d) 四个目标维各要求 ≥2/3，按 answer_dump、lecture、sycophant_close、no_teach 顺序 | 0/3、2/3、2/3、1/3 | 四项均 3/3 | 四项均 0/3 |
+| (e) 确定项 FP + FN ≤2，另报缺判 | 0，缺 57/99 | 0，无缺判 | 11，缺 39/99 |
+| 首次结构合规 → 重试后合规 | 56/108 → 60/108 | 107/108 → 108/108 | 63/108 → 66/108 |
+
+三侧的验真通过，PID 分别为 `40516`、`34744`、`42976`，均已结束。Haiku 达到四个失败格后停线；Gemini 只有一次重试，无停线。失败格和未发格均保留原分母。[合并报告、验真与 PID](../runs/round2-bakeoff-proxy-report/bakeoff-report.md)。
+
+另锁[冻结复测预登记](../.tmp/scratch/judge-bakeoff/preregistration-freeze.md) SHA256 `e489892180d863f725976bfccb97793c141e7fcc81f199429a32f6a44da40c1b`。沿用选中 Gemini 的固定端点、策略、代理和裁判指纹 `27a32e4b14f73415f04bd7dc5314e3509f719f10be399bcb0c5123678e70757f`，对新样本计划另记运行身份 `2af26b90c9caf0e439c817f227c1f94b6ec854b1be2dd7d92ecc8d4a8923ce9e`。干净 `d93b5d4` 启动 `round2-binary-v3-freeze-gemini-01`，单进程 PID `47852` 已结束，`--verify-run` 通过，51/51 格有合规判决，无停线或缺判。[复测报告](../runs/round2-binary-v3-freeze-gemini-01/freeze-retest-report.md) · [PID 复核](../runs/round2-binary-v3-freeze-gemini-01/pid-check.json)
+
+- **S1 通过。** 15/15 格完整，分率方向 3/3，四个目标各 3/3。五组复跑均成对完成；四个目标位相同 20/20，全部题位相同 94/95，六维分档相同 29/30。一致率只描述，不是判线。
+- **定向复测未达。** 召回和特异度均须至少 0.8。V2 达线（3/3、2/2）；V1 召回 2/3，`V1-claim-none` 漏判；A1 特异度 1/2，`A1-only-proposes` 把 #9 判为 Yes；A2 召回 1/2，`A2-still-chosen` 漏判。
+- **normal 四格未达。** V2 四格布尔值均符合预期，补解释格正确引用 #4/#5；但 `V2-normal-claim` 把原有 #4 检查的 V1 判为 No，验证维掉到 0，分档为 `1/2/1/0`，不符登记的 `1/2/1/1`。这次失败是 V1，不是 V2 误认原 #5。
+
+| 运行 | 实际请求 / 上限 | 预留输出 token / 上限 | 提供方实报总 token（推理） |
+| --- | ---: | ---: | ---: |
+| Haiku 代理补跑 | 76/324 | 155,648/663,552 | 392,352（54,173） |
+| Gemini 代理补跑 | 109/324 | 446,464/1,327,104 | 252,910（1,120） |
+| Gemini 冻结复测 | 307/314 | 1,257,472/1,286,144 | 631,418（1,953） |
+| 本次新增合计 | 492/962 | 1,859,584/3,276,800 | 1,276,680（57,246） |
+| 原 Qwen，仅供比较 | 85/324 | 696,320/2,654,208 | 193,623（0） |
+
+三份新增批次均无用量缺报。补跑两侧及冻结复测预检均零请求。实现提交 `d2f7cce`、`d93b5d4`；真实启动分别使用同 HEAD 的 [278 项](../runs/_receipts/check-d2f7cce4576aa4f6289a252daa757754a9e00491.json) 与 [292 项](../runs/_receipts/check-d93b5d43cf38f58e8ec2fef7f16052be7cc67821.json)干净检查收据。Gemini 保留为胜出候选；不写冻结记录，不改判线，不补试。等待用户决定下一步。
+
+### 原直连批次（20261121）
+
+**原批未选出候选。** 实现提交 `1a73c45e6db859268472b32887cc5555844e1505`。尺子、输出契约和评测身份分别为 `e1-binary-v3`、`judge-output-v5`、`evaluation-identity-v5`。每格按误解修复、支持递增与淡出、交还主动权、保留试错、表征转换、验证或迁移发六个单维请求；计分继续按二元尺子 v2 已锁题义由代码重算。
+
+三侧使用同一份预登记，SHA256 `46395637d0dfc7e4a382117f6818f4dc7ecec9848a4c312a0d533f5e021d8114`。计划 18 格，来自 8 份不同公开对话；五个冻结 S1 对话各重复 3 遍，另有 3 份超时输入各一格。每格 6 维。预登记的 (c)–(e) 与 ①d 原文一致；(a) 按 ①h 更新为每格六维均有一份在 120 秒内返回完整合规正文的请求，可为重试；首次合规率单报，并只参与选优平手比较。三批各用一个进程、并发 4。单维最多 3 次。连续 3 次供应商或传输失败停线，连续 3 个失败格停线；18 格累计失败 4 格停线。所有运行均使用固定端点，无 fallback、无中途切换。
+
+| 候选 | 锁定模型与端点 | 推理与单维上限 | 首次结构合规 | 重试后结构合规 | 完整格；S1 | 调用与停线 |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| Haiku | `anthropic/claude-haiku-5.5` / `anthropic`，`e1-call-policy-v8-bakeoff-haiku` | effort low；温度省略；输出 2,048；实报推理 ≤1,536 | 0/108 | 0/108 | 0/18；0/15 | 6/324 次（2 次重试），12,288/663,552 输出 token 额度；6 次 HTTP 403，三次连续供应商失败停线 |
+| Gemini | `google/gemini-3.8-flash` / `google-ai-studio`，`e1-call-policy-v9-bakeoff-gemini` | effort low；温度 0；输出 4,096；实报推理 ≤3,072 | 0/108 | 0/108 | 0/18；0/15 | 6/324 次（2 次重试），24,576/1,327,104 输出 token 额度；6 次 HTTP 403，三次连续供应商失败停线 |
+| Qwen | `qwen/qwen3-235b-a22b-2507` / `parasail/fp8`，`e1-call-policy-v10-bakeoff-qwen` | reasoning 省略；温度 0；输出 8,192；实报推理 0 | 63/108 | 66/108 | 7/18；7/15 | 85/324 次（14 次重试），696,320/2,654,208 输出 token 额度；实报 193,623 tokens，其中推理 0；四格停线后结算在途格 |
+
+| 采用线 | Haiku | Gemini | Qwen |
+| --- | --- | --- | --- |
+| (a) 符合要求的格 /18 | 未测，0/18 完成 | 未测，0/18 完成 | 未达，7/18 |
+| (b) S1 完整格 /15 | 未测，0/15 完成 | 未测，0/15 完成 | 未达，7/15 |
+| (c) 坏教师分率方向 /3 | 未测，0/3 有配对 | 未测，0/3 有配对 | 未达，0/3 |
+| (d) 四个目标维命中数 /3 各 | 未测，0/3 有配对 | 未测，0/3 有配对 | 未达，0/3 各 |
+| (e) 确定项 FP+FN /2 | 0/2，但 0 项观测、99 项缺判* | 0/2，但 0 项观测、99 项缺判* | 未达，11/2 |
+
+`*` Haiku/Gemini 的 (e) 为 0 个错误、0 个真值观测；99 个确定位全缺。两候选在原直连批次因 403 未测到。原 bakeoff 未保存错误正文；后续 A→D 的 8 个直连小探针均在 OpenRouter `Gate Endpoints with Geo Restrictions` 步骤被拒。[403 诊断与逐次原件](../.tmp/scratch/judge-bakeoff/403-diagnosis.md)
+
+Qwen 的最终采用线为：(a) 7/18，(b) 7/15，(c) 0/3 遍，(d) 四个目标各 0/3，(e) 11 个确定项错误（10 FP、1 FN，上限 2）。构造矩阵缺 39/99 位。跨维 S3/P1 冲突 0 次；规范化 11 次。5 格因单维 3 次尝试后仍有本地 `order` 错误而记 `judge_partial_failure`，其中表征转换 3 格、保留试错 2 格；没有跨维部分失败。另有 2 格在停线时只完成部分维度，未发布整格判决；4 格未启动，逐格逐维列在候选报告中。
+
+| 候选 | (c) 三遍坏教师严格低于 normal | (d) answer_dump / lecture / sycophant_close / no_teach | (e) FP + FN / 缺判 |
+| --- | --- | --- | --- |
+| Haiku | 0/3 | 0/3、0/3、0/3、0/3 | 0/2；0 个真值观测，99 个缺判 |
+| Gemini | 0/3 | 0/3、0/3、0/3、0/3 | 0/2；0 个真值观测，99 个缺判 |
+| Qwen | 0/3 | 0/3、0/3、0/3、0/3 | 11/2；39/99 缺判 |
+
+Qwen 与 ①g 整包版有 7 个共同完整格；维度相同数为 `misconception_repair` 5/7、`support_escalation_and_fading` 7/7、`agency_handoff` 5/7、`productive_struggle` 7/7、`representation_pivot` 4/7、`verification_or_transfer` 7/7。尺子表示、超时、重试与停线同时变化，这只能部分区分拆维效应。Haiku/Gemini 完整格为 0，候选间逐题一致率均为 0/0。Qwen 单维成功请求耗时中位数/p90 为 2,940/4,950 ms；另外 19 次有序或窗口拒收请求计入失败与拒收统计，H/G 无成功时间分母。首次合规、重试后合规、三遍一致率、候选间一致率、规范化数及逐题矩阵详见[三候选报告](../runs/round2-bakeoff-report/bakeoff-report.md)和[机器结果](../runs/round2-bakeoff-report/bakeoff.json)。
+
+三次运行均由单进程启动，PID `44952`、`32252`、`42976` 均已结束。业务退出码均为 1；三份 `--verify-run` 均以 0 退出，`verified:true`、`missing:[]`、`invalid:[]`，启动、进程、请求日志及预算相符。未分配额度未使用。总计 97/972 次请求，预留输出 token 额度 733,184/4,644,864。只有 Qwen 有提供方 token 实报；H/G 的用量缺报，账单合计未知。单独检查收据见 `runs/round2-bakeoff-report/`。
+
+干净提交 `1a73c45` 上的 `npm run check` 通过 241/241 项及 51 个导入边界；收据为 [check-1a73c45](../runs/_receipts/check-1a73c45e6db859268472b32887cc5555844e1505.json)。5 个二元 v2 历史 run 的 `--verify-run` 仍通过；v1 历史 `s1-binary-round2-01` 的旧版独立检查在此 HEAD 有既有版本号不匹配，未被改写。
+
+原直连批次未启动冻结复测。后续独立预登记的代理补跑与胜出者复测见本节上方。过程与预算见本机[进度记录](../.tmp/scratch/judge-bakeoff/progress.md)。
+
+<a name="round2-judge-contrast"></a>
+
+## 第二轮 ①g 两种裁判策略均未达采用线（20261121）
+
+**Qwen 和限额 HY4 均不采用。** `e1-binary-v2` 的最终裁判尚未选定。两个批次复用 ①d 的 18 格及 (b)–(e)。两侧的 (a) 均要求计划首尝试在 180 秒内出现非空白正文且无推理 delta。实报推理 token 单列。小样覆盖 S1 五个极端条件和三个历史超时输入，冻结前还须完成正式复测。
+
+| 候选 | OpenRouter 固定端点 | 调用策略 | 单次输出上限 |
+| --- | --- | --- | ---: |
+| Qwen3 235B Instruct 2507，省略推理参数 | `qwen/qwen3-235b-a22b-2507` / `parasail/fp8` | `e1-call-policy-v6-qwen-parasail` | 8,192 |
+| HY4 Flash，开推理，请求推理上限 16,384 | `tencent/hy4-flash` / `tencent/fp8` | `e1-call-policy-v7-hy4-capped` | 32,768 |
+
+两侧均使用 `json_schema.strict:true`、`provider.require_parameters:true` 和 `provider.allow_fallbacks:false`。常规入口默认策略为 `e1-call-policy-v4`。
+
+| 固定采用线 | Qwen | 限额 HY4 |
+| --- | --- | --- |
+| (a) 18/18 首尝试 180 秒内见正文且无推理 delta | 13/18，未达 | 0/18，未达 |
+| (b) S1 至少 14/15 格有合规判决 | 11/15，未达 | 6/15，未达 |
+| (c) 3/3 遍四个坏教师的适用分率均严格低于同遍 `normal` | 1/3，未达 | 0/3，未达 |
+| (d) 试错、主动权、验证或迁移、误解修复各至少 2/3 遍严格低于同遍 `normal` | 1/3、2/3、2/3、2/3，未达 | 0/3、2/3、1/3、1/3，未达 |
+| (e) 确定项假阳加假阴不超过 2，缺判另列 | 10 假阳 + 0 假阴，缺 35/99，未达 | 0 假阳 + 0 假阴，缺 68/99，计数达线。仅观察到 31 个确定项，均为预期 No |
+
+Qwen 的 15 次请求均有正文且实报推理为 0。`r1:answer_dump:judge:4:1:1`、`r1:answer_dump:judge:4:1:3`、`r3:answer_dump:judge:4:1:1` 的 P3 同样违反时序，`prior=#2`、`pending=#1`、`rescue=#2`。`r1:answer_dump:judge:4:1:2` 的 R2 为 No，却引用 `newFrame=#4`。同类重试耗尽后停线。通过本地校验的判决仍有 10 个假阳，分布在 S1（4）、S3（2）、P2（4）。[逐题、引用差异及拒收原件](../runs/round2-qwen-judge-01/qwen-judge-report.md)
+
+HY4 的 11 次请求均出现推理 delta，7 次实报推理超过 16,384。5 次返回 `length` 且无正文，推理和总输出均为 32,768 token，耗时 121.997 至 135.254 秒。`r1:answer_dump:judge:4:1:2` 再次耗尽，触发全批两次同类重试停线。[逐题、引用差异及耗尽原件](../runs/round2-hy4-capped-01/hy4-capped-report.md)
+
+| Run | PID | 已发首尝试耗时 p50 / p90 | 请求 / 上限 | 出站输出额度 / 上限 | 实报合计，其中推理 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `round2-qwen-judge-01` | 40744 | 18.708 / 25.896 秒，13 条 | 15/26 | 122,880/212,992 | 67,770，0 |
+| `round2-hy4-capped-01` | 21172 | 129.250 / 153.843 秒，9 条 | 11/26 | 360,448/851,968 | 280,850，239,530 |
+
+两批均按并发 4 从单个进程启动，业务退出 1，`--verify-run` 退出 0，启动、进程、manifest 和遥测 PID 一致。两批 token 用量无缺报。两组耗时含失败首尝试，各有 5 格和 9 格未发。
+
+汇总 `v1Agreement` 的逐题计数，Qwen 与开推理 v1 的 15 道未改题一致 135/165 位，HY4 一致 83/90 位。Qwen 三遍题级一致 35/38 位，HY4 没有三遍都合规的格，一致率无分母。[Qwen 逐题计数](../runs/round2-qwen-judge-01/qwen-judge-summary.json) · [HY4 逐题计数](../runs/round2-hy4-capped-01/hy4-capped-summary.json)
+
+- Qwen 预登记 SHA256 `ab178183a97c64cf1f563bce5681bda8ada894e305270c1fadf89a4aecae5745`。身份 `fc1e1c9482aa67bf825cdf1d17a37f7cfbeb8e2542541dbcf3ea966ab2d7a484`。干净 `d9f946f` 标准检查 157/157。[预登记](../runs/round2-qwen-judge-01/preregistration.md) · [验真](../runs/round2-qwen-judge-01/verify-run.json) · [PID](../runs/round2-qwen-judge-01/pid-check.json) · [检查收据](../runs/_receipts/check-d9f946f3085e56d0b65facea7b6ebead0935e16e.json)
+- HY4 预登记 SHA256 `e70072dd771a4275bfbecd3b913068622ac77e924c6ed92ea4a453d91d03ea3e`。身份 `b7ea5cb7f06d424ca2c1fe1cf2194fa4ffc10277ec081439ae7a130ccc1fa4b6`。干净 `14a0d91` 标准检查 158/158。[预登记](../runs/round2-hy4-capped-01/preregistration.md) · [验真](../runs/round2-hy4-capped-01/verify-run.json) · [PID](../runs/round2-hy4-capped-01/pid-check.json) · [检查收据](../runs/_receipts/check-14a0d910323179d493c467ed93848288a16db780.json)
+
+**停在候选选择。** 本机调研 `%TEMP%\teacharena\round2\judge-model\survey.md` 列出的未实测候选包括 Qwen3-Next 80B Instruct（DeepInfra FP8）、Mistral Small 4（Mistral ZDR）、Gemini 2.5 Flash-Lite（AI Studio）。[Qwen3-Next 端点](https://openrouter.ai/api/v1/models/qwen/qwen3-next-80b-a3b-instruct/endpoints) · [Mistral 端点](https://openrouter.ai/api/v1/models/mistralai/mistral-small-2603/endpoints) · [Gemini 端点](https://openrouter.ai/api/v1/models/google/gemini-2.5-flash-lite/endpoints)
+
+裁判选定后，用最终身份重跑 S1 与 V1/V2/A1/A2 的定向扰动，另复核 `normal` 的 V2 #4/#5 疑点。两项均通过后冻结。
+
+## 阶段 4a：离线 HTML 回读报告
+
+已合入 `main`。使用 `--export-report <run-id> [--out <path>]` 导出。[导出与排障步骤](runbook.md#导出离线-html-回读报告)。报告展示落盘的判线、验真和分数，点选判定或证据序号可打开本格原对话。二元尺子与六维 v3 分开显示，不跨版比较。
+
+用已有的 `s1-binary-round2-01` 和 `e2-real-20261119-06` 导出并通过 DOM 点击测试。前者回读二元 v1 的 15 格，后者回读 v3 的五格；后者保存的四处理由引用未列入该维 `evidence`，报告保留红字，仍可定位经绑定核对的消息。复核修正了无效绑定的答案混入其他格、输出覆盖缺失原件路径、缺窗口摘要或跨格绑定时仍能点击引用、串用其他 run 验真收据，以及二元 v1 显示 v2 问题文案的问题。完整且有序的消息 ID、run 结果身份和 Windows 输出路径也纳入报告边界校验。此步骤未发起评测，也未改动评分。
+
+非阻塞后续：E1/E2 对照分数与绑定判决不一致时，报告保留红字，但点击对照分数仍可能定位到判决引用；应改为只打开观察窗口。
+
+<a name="round2-runner-merge"></a>
+
+## 第二轮 ①f runner 本地合并（20261121）
+
+`1519bc7` 在 `main` 合入 `f8fd2db`。`src/cli.mjs` 的续跑和格级并发使用默认 `e1-call-policy-v4`。①d 的关推理对照由 `scripts/reasoning-off.mjs` 串行执行。关推理与并发预留的组合在共享批执行层用离线传输夹具验证，出站和回放都核对批身份中的策略。
+
+| 离线场景 | `--verify-run` 已核对 |
+| --- | --- |
+| 强杀后同 ID 续跑 | 首进程保留 1 个合规判决，第二进程补 14 格，共预留 16 次。首格原件 SHA256 相同。 |
+| 并发 3 的次数和 token 上限 | 两个独立场景均拦住第 3 次预留，各结算 2 次，预留 131,072 输出 token。关推理组合也通过。 |
+| 模拟 429 | 并发从 3 降至 2，保留两次普通重试。 |
+
+干净 `da507ce` 上的标准 `npm run check` 通过 149/149 项及 38 个导入边界。[正式检查收据](../runs/_receipts/check-da507ce04f2c6996bbde958f8b478447f906b15e.json)。合并提交首次全量为 147/149，两条 A/B 测试因话术侧运行根尚未创建而失败。`da507ce` 恢复先启动收据、再准备 `ruler-expand` 的 `test` 和 `ab` 计划，目录独立性校验不变。两条定向测试从 0/2 转为 2/2，相邻回归 26/26。
+
+组合测试从 0/1 转为 1/1，①d 仓库用例 15/15、离线入口 1/1，①e 原 12 条均通过。测试未发出真实模型请求。原件和操作记录见本机 `.tmp/scratch/merge-runner/progress.md`。
+
+修复后的 S1 参考 `identityId` 为 `af1eb1f03c913b21551a9b54542e14a98d59d5dee828f32ecb4c409395b8bf69`。计算采用最终 runner 源码、`S1-binary` 真实模式、`e1-binary-v2`、默认 v4、冻结源 `e2-real-20261119-06`、45 次与 2,949,120 输出 token 上限，以及历史预登记摘要 `2ed20c5803aaa3d4c01773cbe2f8531083b22693ab05cad5522685aa1c15cf13`。S1 和定向复测须在最终 runner 上按各自重新登记的身份重跑，结果通过后才可冻结尺子。
+
+DeepSeek V4.1 Flash 独立审查合并及回归修复，无阻塞项。关推理与并发的证据覆盖两项预留上限及遥测回放。①d 历史预登记和原件用记录提交的源码复核。
+
+<a name="round2-reasoning-off"></a>
+
+## 第二轮 ①d HY4 关推理小对照（20261121）
+
+**三次请求实报推理为零，首格三次判决均被拒，不采用关推理。** `da95e66` 增加显式选用的 `e1-call-policy-v5-reasoning-off`，按 [OpenRouter 文档](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)发送 `reasoning.enabled:false`。`e1-binary-v2` 的题面与提示不变。`round2-reasoning-off-01` 只启动 `r1/normal`。三次均在 2.170–2.414 秒见正文，无推理 delta。三份判决都用 #1 作 M0 锚、#3 作 M2 锚，M2 的修复证据为 #5。违反同锚约束，两次同类重试后停线，0/18 格有合规判决，余 17 格未发。唯一同格首尝试耗时为关推理 4.210 秒、历史开推理 v1 91.800 秒，只有旧判决合规，不能推断批量提速。[报告及调用原件](../runs/round2-reasoning-off-01/reasoning-off-report.md)
+
+| 采用线 | 实测 |
+| --- | --- |
+| (a) 首尝试 180 秒内见正文且实报推理为 0 | 1/18，未达。另两次是同格重试。 |
+| (b) S1 合规判决 | 0/15，未达。 |
+| (c) 四个坏教师适用分率均低于同遍 `normal` | 0/3 遍，未达。 |
+| (d) 四个目标维各至少命中 2/3 遍 | 各 0/3，未达。 |
+| (e) 确定项假阳加假阴不超过 2 | 0 个观察到的错误，99 个确定项全缺。预期 R0 N/A 的六项全缺，不能计算判对率。 |
+
+用户文档由 `19e47bb` 原样提交，真实运行用该干净 HEAD 的 [136 项检查收据](../runs/_receipts/check-19e47bb22f7e48789e3560dc91893f880cdae55d.json)。预登记绑定源码而不是 HEAD，SHA256 `f2e1de0db60bff27331d888607a6295cba297a4aa046305f1da8793bf782a46f` 不变，真实身份 `cd892f897e2f6be085cc76d24fbe6e11f00a2d781a293f8aa1616b30d49b4a8b` 与预检一致。运行退出 1；专用 `--verify-run` 退出 0，启动、进程、manifest 与三条遥测 PID `45888` 一致。请求 3/26 次，出站额度 196,608/1,703,936 token，实报 8,883 token，无缺报。[预登记](../runs/round2-reasoning-off-01/preregistration.md) · [逐原件验真](../runs/round2-reasoning-off-01/verify-run.json)
+
+默认 v4 不变。备选 Qwen3 235B Instruct / Parasail，本次不切换。此小对照只决定是否采用关推理，不用于冻结尺子。评测身份包含编排、收据与裁判源码哈希；续跑和并发合入后，S1 与定向复测需用最终身份重跑。
+
+<a name="round2-runner-resume-concurrency"></a>
+
+## 第二轮 ①e 断点续跑与格级并发（20261121）
+
+**E1、E2、S1 的离线原件通过复核。** `--resume` 验证原身份、预登记、HEAD、源码和历史原件后才补格。`--concurrency` 默认 1，最多 5。同一 run 所有进程共用次数和请求输出额度，尚无结算的预留也占预算。`ruler-expand` 保留原串行入口及门槛。[操作](runbook.md#格级并发和断点续跑) · [收据契约](../contracts/artifacts/README.md#运行收据)
+
+强杀演示中，进程 1 的一个合规低分判决原样保留；进程 2 补 14 格，累计扣 16 次。并发 3 的独立次数、token 上限演示分别在第 3 次预留前停线，两条已开始的调用照常结算。模拟 429 使并发从 3 降为 2，且仍有两次普通重试。三场都是 faux，未作真实评测。测试和原件见本机 `.tmp/scratch/runner-concurrency/`；分支检查未跑受保护题集，不作为真实模式检查收据。
+
+**合入会改变评测身份。** `evaluationIdentity()` 已把 `src/run.mjs`、`src/run-receipts.mjs` 等 runner 源码哈希写入 `identity.sources`；S1 还绑定专用入口和复核源码。合入后，S1 和定向复测须用最终身份各自重跑，再冻结尺子。既有 ①b、①c 的历史结论和原件不回填，也不能换身份沿用 run ID。
+
 <a name="round2-perturbation-v2"></a>
 
 ## 第二轮 ①c 学生证据与定向复测（20261121）

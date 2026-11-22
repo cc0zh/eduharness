@@ -1,20 +1,25 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
-import { cellIds, cellResult, filenames, runId } from '../contracts/artifacts/schema.mjs';
+import { cellIds, filenames, runId } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, message } from '../contracts/core/schema.mjs';
 import { readTask, revision } from '../contracts/dataset/schema.mjs';
-import { directDimension, outputContract, previousRuler, ruler } from '../contracts/judge/schema.mjs';
+import { outputContract, previousRuler, ruler } from '../contracts/judge/schema.mjs';
 import { policy, routes, rounds, taskId } from '../config/e1.mjs';
 import { targets } from '../config/e2.mjs';
+import { runCellBatch } from './cell-batch.mjs';
+import { attemptFile, callIdFor } from './cell-batch-plan.mjs';
 import { grade } from './judge.mjs';
 import { learnerPrompt, learnerReply } from './learner.mjs';
-import { attemptBudget, Models } from './models.mjs';
+import { gradeBinaryDimension } from './binary-judge-v3.mjs';
+import { Models } from './models.mjs';
 import { offlineResponses } from './offline.mjs';
 import { createTeacher } from './teacher/session.mjs';
 
 export const source = name => readFileSync(new URL(`../${name}`, import.meta.url));
-const identityFiles = ['package-lock.json', 'config/e1.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/models.mjs', 'src/run.mjs', 'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', 'src/learner.mjs', 'contracts/learner/profiles.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
+const identityFiles = ['package-lock.json', 'config/e1.mjs', 'config/judge-reasoning-off.mjs', 'config/judge-contrast.mjs', 'src/judge-transport.mjs', 'src/judge-contrast-plan.mjs', 'src/cli.mjs', 'src/real-preflight.mjs', 'src/run-receipts.mjs', 'src/provider-response-diagnostics.mjs', 'src/models.mjs', 'src/run.mjs',
+  'src/cell-batch.mjs', 'src/cell-batch-plan.mjs', 'src/cell-batch-journal.mjs', 'src/cell-batch-verification.mjs', 'src/receipt-files.mjs',
+  'src/teacher/session.mjs', 'src/judge.mjs', 'src/offline.mjs', 'src/learner.mjs', 'contracts/learner/profiles.mjs', ...['core', 'artifacts', 'dataset', 'judge', 'learner', 'teacher'].map(owner => `contracts/${owner}/schema.mjs`)];
 export const write = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 const variants = scenario => scenario === 'E2' ? cellIds : ['normal', 'answer_dump'];
 const frozenE2Rulers = [previousRuler, ruler, 'e1-numbered-evidence-v4'];
@@ -42,28 +47,6 @@ export function budget({ judgeOnly, judgeCell, scenario } = {}) {
   const learner = rounds * judge;
   const attempts = policy.retries + 1;
   return { typicalCalls: 2 * learner + judge, maxCalls: attempts * (teacher + learner + judge), maxOutputTokens: attempts * (teacher * policy.teacher.maxTokens + learner * policy.learner.maxTokens + judge * policy.judge.maxTokens) };
-}
-
-function compare(judgements) {
-  function readSide(cell, dimension) {
-    const judged = judgements.get(cell);
-    if (!judged) return null;
-    const { groups, binding, messages } = judged;
-    const row = groups.teaching[dimension] ?? groups.consolidation[dimension];
-    return {
-      score: row.score,
-      references: row.evidence.map(id => {
-        const index = binding.messageIds.indexOf(id);
-        const { turn, role } = messages[index];
-        return { id, number: index + 1, turn, role };
-      }),
-    };
-  }
-  return Object.entries(targets).map(([cell, dimension]) => {
-    const normal = readSide('normal', dimension);
-    const variant = readSide(cell, dimension);
-    return { cell, dimension, normal, variant, delta: normal && variant ? normal.score - variant.score : null };
-  });
 }
 
 export function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
@@ -95,7 +78,7 @@ export function frozenDialogue(root, id, scenario, cell, realSourceRequired) {
   } catch (error) { throw failure('invalid_input', {}, `judge-only cannot validate the frozen ${scenario} ${cell} dialogue: ${error.message}`); }
 }
 
-export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, frozenBytes, judgeOnly, fixtures, improved, grader = grade, judgeTimeoutMs, learnerVariant }) {
+export async function executeCell({ runDir, id, variant, coordinate, task, operatorPolicy, mode, reserve, recorder, writer, generateOnly, frozen, frozenBytes, judgeOnly, fixtures, improved, grader = grade, judgeTimeoutMs, control, learnerVariant }) {
   const prefix = coordinate?.taskId ?? coordinate?.repetition;
   const cell = prefix ? `${prefix}:${variant}` : variant;
   const folder = prefix ? `${prefix}/${variant}` : variant;
@@ -105,12 +88,15 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
   const store = (file, value) => write(join(path, file), value);
   const push = (file, list, item) => { list.push(item); store(file, list); };
   const say = (role, turn, text) => push(filenames.transcript, messages, message(`${id}:${cell}:m:${messages.length + 1}`, role, turn, text));
-  const save = (raw, meter) => {
+  const save = (raw, meter, rateLimited) => {
     const name = `${raw.role}-${raw.turn}-${raw.call}-${raw.attempt}.json`;
-    const attemptPath = coordinate ? `${folder}/${filenames.raw}/${name}` : join(variant, filenames.raw, name);
+    const attemptPath = control ? attemptFile(folder, raw) : coordinate ? `${folder}/${filenames.raw}/${name}` : join(variant, filenames.raw, name);
     const binding = coordinate && raw.binding ? { binding: { ...raw.binding, ...coordinate } } : undefined;
     write(join(runDir, attemptPath), { ...raw, ...coordinate, ...binding });
-    push(filenames.telemetry, telemetry, { ...meter, ...coordinate, ...binding, attemptPath, pid: writer.pid });
+    const entry = { ...meter, ...coordinate, ...binding, attemptPath, pid: writer.pid,
+      ...(control && { processIndex: writer.processIndex, callId: callIdFor(folder, raw), ...(rateLimited && { rateLimited }) }) };
+    push(filenames.telemetry, telemetry, entry);
+    control?.settle(entry, messages);
     return attemptPath;
   };
   if (frozenBytes) writeFileSync(join(path, filenames.transcript), frozenBytes);
@@ -121,7 +107,9 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
   try {
     fixtures ??= mode === 'offline' ? offlineResponses(variant) : undefined;
     const roles = frozen ? ['judge'] : generateOnly ? ['teacher', 'learner'] : undefined;
-    const models = new Models({ mode, responses: frozen && fixtures ? fixtures.slice(-1) : fixtures, roles, save, reserve, recorder, cell, judgeTimeoutMs });
+    const models = new Models({ mode, responses: frozen && !control?.judgePolicy ? fixtures?.slice(-1) : fixtures, roles, save, reserve, recorder, cell,
+      judgeTimeoutMs, judgeReasoningOff: control?.judgeReasoningOff, judgePolicy: control?.judgePolicy,
+      judgeProxySource: control?.judgeProxySource, beforeAttempt: control?.before });
     if (!frozen) {
       const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event), improved });
       const studentPrompt = learnerPrompt(task, learnerVariant);
@@ -135,8 +123,17 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     }
     if (generateOnly) return { messages };
     role = 'judge'; turn = rounds; call = 1;
+    if (control?.splitNext) {
+      for (let next; (next = control.splitNext());) {
+        ({ call } = next);
+        if (next.nextAttempt > control.splitMaxAttempts) return { interruptedSplit: true };
+        await gradeBinaryDimension(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly,
+          repetition: coordinate?.repetition, dimension: next.dimension, nextAttempt: next.nextAttempt, retryFeedback: next.retryFeedback });
+      }
+      return { messages };
+    }
     const { scores, binding, ...judgement } = await grader(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly });
-    store(filenames.judge, { binding: { ...binding, ...coordinate }, ...judgement });
+    if (!control) store(filenames.judge, { binding: { ...binding, ...coordinate }, ...judgement });
     return { ...judgement, scores, binding, messages };
   } catch (error) {
     const classified = error.failure ?? failure('artifact_io', { role, turn, call }, error.message).failure;
@@ -144,10 +141,11 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
   }
 }
 
-export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', scenario: requested = 'E1', checkReceipt, limits, recorder }) {
+export async function run(config) {
+  const { mode, root, id, judgeOnly, judgeCell = 'normal', scenario: requested = 'E1', checkReceipt } = config;
   const scenario = scenarioName({scenario:requested, judgeOnly});
   const ceiling = budget({ scenario:requested, judgeOnly, judgeCell });
-  limits ??= { maxAttempts: ceiling.maxCalls, maxRequestedOutputTokens: ceiling.maxOutputTokens };
+  const limits = config.limits ?? { maxAttempts: ceiling.maxCalls, maxRequestedOutputTokens: ceiling.maxOutputTokens };
   const taskBytes = source('data/upstream/tasks/stage0_situated_tutoring.json');
   const policyBytes = source('data/upstream/policy_situated_tutoring.md');
   const operatorPolicy = policyBytes.toString('utf8');
@@ -159,37 +157,13 @@ export async function run({ mode, root, id, judgeOnly, judgeCell = 'normal', sce
     ? { runId: judgeOnly, ...frozen.get('normal').sourceIdentity, cells: [...frozen.values()].map(entry => entry.provenance) }
     : frozen.get(judgeCell).provenance);
   const paired = requested === 'E2' && (!judgeOnly || judgeCell === 'all');
-  const runDir = join(root, id);
-  mkdirSync(root, { recursive: true });
-  try { mkdirSync(runDir); }
-  catch (error) {
-    if (error.code === 'EEXIST') throw failure('run_conflict', { runDir }, `run directory already exists: ${runDir}`);
-    throw error;
-  }
-  const writer = { pid: process.pid, startedAt: new Date().toISOString() };
-  const reserve = attemptBudget(limits);
   const identity = evaluationIdentity({mode, taskBytes, policyBytes, limits, provenance});
+  identity.planned = planned;
   if (paired) {
     identity.targets = targets;
     identity.sources['config/e2.mjs'] = hash(source('config/e2.mjs'));
   }
-  write(join(runDir, filenames.manifest), { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, writer, checkReceipt, source: provenance });
-  const cells = [];
-  const judgements = new Map();
-  for (const variant of planned) {
-    const judged = await executeCell({ runDir, id, variant, task, operatorPolicy, mode, reserve, recorder, writer, frozen: frozen?.get(variant).messages, judgeOnly });
-    cells.push(cellResult(variant, judged.scores, judged.failure));
-    if (judged.failure) break;
-    if (paired) judgements.set(variant, judged);
-  }
-  const comparisons = paired ? compare(judgements) : undefined;
-  const complete = cells.length === planned.length && cells.every(c => c.validTotal);
-  const acceptance = complete && (comparisons
-    ? comparisons.every(row => row.delta >= 1 && row.normal.references.length && row.variant.references.length)
-    : Boolean(frozen) || cells[0].directAnswer - cells[1].directAnswer >= 1);
-  const result = { scenario, taskId, mode, runDir, directDimension, acceptance, cells, ...(comparisons && { comparisons }) };
-  write(join(runDir, filenames.result), result);
-  mkdirSync(join(root, '_receipts'), { recursive: true });
-  write(join(root, '_receipts', `${id}.json`), { id, scenario, mode, runDir, result: filenames.result, acceptance });
-  return result;
+  return runCellBatch(config, { scenario, taskId, id, mode, identity, identityId: hash({ mode, scenario, identity }), budget: ceiling, limits, planned, checkReceipt, source: provenance },
+    (variant, context) => executeCell({ ...context, id, variant, task, operatorPolicy, mode, frozen: frozen?.get(variant).messages,
+      frozenBytes: frozen?.get(variant).bytes, judgeOnly }));
 }

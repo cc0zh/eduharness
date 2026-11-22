@@ -1,5 +1,6 @@
 import { developmentTopics, fidelityConditions, hardLearnerScenario } from '../config/hard-learners.mjs';
-import { fidelityPolicy, policy, rounds } from '../config/e1.mjs';
+import { policy, rounds } from '../config/e1.mjs';
+import { fidelityPolicy } from '../config/fidelity-audit.mjs';
 import { message } from '../contracts/core/schema.mjs';
 import { hardProfileIds } from '../contracts/learner/profiles.mjs';
 

@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
-import { fidelityRoute, routes } from '../config/e1.mjs';
+import { routes } from '../config/e1.mjs';
+import { fidelityRoute } from '../config/fidelity-audit.mjs';
 import { hardLearnerCheckScope } from '../config/hard-learners.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 

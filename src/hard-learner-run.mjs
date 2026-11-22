@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fidelityPolicy, fidelityRoute, policy, rounds, routes } from '../config/e1.mjs';
+import { policy, rounds, routes } from '../config/e1.mjs';
+import { fidelityPolicy, fidelityRoute } from '../config/fidelity-audit.mjs';
 import { hardLearnerScenario as scenario } from '../config/hard-learners.mjs';
 import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
 import { fidelityAuditPrompt, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
@@ -19,7 +20,7 @@ export function prepareHardLearners({ mode, registration, registrationDigest }, 
   return bytes;
 }
 
-const sources = ['package-lock.json', 'config/e1.mjs', 'config/hard-learners.mjs', 'contracts/core/schema.mjs',
+const sources = ['package-lock.json', 'config/e1.mjs', 'config/fidelity-audit.mjs', 'config/hard-learners.mjs', 'contracts/core/schema.mjs',
   'contracts/learner/schema.mjs', 'contracts/learner/profiles.mjs', 'contracts/learner/fidelity.mjs',
   'src/learner.mjs', 'src/models.mjs', 'src/cli.mjs', 'src/run-receipts.mjs', 'src/real-preflight.mjs', 'src/offline.mjs',
   'src/hard-learner-plan.mjs', 'src/hard-learner-run.mjs', 'src/hard-learner-verification.mjs'];

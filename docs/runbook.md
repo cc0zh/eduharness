@@ -4,7 +4,7 @@
 
 付费运行按用户另行确认的额度执行。
 
-重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 传入剩余额度。同一 run 的各格共享这一上限，每次尝试在发送前预留额度；预算不足报 `budget_exhausted`。已有目录报 `run_conflict`，不会写入。manifest 的 `writer.pid` 对应每条调用遥测的 `pid`。
+使用新 ID 重新试跑时，用 `--max-attempts` 和 `--max-requested-output-tokens` 限定本次额度。已有 ID 默认报 `run_conflict`。补跑原批次请用下述 `--resume`，不要把剩余额度填成新的硬上限。
 
 E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与真实运行命令](plans/e2.md)。在 `result.json` 的 `comparisons` 对照每个目标维度的原始分档、证据序号和轮次。用同格 `judge.json` 查证据分组与机会窗口，再用 `transcript.json` 回读消息 ID。任一格发生基础设施故障时，保留已有比较并停止后续格子。缺少任一侧的分档时，该比较的差异值为 `null`。
 
@@ -26,11 +26,35 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 
 使用 `--scenario E2 --judge-only <源 run ID> --judge-cell all` 可用当前尺子补评冻结五格。真实模式要求真实源 run。新 manifest 保存源评测身份、源 manifest 哈希和每格对话哈希，结果对照使用本次裁判给出的分档。OpenRouter 结构化裁判的调用原件保存脱敏 `outbound` 请求字段。将 `reasoning.max_tokens` 与遥测的 `reasoningTokens` 核对。超限时记录「路由未执行上限」，用量缺失时记录未知。
 
+## 格级并发和断点续跑
+
+- `E1`、`E2`、`S1-binary` 支持 `--concurrency N`，默认 `1`，可设 `1` 到 `5`。只并发格子，格内依旧串行。`ruler-expand` 保留原来的阶段门槛、停线和串行顺序，不接收这两个选项。
+- 中断后确认原进程已退出，再给原命令加 `--resume --id <原 ID>`。保留原模式、场景、输入、预登记文件和两个硬上限。并发可另设。真实续跑仍走费用确认与干净 HEAD 检查。若 HEAD、源码哈希、评测身份或预登记 SHA256 不符，命令拒绝续跑。旧格式的 run 不能补写为新格式。
+- 原件校验通过的裁判判决一律保留，包括低分或未过预登记判线的判决。只补没有完成判决的格子。若已提交的原件损坏，先恢复原件；不能重抽一份代替。
+- 每次尝试先原子记下一次及该角色的最大请求输出额度，再调用模型。所有进程共用硬上限。中断留下的预留也扣减，因为无法确认请求没送达。续跑不退还这笔额度，也不以供应商实报 token 补预算。
+- 收到 HTTP 429 或供应商限流时，本进程并发降一档，最低为 `1`。限流等待后再尝试，占用硬额度，不占两次普通重试。一次调用的初次尝试加两次普通重试仍未成功即停线。停线后不再发新请求或重试；已经发出的调用可以结束，结果和耗费仍落盘。预算不足时也不再发放新预留，已预留的调用照常结算。
+- 用 `node src/cli.mjs --verify-run <原 ID> --run-root <原根>` 回读。`processes` 列出各进程、各自补上的格子、降档和停线，`budget` 是累计预留。`result.json` 和评测收据按计划次序输出，不按完成先后排序。`verified` 只表示原件一致，不能代替 `acceptance` 或判线。
+
 ## 第二轮 S1 五格复判
 
-`--scenario S1-binary --judge-only e2-real-20261119-06` 用[二元尺子](../contracts/judge/binary.md)串行复判同一组五格三遍。先在干净 HEAD 运行 `npm run check`。以新的预检 ID 加 `--mode real --estimate-only` 核对源对话及预算。登记实际 run ID、预检上限、判线和构造预期答案，计算预登记文件 SHA256。
+`--scenario S1-binary --judge-only e2-real-20261119-06` 用[二元尺子](../contracts/judge/binary.md)复判同一组五格三遍。先在干净 HEAD 运行 `npm run check`。以新的预检 ID 加 `--mode real --estimate-only` 核对源对话及预算。登记实际 run ID、预检上限、判线和构造预期答案，计算预登记文件 SHA256。
 
 按授权额度启动时用 `--mode real --confirm-cost --preregistration <文件> --preregistration-sha256 <摘要> --id <已登记 ID>`，加预检的 `--max-attempts` 和 `--max-requested-output-tokens`。每格目录为 `r1/normal` 等。完成后执行 `node src/cli.mjs --verify-run <ID>`，再运行 `node scripts/s1-binary-report.mjs <ID>` 生成分数、引用和构造矩阵。以报告的逐遍适用分率及目标维方向检查预登记判线。
+
+## 导出离线 HTML 回读报告
+
+在含 `runs/<run-id>/` 的工作目录执行：
+
+```sh
+node src/cli.mjs --export-report s1-binary-round2-01
+node src/cli.mjs --export-report e2-real-20261119-06 --out e2-review.html
+```
+
+默认写到 `runs/<run-id>/report.html`。`--out <path.html>` 可选，父目录须已存在，导出不会覆盖同名文件。用浏览器打开报告，不需要网络。当前支持公开的 S1 二元 v1/v2 和 E1/E2 六维 v3 产物，不读取扩展题集、原始调用或 run 外的收据。
+
+先看判线、验真和用量，再点矩阵里的判定或 `#n` 回读原对话。也可以点列标题中的“查看对话”。没有可验证引用的判定只打开该格观察窗口。红字给出不一致的原件、字段或证据序号；无法安全绑定的引用不会跳到其他消息。
+
+导出不重算分数或用量。验真只读本 run 下已保存的 `verify-run.json`，没有就显示「未验真」。没有判线时不把 `acceptance` 当判线。历史 run 如果没有保存请求总数或用量汇总，报告标明缺项，并列出已有的逐次遥测。
 
 ## 扩展题集
 
@@ -78,3 +102,11 @@ E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --
 裁判校验失败时，下一次尝试携带上一份校验错误。仅可无损重排同一证据槽位的 ID 或互不重叠的组；记录 `normalized` 和 `originalOrder`，原件不改。各调用另记录 `elapsedMs` 和 `timeoutMs`；本地 deadline 到期与 provider 中断分别标记。
 
 OpenRouter HY4 裁判和复评通过 pi 的 `onPayload` 请求 `json_schema` 和 `provider.require_parameters`，`judgementMode` 记录对应分支。工具调用不是这个路由的备选；公开元数据没有承诺强制指定工具。语法和结构之后仍校验本地语义。历史正文重放使用兼容解析，不把重放分数写回原 run。
+
+## ①h 三候选复判
+
+用 `node scripts/judge-bakeoff-preregister.mjs` 将共同的样本、候选参数、硬上限和判线写入 `.tmp/scratch/judge-bakeoff/preregistration.md`。保存脚本输出的 SHA256。在干净 HEAD 上运行 `npm run check`，保留对应收据。
+
+每个候选使用 `--scenario S1-judge-bakeoff --judge-policy haiku|gemini|qwen --concurrency 4`，以及 `--preregistration <文件> --preregistration-sha256 <SHA256>`。先加 `--mode real --estimate-only --id <新的预检 ID>`。取得授权后，用登记的正式 ID 和两个上限，加 `--confirm-cost` 执行。执行完成后用 `--verify-run` 核对每批，再运行 `node scripts/judge-bakeoff-report.mjs --run-root runs --out .tmp/scratch/judge-bakeoff`。
+
+维度按 `call` 1 到 6 定位。判决的 `binding.dimensions` 给出每维原件的 `processIndex` 和 `attemptPath`。停线前已结算的维度在 `_processes/<processIndex>/` 和请求日志中回读。重试的反馈类别、实报用量和拒收细节保存在调用原件。规则见 [e1-binary-v3 契约](../contracts/judge/binary-v3.md)。

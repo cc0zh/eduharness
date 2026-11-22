@@ -14,6 +14,7 @@
     "@earendil-works/pi-agent-core": "1.5.2",
     "@earendil-works/pi-ai": "1.5.2",
     "@sinclair/typebox": "0.34.52",
-    "es-module-lexer": "1.7.0"
+    "es-module-lexer": "1.7.0",
+    "undici": "7.30.2"
   }
 }

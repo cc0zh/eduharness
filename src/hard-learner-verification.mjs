@@ -1,5 +1,6 @@
 import { isDeepStrictEqual as same } from 'node:util';
-import { fidelityPolicy, policy, rounds } from '../config/e1.mjs';
+import { policy, rounds } from '../config/e1.mjs';
+import { fidelityPolicy } from '../config/fidelity-audit.mjs';
 import { hardLearnerCheckScope, hardLearnerScenario as scenario } from '../config/hard-learners.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { parseFidelityAudit, parseFidelityEvidence } from '../contracts/learner/fidelity.mjs';
