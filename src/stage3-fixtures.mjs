@@ -14,7 +14,8 @@ const teacher = [
   assigned,
 ];
 const ref = (n, quote) => ({ n, quote });
-const observe = (state, initialBlocker, progress = null, choice = null) => fauxJson({ state, initialBlocker, progress, choice, execution: null });
+const observe = (state, initialBlocker, progress = null, choice = null, edition = 1) => fauxJson({ state, initialBlocker, progress, choice, execution: null,
+  ...(edition === 2 && { resolvedBlockers: progress ? [initialBlocker] : [] }) });
 
 export const stage3Fixtures = {
   corpus() {
@@ -30,15 +31,20 @@ export const stage3Fixtures = {
     }));
     return { dev, tasks, manifestSha256: hash(dev) };
   },
-  dialogue(arm) {
+  dialogue(arm, edition = 1) {
     const candidate = arm === 'candidate';
+    const v2 = candidate && edition === 2;
     const learner = [progress, practice, candidate ? choice : practice, execution];
-    const replies = candidate ? [teacher[0], 'What would you like to test, and why?', 'Choose a remaining check and tell me why it helps.', 'Try the check you suggested and tell me what it shows.'] : teacher;
+    const replies = candidate ? [teacher[0], 'What would you like to test, and why?', 'Choose a remaining check and tell me why it helps.', 'Try the check you suggested and tell me what it shows.'] : [...teacher];
+    if (v2) {
+      replies[1] = [assigned, assigned];
+      replies[2] = [assigned, 'How would you check your conclusion? Propose your own check, explain why it would help, and try it.'];
+    }
     const blocker = ref(1, opening);
     return {
-      generation: replies.flatMap((reply, i) => [fauxReply(reply), fauxJson({ text: learner[i] })]),
-      observations: [observe('blocked', blocker), observe('ready', blocker, ref(3, progress)),
-        observe('ready', blocker, ref(5, practice)), observe('chosen', blocker, ref(7, choice), ref(7, choice))],
+      generation: replies.flatMap((reply, i) => [...[reply].flat().map(fauxReply), fauxJson({ text: learner[i] })]),
+      observations: [observe('blocked', blocker, null, null, edition), observe('ready', blocker, ref(3, progress), null, edition),
+        observe('ready', blocker, ref(5, practice), null, edition), observe('chosen', blocker, ref(7, choice), ref(7, choice), edition)],
     };
   },
   judgement(arm, messages) {

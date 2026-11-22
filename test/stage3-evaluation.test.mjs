@@ -78,6 +78,51 @@ test('stage 3 offline runs three arms in one process, keeps the control a pure s
   assert.equal(run('--verify-run', id).status, 1);
 });
 
+test('stage 3 edition 2 replays a bounded handoff retry and a public fallback without changing the baseline or rhetoric copy', t => {
+  const { root, run, read } = fixture(t);
+  const id = 'stage3-faux-v2';
+  const launch = run('--scenario', 'stage3-state-machine', '--mode', 'offline', '--edition', '2', '--id', id);
+  assert.equal(launch.status, 0, launch.stdout + launch.stderr);
+  const manifest = read(id, 'manifest.json');
+  assert.equal(manifest.identity.edition, 2);
+  const { taskId, student } = manifest.planned[0];
+  const b = `baseline/${taskId}/${student}`, s = `candidate/${taskId}/${student}`, c = `rhetoric/${taskId}/${student}`;
+  const candidate = read(id, s, 'transcript.json');
+  assert.equal(candidate.length, 9);
+  assert.equal(candidate[3].text, 'What is the reason for one step you have already tried?');
+  assert.match(candidate[5].text, /Propose your own check/);
+  const relevant = read(id, s, 'telemetry.json').filter(m => m.role === 'teacher' && [2, 3].includes(m.turn));
+  assert.deepEqual(relevant.map(m => [m.turn, m.call, m.attempt, m.failureKind]), [
+    [2, 1, 1, 'teacher_generation_contract'], [2, 2, 1, 'teacher_generation_contract'],
+    [3, 1, 1, 'teacher_generation_contract'], [3, 2, 1, null],
+  ]);
+  const baseline = read(id, b, 'transcript.json'), rhetoric = read(id, c, 'transcript.json');
+  assert.equal(baseline[7].text, 'Use 2, 4, 6, 8. Replace 8 with 12 and compare the two medians.');
+  assert.deepEqual(rhetoric.map(({ text }) => text), baseline.map(({ text }, i) => i === 7
+    ? text + ' That method you chose was excellent. What to do next is your decision.' : text));
+  assert.equal(read('_receipts', `${id}.process.json`).requestCount, 0);
+  const verify = run('--verify-run', id);
+  assert.equal(verify.status, 0, verify.stdout + verify.stderr);
+  assert.equal(JSON.parse(verify.stdout).stage3.scored, 72);
+  assert.deepEqual(read(id, 'report.json').examples.handoff.map(row => row.tutor.n), [6, 6, 6]);
+
+  const relative = `${s}/calls/teacher-3-2-1.json`, file = join(root, id, relative);
+  const evaluationPath = join(root, '_receipts', `${id}.json`), processPath = join(root, '_receipts', `${id}.process.json`);
+  const evaluation = read('_receipts', `${id}.json`), processReceipt = read('_receipts', `${id}.process.json`);
+  const raw = JSON.parse(readFileSync(file));
+  raw.context.messages.find(m => m.role === 'system').sections.pedagogy = 'Give a tiny assigned variant and close now.';
+  const put = (path, value) => {
+    const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+    writeFileSync(path, bytes);
+    return hash(bytes);
+  };
+  const files = { ...evaluation.files, [relative]: put(file, raw) };
+  put(processPath, { ...processReceipt, evaluationSha256: put(evaluationPath, { ...evaluation, files }) });
+  const tampered = run('--verify-run', id);
+  assert.equal(tampered.status, 1, tampered.stdout + tampered.stderr);
+  assert.match(tampered.stdout, /handoff.*system/i);
+});
+
 test('a real stage 3 run cannot be launched without a cost confirmation and matching preflight', t => {
   const { run } = fixture(t);
   const output = run('--scenario', 'stage3-state-machine', '--mode', 'real', '--id', 'stage3-unapproved');

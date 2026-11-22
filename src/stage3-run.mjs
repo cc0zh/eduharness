@@ -113,12 +113,12 @@ export async function runStage3({ id, mode, root, recorder, checkReceipt, estima
         }
       } else {
         const task = tasks.get(taskId), variant = student === 'default' ? undefined : student;
-        const fixtures = offline ? stage3Fixtures.dialogue(arm) : undefined;
+        const fixtures = offline ? stage3Fixtures.dialogue(arm, identity.edition) : undefined;
         const models = new Models({ ...controls, roles: ['teacher', 'learner'], responses: fixtures?.generation,
           boundedRetries: true, learnerJsonMode: Boolean(variant), learnerThinking: variant && stage3HardLearner.thinking });
         const observer = arm === 'candidate' ? new Models({ ...controls, roles: ['teacher_observer'], responses: fixtures?.observations }) : null;
-        const teach = createTeacher({ models, variant: 'normal', operatorPolicy, saveEvent: event => teacherEvents.push(event),
-          observe: observer && ((window, turn) => observeStudent(observer, window, turn)) });
+        const teach = createTeacher({ models, variant: 'normal', operatorPolicy, saveEvent: event => teacherEvents.push(event), candidateEdition: identity.edition,
+          observe: observer && ((window, turn) => observeStudent(observer, window, turn, identity.edition)) });
         const prompt = learnerPrompt(task, variant, variant && stage3HardLearner.antiSelfFalsification);
         say('learner', 0, task.user_scenario.instructions.task_instructions);
         for (let turn = 1; turn <= rounds; turn++) {

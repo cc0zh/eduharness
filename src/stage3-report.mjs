@@ -11,7 +11,8 @@ export const stage3Thresholds = Object.freeze({
 export function tutorExamples(cells) {
   const examples = { handoff: [], notReady: [] };
   for (const cell of cells.filter(row => row.arm === 'candidate')) {
-    for (const [key, keep] of [['handoff', x => x.action === 'handoff'], ['notReady', x => ['blocked', 'not_ready', 'unknown'].includes(x.state)]]) {
+    const denied = new Set(cell.teacherEvents?.filter(e => e.kind === 'handoffFallback').map(e => e.turn));
+    for (const [key, keep] of [['handoff', x => x.action === 'handoff' && !denied.has(x.turn)], ['notReady', x => ['blocked', 'not_ready', 'unknown'].includes(x.state)]]) {
       if (examples[key].length >= 3 || !cell.messages) continue;
       const event = cell.teacherEvents?.find(e => e.kind === 'stateDecision' && keep(e) && cell.messages.length >= e.turn * 2);
       if (!event) continue;

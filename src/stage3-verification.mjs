@@ -5,6 +5,7 @@ import { exact, hash, message, requireThat } from '../contracts/core/schema.mjs'
 import { bindBinary } from '../contracts/judge/binary.mjs';
 import { assembleBinaryVerdict, splitDimensions } from '../contracts/judge/binary-v3.mjs';
 import { parseLearner } from '../contracts/learner/schema.mjs';
+import { handoffFallbackReply, handoffRejection, validateHandoffResponse } from '../contracts/teacher/handoff.mjs';
 import { validateObservation } from '../contracts/teacher/observation.mjs';
 import { publicReply } from '../contracts/teacher/schema.mjs';
 import { replaySplitJudge, splitBinding } from './split-judge-replay.mjs';
@@ -13,8 +14,8 @@ import { stage3Fixtures } from './stage3-fixtures.mjs';
 import { stage2bManifestSha } from './stage2b-plan.mjs';
 import { judgementManifest, readStage3Method, stage3Budget, stage3CallId, stage3CallPath, stage3Folder, stage3Ledger, stage3Plan, stage3Stop } from './stage3-plan.mjs';
 import { assessStage3, tutorExamples } from './stage3-report.mjs';
-import { linearGoals } from './teacher/session.mjs';
-import { decideStudentAction, observationPrompt, observationWindow, stateActionGoal } from './teacher/state-machine.mjs';
+import { handoffSystemView, linearGoals, teacherActionGoal, usesHandoffContract } from './teacher/session.mjs';
+import { decideStudentAction, emptyObservation, initialPending, observationPromptFor, observationWindow } from './teacher/state-machine.mjs';
 import { workingJudge, workingJudgeFingerprint } from './working-judge.mjs';
 
 const responseText = raw => raw.response.content.filter(block => block.type === 'text').map(block => block.text).join('');
@@ -22,7 +23,6 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 const checkPass = (check, head) => check?.head === head && check.status === 'passed' && check.command === 'npm run check' && Number.isSafeInteger(check.passed) && check.passed > 0;
 const theWindow = (raw, prompt, view) => raw.context.systemPrompt === prompt && raw.context.messages.length === 1
   && raw.context.messages[0].role === 'user' && same(JSON.parse(raw.context.messages[0].content), view);
-const emptyObservation = { state: 'unknown', initialBlocker: null, progress: null, choice: null, execution: null };
 
 export function verifyStage3Artifacts({ id, start, receipt, evaluation, requests, checkArtifact }) {
   const { mode, pid, head, startedAt } = start;
@@ -43,7 +43,7 @@ export function verifyStage3Artifacts({ id, start, receipt, evaluation, requests
   function identityChecks(identity, identityId) {
     const expected = real ? { dev: stage3DevTasks, manifestSha256: stage2bManifestSha, split: 'dev' } : { ...stage3Fixtures.corpus(), split: 'synthetic' };
     const { dataset } = identity;
-    requireThat(identity.version === 'stage3-dev-v1' && ['1', '2'].includes(String(identity.edition)) && String(identity.edition) === (launch.edition ?? '1')
+    requireThat(identity.version === 'stage3-dev-v1' && [1, 2].includes(identity.edition) && String(identity.edition) === (launch.edition ?? '1')
       && identityId === hash({ mode, scenario, identity }) && identity.preregistrationSha256 === methodSha
       && dataset.split === expected.split && dataset.manifestSha256 === expected.manifestSha256 && same(dataset.dev, expected.dev)
       && same(identity.planned, stage3Plan(expected.dev)) && same(identity.limits, limits) && same(identity.stop, stage3Stop())
@@ -208,42 +208,82 @@ export function verifyStage3Artifacts({ id, start, receipt, evaluation, requests
 
 function checkDialogue(identity, cell, attempted) {
   const { messages, teacherEvents, arm, taskId, student, status } = cell;
+  const { edition } = identity;
   if (messages.length) requireThat(hash(messages[0].text) === identity.dataset.openings[taskId], 'stage 3 opening differs');
   const outputs = new Map(), views = new Map();
   for (const { raw, meter } of attempted) {
     const { role, turn, failureKind } = meter;
     if (role === 'teacher_observer') {
       const window = observationWindow(messages.slice(0, 2 * turn - 1));
-      requireThat(theWindow(raw, observationPrompt, window) && !views.has(turn), 'stage 3 observer window or call count differs');
-      views.set(turn, { window, value: failureKind ? emptyObservation : validateObservation(JSON.parse(responseText(raw)), window), failureKind });
+      requireThat(theWindow(raw, observationPromptFor(edition), window) && !views.has(turn), 'stage 3 observer window or call count differs');
+      views.set(turn, { window, value: failureKind ? emptyObservation(edition) : validateObservation(JSON.parse(responseText(raw)), window, edition), failureKind });
     } else if (!failureKind && role === 'learner') {
       const window = messages.slice(0, 2 * turn).map(({ role, text }) => ({ role, text }));
       const metadata = { allowBoundedCleanup: student !== 'default' };
       requireThat(same(JSON.parse(raw.context.messages.at(-1).content), window), 'stage 3 learner window differs');
       outputs.set(2 * turn, parseLearner(responseText(raw), raw.response, undefined, metadata).text);
-    } else if (!failureKind && role === 'teacher' && raw.response.stopReason === 'stop') {
-      outputs.set(2 * turn - 1, publicReply(responseText(raw)));
     }
   }
-  requireThat(messages.slice(1).every((m, i) => m.text === outputs.get(i + 1)), 'stage 3 public dialogue does not replay');
   const decisions = teacherEvents.filter(event => event.kind === 'stateDecision');
   const decisionsByTurn = new Map(decisions.map(event => [event.turn, event]));
   requireThat(decisionsByTurn.size === decisions.length, 'duplicate stage 3 state decision');
   if (arm === 'baseline') requireThat(decisions.length === 0, 'baseline cannot use the state gate');
   if (status === 'scored' && arm === 'candidate') requireThat(decisions.length === 4 && views.size === 4, 'candidate lacks four state decisions');
-  let pending = null;
+  let pending = initialPending(edition);
   for (const { turn, kind, call, phase, ...observed } of decisions) {
     const view = views.get(turn);
     requireThat(view && call === 0 && phase === 'diagnose', 'unbound teacher state decision');
-    const expected = decideStudentAction(view.value, view.window, pending);
+    const expected = decideStudentAction(view.value, view.window, pending, edition);
     if (view.failureKind) expected.fallback = view.failureKind;
     requireThat(same(observed, expected), 'teacher state decision does not replay');
     ({ pending } = expected);
   }
-  for (const { raw, meter } of attempted.filter(x => x.meter.role === 'teacher')) {
-    const goals = raw.context.messages.filter(m => m.role === 'system' && Object.hasOwn(m.sections ?? {}, 'goal')).map(m => m.sections.goal);
-    const expectedGoal = arm === 'candidate' && stateActionGoal(decisionsByTurn.get(meter.turn)?.action);
-    const expected = arm === 'candidate' ? [expectedGoal] : linearGoals.slice(0, meter.turn);
-    requireThat((arm !== 'candidate' || expectedGoal) && same(goals, expected), `teacher goal does not match ${arm} turn ${meter.turn}`);
+  const fallbacks = new Map();
+  for (const event of teacherEvents.filter(e => e.kind === 'handoffFallback')) {
+    requireThat(!fallbacks.has(event.turn), 'duplicate handoff fallback');
+    fallbacks.set(event.turn, event);
   }
+  for (const [turn, rows] of Map.groupBy(attempted.filter(x => x.meter.role === 'teacher'), x => x.meter.turn)) {
+    const action = arm === 'candidate' ? decisionsByTurn.get(turn)?.action : undefined;
+    if (usesHandoffContract(edition, action)) {
+      outputs.set(2 * turn - 1, replayHandoff(rows, turn, fallbacks.get(turn)));
+      fallbacks.delete(turn);
+      continue;
+    }
+    const expected = arm === 'candidate' ? [teacherActionGoal(edition, action)] : linearGoals.slice(0, turn);
+    for (const { raw, meter } of rows) {
+      const goals = raw.context.messages.filter(m => m.role === 'system' && Object.hasOwn(m.sections ?? {}, 'goal')).map(m => m.sections.goal);
+      requireThat((arm !== 'candidate' || expected[0]) && same(goals, expected), `teacher goal does not match ${arm} turn ${turn}`);
+      if (!meter.failureKind && raw.response.stopReason === 'stop') outputs.set(2 * turn - 1, publicReply(responseText(raw)));
+    }
+  }
+  requireThat(fallbacks.size === 0 && messages.slice(1).every((m, i) => m.text === outputs.get(i + 1)), 'stage 3 public dialogue does not replay');
+}
+
+function replayHandoff(rows, turn, fallback) {
+  const limit = policy.teacher.requestsPerTurn;
+  let retry = false, nextCall = true, reply;
+  requireThat(rows.length <= limit, 'handoff exceeds teacher call slots');
+  for (const [i, { raw, meter }] of rows.entries()) {
+    requireThat(nextCall && meter.call === i + 1 && meter.attempt === 1, 'invalid handoff regeneration sequence');
+    const system = raw.context.messages.filter(m => m.role === 'system').map(({ content, sections }) => ({ content, sections }));
+    requireThat(!raw.context.systemPrompt && same(system, handoffSystemView(retry)), 'handoff system prompt differs from its isolated contract');
+    if (!meter.failureKind) {
+      reply = validateHandoffResponse(responseText(raw), raw.response, meter.call < limit);
+      nextCall = reply === undefined;
+    } else {
+      if (meter.failureKind === 'teacher_generation_contract') {
+        let rejected = false;
+        try { validateHandoffResponse(responseText(raw), raw.response, meter.call < limit); }
+        catch { rejected = true; }
+        requireThat(rejected, 'handoff reply was incorrectly rejected');
+      }
+      retry = nextCall = handoffRejection(meter.failureKind);
+    }
+  }
+  const { failureKind } = rows.at(-1).meter;
+  const expected = rows.length === limit && handoffRejection(failureKind)
+    ? { kind: 'handoffFallback', turn, call: limit, phase: 'diagnose', action: 'diagnose', failureKind } : undefined;
+  requireThat(same(expected, fallback), 'handoff fallback does not match exhausted generation');
+  return expected ? handoffFallbackReply : reply;
 }

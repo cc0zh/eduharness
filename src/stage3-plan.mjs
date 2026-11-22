@@ -63,7 +63,7 @@ export function readStage3Method() {
 }
 
 const additionalSources = () => [...workingJudgeFingerprintFiles, 'config/stage2b-headroom.mjs', 'config/hard-learners.mjs', 'config/stage3.mjs', 'contracts/teacher/observation.mjs',
-  'src/teacher/state-machine.mjs', 'src/stage2b-plan.mjs', 'src/stage2b-ledger.mjs',
+  'contracts/teacher/handoff.mjs', 'src/teacher/state-machine.mjs', 'src/stage2b-plan.mjs', 'src/stage2b-ledger.mjs',
   ...['plan', 'fixtures', 'audit', 'report', 'run', 'verification'].map(part => `src/stage3-${part}.mjs`)];
 export function prepareStage3(mode, edition, registered) {
   const real = mode === 'real';
