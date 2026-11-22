@@ -4,7 +4,7 @@
 
 **根因与边界。** 在去理由与加宣称的两格，裁判的 V1/V2 锚点从 #4/#5 转移到 #6/#7。#6 已给垂距依据，并要求学生列原题第二个方程。#7 写出了这个方程。预登记把这种设式与解释垂距或独立完成新情形分开，因此将两格都记为误报。是否应把该推导纳入 V2，仍需复核题义。裁判换引用的原因待查，该批缺少第二遍。
 
-**证据。** 本机 `runs/round2-perturbation-01/b-geo/{judge,transcript}.json`、`V2-normal-explain/{judge,transcript}.json`、`V2-normal-guess/{judge,transcript}.json`、`V2-normal-claim/{judge,transcript}.json`，读取 V1、V2 与 #4–#7。[状态和报告入口](../../status.md#round2-perturbation)。
+**证据。** 本机 `runs/round2-perturbation-01/b-geo/{judge,transcript}.json`、`V2-normal-explain/{judge,transcript}.json`、`V2-normal-guess/{judge,transcript}.json`、`V2-normal-claim/{judge,transcript}.json`，读取 V1、V2 与 #4–#7。[状态和报告入口](../../archive/status-log-2026-11.md#round2-perturbation)。
 
 **现状。** 保留原判决和预登记真值，报告将误报和换引用分别记录。只建议审议 V2 与 V1 的题义边界，未改、未冻结尺子。
 

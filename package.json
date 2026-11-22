@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "check:docs": "node scripts/check-docs.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.5.2",

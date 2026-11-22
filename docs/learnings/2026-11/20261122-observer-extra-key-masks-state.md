@@ -4,6 +4,6 @@
 
 **直接原因。** [观察器契约](../../../contracts/teacher/observation.mjs#L16-L25)要求精确字段与合法 `state`。两类触发同一错误，但第二类删掉 `type` 仍缺状态。不是五次待修锚未对齐，也不因字段看似相近就能断定 `type` 等于 `state`。
 
-**证据。** `stage3-dev-v2-real-01` 的 [F01-A／默认](../../../runs/stage3-dev/stage3-dev-v2-real-01/candidate/TA2B-F01-A/default/calls/teacher_observer-2-1-1.json)和 [F01-B／默认](../../../runs/stage3-dev/stage3-dev-v2-real-01/candidate/TA2B-F01-B/default/calls/teacher_observer-2-1-1.json) #4 前原件，`callId` 分别为 `candidate:TA2B-F01-A:default:teacher_observer:2:1:1`、`candidate:TA2B-F01-B:default:teacher_observer:2:1:1`。
+**证据。** `stage3-dev-v2-real-01` 的 F01-A／默认（`runs/stage3-dev/stage3-dev-v2-real-01/candidate/TA2B-F01-A/default/calls/teacher_observer-2-1-1.json`）和 F01-B／默认（`runs/stage3-dev/stage3-dev-v2-real-01/candidate/TA2B-F01-B/default/calls/teacher_observer-2-1-1.json`） #4 前原件，`callId` 分别为 `candidate:TA2B-F01-A:default:teacher_observer:2:1:1`、`candidate:TA2B-F01-B:default:teacher_observer:2:1:1`。
 
 **处置与预防。** 保留回退，不改契约。以后若试窄容错，用仅冗余键和冗余且缺必需状态两种原件分别断言，另守住错角色及待修锚的拒收。不能用 HTTP 200 当观察成功。

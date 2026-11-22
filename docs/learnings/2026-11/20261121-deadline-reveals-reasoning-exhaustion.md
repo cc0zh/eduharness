@@ -4,7 +4,7 @@
 
 **根因与边界。** 四次 `length` 都在约 2–5 秒收到首字节，末阶段仍是推理，实报推理和总输出均为 65,536。路由未按请求中的 16,384 推理上限停止，推理耗尽整个输出预算。延后本地截止能揭示这四次的结束状态，未让它们获得判决。①b 的旧尝试没有最终用量且提示词版本不同，不能断言它们都会走同一路径，也不知道路由不执行上限的内部原因。
 
-**证据。** ①b 遥测：[A2](../../../runs/round2-perturbation-01/A2-assigned-multiplier/telemetry.json)、[R0](../../../runs/round2-perturbation-01/R0-still-learner-origin/telemetry.json)、[R1](../../../runs/round2-perturbation-01/R1-student-score-cards/telemetry.json)。同格 `calls/judge-4-1-1.json` 可回读首尝试。①c 自 `4c41f0a:src/models.mjs` 记录 `phaseMs` 与实报计数。回读 [`R1-student-score-cards-r1/telemetry.json`](../../../runs/round2-timeout-v2-01/R1-student-score-cards-r1/telemetry.json) 的首/末推理、`firstVisible: null`、`finish_reason: "length"` 和两列 token。其它三次为同 run 的 `b-counts`、`R0-still-learner-origin-r2`、`A2-assigned-multiplier-r2`。[诊断全表](../../../.tmp/scratch/timeout-exp/report.md) · [①c 状态](../../status.md#round2-perturbation-v2) · [复核](../../../runs/round2-timeout-v2-01/verify-run.json)
+**证据。** ①b 遥测：A2（`runs/round2-perturbation-01/A2-assigned-multiplier/telemetry.json`）、R0（`runs/round2-perturbation-01/R0-still-learner-origin/telemetry.json`）、R1（`runs/round2-perturbation-01/R1-student-score-cards/telemetry.json`）。同格 `calls/judge-4-1-1.json` 可回读首尝试。①c 自 `4c41f0a:src/models.mjs` 记录 `phaseMs` 与实报计数。回读 `runs/round2-timeout-v2-01/R1-student-score-cards-r1/telemetry.json` 的首/末推理、`firstVisible: null`、`finish_reason: "length"` 和两列 token。其它三次为同 run 的 `b-counts`、`R0-still-learner-origin-r2`、`A2-assigned-multiplier-r2`。诊断全表（`.tmp/scratch/timeout-exp/report.md`） · [①c 状态](../../archive/status-log-2026-11.md#round2-perturbation-v2) · 复核（`runs/round2-timeout-v2-01/verify-run.json`）
 
 **现状。** 360 秒只限诊断，正式 180 秒不变。真实复测中 `b-quiet` 两次在原截止前仍只有推理；缺少实报，不能把它们记成推理耗尽。
 

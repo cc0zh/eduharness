@@ -13,6 +13,6 @@
 | 训练 | 15 | `7d499be025438c8ac37a9410b0340c061c3e6b5512b0d983c045675d4f9381c3` |
 | 测试 | 25 | `5ba6f198751577c5a622c2c8d748cf2072f566b28001c5ca52524b356b24a3c8` |
 
-训练每题一条对话，按名单顺序以 `no_teach`、`normal`、`answer_dump`、`lecture`、`sycophant_close` 循环。测试每题一条 `normal`，按测试名单顺序加一条坏教师对话，以 `answer_dump`、`lecture`、`sycophant_close`、`no_teach` 循环。测试只读锁定测试名单，须通过[尺子冻结记录](../../docs/status.md#冻结记录)的准入核对。
+训练每题一条对话，按名单顺序以 `no_teach`、`normal`、`answer_dump`、`lecture`、`sycophant_close` 循环。测试每题一条 `normal`，按测试名单顺序加一条坏教师对话，以 `answer_dump`、`lecture`、`sycophant_close`、`no_teach` 循环。测试只读锁定测试名单，须通过[尺子冻结记录](../../docs/archive/status-log-2026-11.md#冻结记录)的准入核对。
 
 `npm run check` 对当前尺子的 schema、评分说明和裁判提示词检查指纹。变更须递增尺子版本，并在 `contracts/judge/ruler-change.json` 绑定当前 `ruler`、`fingerprint`、前版真实训练 `trainingRunId`、`trainingReceiptSha256` 及锁定的 `labelsSha256`。检查从训练 run 下读取 `labels-locked.csv`。

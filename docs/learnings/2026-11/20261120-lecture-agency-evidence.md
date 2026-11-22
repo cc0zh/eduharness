@@ -4,7 +4,7 @@
 
 **根因与边界。** `S0-63/lecture` 已证实教师 #4、#6 给过计算、阈值和判定。裁判将学生 #7 视为有限推理，给 1 档；执行者 AI 回读认为 #7 复述了上述步骤，未确认该分档。也不是每个同档都是裁判漏判。`S0-75/lecture` 的学生 #7、#9 自发提出检验并预测结果，尽管教师 #2 已完整讲解。证据支持本批对照区分不足，不能只归因于尺子，也不能推广到所有讲授对话。
 
-**证据。** `720a875:docs/status.md` 的[未见题结果](../../status.md#未见题验证结果)，`runs/ruler-test-v3-real-01/test-report.md:17–29` 和 `test-audit.json` 的 `lecture` 行；同 run 的 `S0-63/lecture/{judge,transcript}.json`、`S0-75/lecture/transcript.json`。
+**证据。** `720a875:docs/status.md` 的[未见题结果](../../archive/status-log-2026-11.md#未见题验证结果)，`runs/ruler-test-v3-real-01/test-report.md:17–29` 和 `test-audit.json` 的 `lecture` 行；同 run 的 `S0-63/lecture/{judge,transcript}.json`、`S0-75/lecture/transcript.json`。
 
 **修复或现状。** 第 3 步未过线，首轮没有继续改尺子。原分数和回读结论分别保留，不能把低总分当成目标维命中。
 

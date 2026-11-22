@@ -4,7 +4,7 @@
 
 **根因与边界。** 已证实该路由有时未把请求值当作硬上限，超时尝试的直接失败点是本地 180 秒截止。推理过长可能解释部分超时，但超时没有供应商最终用量和流事件时序。字符换算不是实报 token，不能断定这些超时由超限造成，也不能断定供应商内部为何变慢。
 
-**证据。** [完整五格及出站对账](../../status.md#v3-完整真实五格)，`runs/e2-real-20261119-06/answer_dump/calls/judge-4-1-2.json`；[未见题结果](../../status.md#未见题验证结果)，`runs/ruler-test-v3-real-01/S0-70/no_teach/calls/judge-4-1-1.json`。本机 `.tmp/scratch/s1-ruler-v2/judge-timeout-diagnosis.md:54–57,101–105` 对照 `e2-real-20261119-05`、`e2-real-20261119-06` 及 `s1-stability-r1-20261119`、`s1-stability-r2-20261119` 的裁判尝试。
+**证据。** [完整五格及出站对账](../../archive/status-log-2026-11.md#v3-完整真实五格)，`runs/e2-real-20261119-06/answer_dump/calls/judge-4-1-2.json`；[未见题结果](../../archive/status-log-2026-11.md#未见题验证结果)，`runs/ruler-test-v3-real-01/S0-70/no_teach/calls/judge-4-1-1.json`。本机 `.tmp/scratch/s1-ruler-v2/judge-timeout-diagnosis.md:54–57,101–105` 对照 `e2-real-20261119-05`、`e2-real-20261119-06` 及 `s1-stability-r1-20261119`、`s1-stability-r2-20261119` 的裁判尝试。
 
 **修复或现状。** 首轮没有验证出能可靠执行上限的路由，也没有据此延长本地截止。超时缺报仍记未知，不补零或给失败格打低分。
 

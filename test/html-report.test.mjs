@@ -90,7 +90,7 @@ function exportHtml({ cwd, dir, id, out }, ...args) {
 
 const attr = (tag, name) => tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1];
 
-function reportDom(html) {
+function reportDom(html, hash = '') {
   const nodes = new Map();
   const interaction = (tag, content, panel) => {
     const attrs = new Map();
@@ -114,12 +114,12 @@ function reportDom(html) {
   const handlers = new Map();
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script, 'missing inline interaction script');
-  runInNewContext(script, { document: {
+  runInNewContext(script, { location: { hash }, document: {
     getElementById: id => nodes.get(id), querySelector: selector => selector === '[data-dialogue]:not([hidden])' ? panels.find(panel => !panel.hidden) : null,
     addEventListener: (type, handler) => handlers.set(type, handler),
   } });
   const links = [...html.matchAll(/(<a\b[^>]*\bdata-jump\b[^>]*>)([^<>]*)<\/a>/g)].map(([, tag, label]) => ({ href: attr(tag, 'href'), className: attr(tag, 'class'), label }));
-  return { panels, links, click(link) {
+  return { panels, links, at: id => nodes.get(id), click(link) {
     assert.ok(link, 'missing reference or judgement link');
     const target = nodes.get(link.href.slice(1));
     assert.ok(target, `no dialogue target for ${link.href}`);
@@ -135,6 +135,136 @@ function reportDom(html) {
     return target;
   } };
 }
+
+function splitCell(f, dir, from, to, cell, repetition) {
+  const source = join(f.dir, 'r1', from);
+  const judge = JSON.parse(read(join(source, 'judge.json')));
+  Object.assign(judge.binding, { cell, repetition, ruler: 'e1-binary-v3' });
+  const { verdict, binding: { messageIds } } = judge;
+  verdict.scoring.ruler = judge.binding.ruler;
+  verdict.anchors = { misconception_repair: { misconception: 1 }, representation_pivot: { oldFrame: 2, blocked: 3 } };
+  verdict.anchorMessageIds = { misconception_repair: { misconception: messageIds[0] }, representation_pivot: { oldFrame: messageIds[1], blocked: messageIds[2] } };
+  const splitAnswers = {
+    M0: [true], M1: [true, { explanation: 2 }], M2: [false, { repair: null }], M3: [false, { solution: null }],
+    R0: [true], R1: [true, { newFrame: 4 }], R2: [true, { uptake: 5 }],
+  };
+  for (const [key, [answer, evidence]] of Object.entries(splitAnswers)) {
+    verdict.answers[key] = { answer, ...(evidence && { evidence }) };
+    verdict.messageIds[key] = Object.fromEntries(Object.entries(evidence ?? {}).filter(([, n]) => n !== null).map(([slot, n]) => [slot, messageIds[n - 1]]));
+  }
+  stored(join(dir, to, 'judge.json'), judge);
+  stored(join(dir, to, 'transcript.json'), JSON.parse(read(join(source, 'transcript.json'))));
+  return judge.verdict.scoring;
+}
+
+function questionMarkup(html, question) {
+  return html.match(new RegExp(`<tr data-question="${question}">([\\s\\S]*?)<\\/tr>`))?.[1] ?? '';
+}
+
+test('S1 v3 freeze retest displays saved freeze gates and verification, including named diagnostic cells', t => {
+  const f = fixture(t, 'binary', { latest: true });
+  const scenario = 'S1-judge-freeze';
+  const identity = { ...f.manifest.identity, version: 'evaluation-identity-v5', ruler: 'e1-binary-v3', judgeOutputContract: 'judge-output-v5', freeze: {} };
+  const scoring = splitCell(f, f.dir, 'normal', 'r1/normal', 'normal', 'r1');
+  splitCell(f, f.dir, 'lecture', 'V1-claim-none', 'V1-claim-none');
+  stored(join(f.dir, 'manifest.json'), { ...f.manifest, scenario, identity, planned: [
+    { id: 'r1/normal', repetition: 'r1', condition: 'normal' }, { id: 'V1-claim-none' },
+  ] });
+  const { repetition, ...diagnostic } = f.result.cells[1];
+  stored(join(f.dir, 'result.json'), { id: f.id, mode: 'real', scenario, acceptance: true, cells: [
+    { ...f.result.cells[0], scoring }, { ...diagnostic, id: 'V1-claim-none', scoring },
+  ] });
+  rmSync(join(f.dir, 'verify-run.json'));
+  stored(join(f.dir, 'freeze-retest-summary.json'), { runId: f.id, mode: 'real', frozen: false, gates: { s1: true, directed: false },
+    details: { s1: { ratePasses: 3, targetHits: { lecture: 3 } }, verification: { runId: f.id, mode: 'real', verified: true, requestCount: 45 } },
+  });
+  const html = exportHtml(f);
+  assert.match(html, /冻结复测未过线/);
+  assert.match(html, /定向可靠性[\s\S]*未过线/);
+  assert.match(html, /已验真[\s\S]*freeze-retest-summary\.json\.details\.verification/);
+  assert.doesNotMatch(html, /id="issues-title"/);
+  assert.match(questionMarkup(html, 'M0'), /href="#dialogue-r1-normal-msg-1"/);
+  assert.match(questionMarkup(html, 'R2'), /href="#dialogue-r1-normal-msg-4"/);
+  assert.match(questionMarkup(html, 'R2'), /href="#dialogue-r1-normal-msg-5"/);
+  assert.doesNotMatch(questionMarkup(html, 'M2'), /href="[^"]+-msg-/);
+  const dom = reportDom(html);
+  const link = dom.links.find(x => x.label === '#4' && x.href.includes('V1-claim-none'));
+  assert.match(dom.click(link).content, /lecture public 4/);
+});
+
+function stage3Fixture(t) {
+  const f = fixture(t, 'binary', { latest: true });
+  const root = join(f.root, 'dev-archive'), dir = join(root, f.id);
+  const scenario = 'stage3-state-machine';
+  const identity = { ...f.manifest.identity, version: 'stage3-dev-v2', ruler: 'e1-binary-v3', judgeOutputContract: 'judge-output-v5' };
+  const planned = ['baseline', 'candidate', 'rhetoric'].map(arm => ({ arm, taskId: 'TA2B-F12-B', student: 'answer-seeker', folder: `${arm}/TA2B-F12-B/answer-seeker` }));
+  for (const { folder, arm } of planned) splitCell(f, dir, arm === 'candidate' ? 'lecture' : 'normal', folder, folder);
+  const manifest = { ...f.manifest, scenario, identity, planned };
+  const result = { id: f.id, mode: 'real', scenario, identityId, decision: 'inconclusive', acceptance: false,
+    cells: planned.map(row => ({ ...row, status: 'scored' })) };
+  stored(join(dir, 'manifest.json'), manifest);
+  stored(join(dir, 'result.json'), result);
+  stored(join(dir, 'verify-run.json'), { runId: f.id, mode: 'real', verified: true, requestCount: 49, acceptance: false, exitCode: 1 });
+  const report = { decision: 'inconclusive', devScreenOnly: true, adoption: false,
+    dimensions: { verification_or_transfer: { pairedFromBaseline: { candidate: { mean: -0.208333, pairs: 24 }, rhetoric: { mean: 0, pairs: 24 } } } },
+    totalRate: { candidate: { points: -2.847222, pairs: 24 } }, gates: { v: { status: 'fail' }, blindHits: { status: 'inconclusive' } },
+  };
+  stored(join(dir, 'report.json'), report);
+  return { ...f, root, dir, manifest, result, report, out: join(dir, 'report.html') };
+}
+
+test('Stage 3 dev renders the saved gate and paired deltas, and opens a deep link to the correct arm', t => {
+  const f = stage3Fixture(t);
+  const html = exportHtml(f, '--run-root', f.root);
+  for (const supported of ['inconclusive', '已验真', 'S − B', 'C − B', '−0.208', '−2.847', '24 对', 'TA2B-F12-B', '盲核']) assert.ok(html.includes(supported), supported);
+  assert.deepEqual([...html.matchAll(/data-question="([A-Z]\d)"/g)].map(match => match[1]), Object.keys(binaryQuestions));
+  assert.doesNotMatch(html, /id="issues-title"/);
+  const hash = '#dialogue-candidate-TA2B-F12-B-answer-seeker-msg-4';
+  const dom = reportDom(html, hash);
+  const target = dom.at(hash.slice(1));
+  assert.equal(target.attrs.get('aria-current'), 'true');
+  assert.equal(target.panel.hidden, false);
+  assert.match(target.content, /lecture public 4/);
+  assert.match(dom.click(dom.links.find(x => x.label === '#4' && x.href.includes('rhetoric'))).content, /normal public 4/);
+  assert.equal(target.attrs.has('aria-current'), false);
+});
+
+test('Stage 3 export rejects foreign coordinates and bindings without following a saved folder', t => {
+  const f = stage3Fixture(t);
+  const candidate = f.manifest.planned[1];
+  const judge = join(f.dir, candidate.folder, 'judge.json');
+  const data = JSON.parse(read(judge));
+  data.binding.cell = f.manifest.planned[0].folder;
+  stored(judge, data);
+  stored(join(f.dir, 'result.json'), { ...f.result, cells: [...f.result.cells,
+    { ...candidate, taskId: '../outside', folder: '../outside' },
+  ] });
+  const html = exportHtml(f, '--run-root', f.root);
+  assert.match(html, /无效或重复的格子坐标/);
+  assert.match(html, /judge\.json\.binding\.cell/);
+  assert.doesNotMatch(html, /data-dialogue="\.\.\/outside|href="#dialogue-candidate-[^"]+-msg-/);
+});
+
+test('a split v3 shared anchor with the wrong message ID is marked invalid instead of linked', t => {
+  const f = stage3Fixture(t);
+  const judge = join(f.dir, f.manifest.planned[1].folder, 'judge.json');
+  const data = JSON.parse(read(judge));
+  data.verdict.anchorMessageIds.misconception_repair.misconception = data.binding.messageIds[2];
+  stored(judge, data);
+  const html = exportHtml(f, '--run-root', f.root);
+  assert.match(html, /verdict\.anchorMessageIds\.misconception_repair\.misconception/);
+  assert.doesNotMatch(questionMarkup(html, 'M0'), /href="#dialogue-candidate-[^"]+-msg-/);
+  assert.match(questionMarkup(html, 'M0'), /href="#dialogue-baseline-[^"]+-msg-1"/);
+});
+
+test('Stage 3 export reports malformed saved gate data rather than treating acceptance as a pass', t => {
+  const f = stage3Fixture(t);
+  writeFileSync(join(f.dir, 'report.json'), '{"decision":"inconclusive"} extra');
+  const html = exportHtml(f, '--run-root', f.root);
+  assert.match(html, /report\.json[\s\S]*不是完整的 JSON/);
+  assert.match(html, /本 run 无判线/);
+  assert.doesNotMatch(html, /<p class="headline">已过线/);
+});
 
 test('binary CLI exports 19 questions and saved verdict, rate, verification and usage without touching originals', t => {
   const f = fixture(t);
@@ -450,6 +580,17 @@ test('rejects out-of-scope runs, directory traversal, linked artifacts and repla
   const linked = join(f.root, 'not-a-run');
   symlinkSync(f.dir, linked, 'junction');
   assert.match(run(f.cwd, 'not-a-run').stderr, /链接|symlink/i);
+});
+
+test('back-href renders a safe return link and rejects unsafe or non-html hrefs', t => {
+  const f = fixture(t);
+  const html = exportHtml(f, '--back-href', '../index.html');
+  assert.match(html, /<nav class="back-nav"[^>]*><a href="\.\.\/index\.html">← 返回项目总览<\/a><\/nav>/);
+  for (const bad of ['https://example.invalid/index.html', 'javascript:alert(1)', 'file:///D:/x.html', '../index.txt', '/abs/index.html', 'C:\\index.html']) {
+    const res = run(f.cwd, f.id, '--out', join(f.dir, 'bad-back.html'), '--back-href', bad);
+    assert.notEqual(res.status, 0, bad);
+    assert.match(res.stderr, /--back-href/);
+  }
 });
 
 if (process.env.TEACHARENA_REPORT_REAL_DOM === '1') {

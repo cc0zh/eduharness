@@ -4,7 +4,7 @@
 
 **根因与边界。** 构造矩阵只收录坏教师指令能决定的行为。6 个正例是 `answer_dump` 首答两题各复判三次。矩阵没有学生题真值，也没有门控 Yes 的真值。V2 不进入矩阵，判对所有构造格不能验证 V2。三遍同判只证明这份对话的重复一致；裁判为什么采信 #5 未知。
 
-**证据。** 本机 `runs/s1-binary-round2-01/preregistration.md` 的构造预期表与 `s1-binary-summary.json` 的 `matrix.questions.V2`；同 run `r1/normal/{judge,transcript}.json` 的 V2、#4–#6。可提交索引为[第二轮状态](../../status.md#round2-s1)及 [`binary.mjs`](../../../contracts/judge/binary.mjs) 的 V2 定义。
+**证据。** 本机 `runs/s1-binary-round2-01/preregistration.md` 的构造预期表与 `s1-binary-summary.json` 的 `matrix.questions.V2`；同 run `r1/normal/{judge,transcript}.json` 的 V2、#4–#6。可提交索引为[第二轮状态](../../archive/status-log-2026-11.md#round2-s1)及 [`binary.mjs`](../../../contracts/judge/binary.mjs) 的 V2 定义。
 
 **现状。** 保留三遍机器分档和预登记结论。报告将构造命中、逐题一致、原字回读分开。没有据此调题、补跑或冻结尺子。
 

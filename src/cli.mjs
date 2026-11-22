@@ -29,9 +29,9 @@ const optionValue = name => {
 
 if (option('--export-report') >= 0) {
   try {
-    const { values } = parseArgs({ options: { 'export-report': { type: 'string' }, out: { type: 'string' } } });
+    const { values } = parseArgs({ options: { 'export-report': { type: 'string' }, 'run-root': { type: 'string', default: 'runs' }, out: { type: 'string' }, 'back-href': { type: 'string' } } });
     const { exportReport } = await import('./html-report.mjs');
-    emit(exportReport(values['export-report'], values.out));
+    emit(exportReport(values['export-report'], values.out, values['run-root'], { backHref: values['back-href'] }));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 2;

@@ -1,10 +1,13 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isDeepStrictEqual as same } from 'node:util';
+import { stage3DevTasks, stage3Scenario } from '../config/stage3.mjs';
 import { cellIds, filenames, modes, runId } from '../contracts/artifacts/schema.mjs';
 import { hash } from '../contracts/core/schema.mjs';
 import { binaryGates, binaryIdentityVersion, binaryOutputContract, binaryQuestions, binaryRuler, notApplicable } from '../contracts/judge/binary.mjs';
+import { splitBinaryIdentityVersion, splitBinaryOutputContract, splitBinaryRuler, splitDimensions, splitQuestions } from '../contracts/judge/binary-v3.mjs';
 import { dimensions, directDimension, outputContract, ruler } from '../contracts/judge/schema.mjs';
+import { judgeFreezeScenario } from './judge-bakeoff-plan.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = value => typeof value === 'string' && value.trim() !== '';
@@ -46,8 +49,12 @@ function files(root, id, note) {
 }
 
 function formatOf({ scenario, mode, phase, identity }) {
-  if (!modes.includes(mode) || phase !== undefined || !object(identity) || identity.freeze !== undefined) return;
+  if (!modes.includes(mode) || phase !== undefined || !object(identity)) return;
   const { ruler: name, version, judgeOutputContract: contract } = identity;
+  const split = name === splitBinaryRuler && contract === splitBinaryOutputContract;
+  if (scenario === judgeFreezeScenario && mode === 'real' && split && version === splitBinaryIdentityVersion && object(identity.freeze)) return 'freeze';
+  if (identity.freeze !== undefined) return;
+  if (scenario === stage3Scenario && mode === 'real' && split && version === 'stage3-dev-v2') return 'stage3';
   if (scenario === 'S1-binary' && (
     name === 'e1-binary-v1' && version === 'evaluation-identity-v3' && contract === 'judge-output-v3' ||
     name === binaryRuler && version === binaryIdentityVersion && contract === binaryOutputContract
@@ -56,23 +63,35 @@ function formatOf({ scenario, mode, phase, identity }) {
     name === ruler && version === 'evaluation-identity-v2' && contract === outputContract) return 'v3';
 }
 
-function coordinate(binary, row, planned = false) {
+function coordinate(format, row, planned = false) {
+  if (format === 'stage3') {
+    if (!['baseline', 'candidate', 'rhetoric'].includes(row?.arm) || !stage3DevTasks.some(task => task.id === row.taskId) ||
+      !['default', 'stubborn', 'answer-seeker'].includes(row.student)) return;
+    const key = `${row.arm}/${row.taskId}/${row.student}`;
+    return row.folder === key ? key : undefined;
+  }
+  if (format === 'freeze' && row?.repetition === undefined) {
+    return typeof row?.id === 'string' && /^[a-z\d][a-z\d-]{0,63}$/i.test(row.id) ? row.id : undefined;
+  }
+  const binary = format !== 'v3';
   const id = planned && binary ? row?.condition : planned ? row : row?.id;
   if (!cellIds.includes(id)) return;
   if (!binary) return id;
-  if (typeof row?.repetition === 'string' && /^r[1-9]\d*$/.test(row.repetition)) return `${row.repetition}/${id}`;
+  if (typeof row.repetition !== 'string' || !/^r[1-9]\d*$/.test(row.repetition)) return;
+  const key = `${row.repetition}/${id}`;
+  return format === 'freeze' && planned && row.id !== key ? undefined : key;
 }
 
-function collectCells(binary, manifest, result, note) {
+function collectCells(format, manifest, result, note) {
   const planned = new Set();
   const cells = new Map();
   for (const [i, row] of (Array.isArray(manifest.planned) ? manifest.planned : []).entries()) {
-    const path = coordinate(binary, row, true);
+    const path = coordinate(format, row, true);
     if (!path || planned.has(path)) note(`manifest.json.planned[${i}]`, '无效或重复的格子坐标');
     else planned.add(path);
   }
   for (const [i, row] of result.cells.entries()) {
-    const path = coordinate(binary, row);
+    const path = coordinate(format, row);
     if (!path || cells.has(path)) note(`result.json.cells[${i}]`, '无效或重复的格子坐标');
     else {
       if (planned.size && !planned.has(path)) note(`result.json.cells[${i}] · ${path}`, '不在 manifest.json.planned');
@@ -115,20 +134,29 @@ function dialogue(raw, binding, key, note, bindingValid) {
     byNumber: (n, where) => reference(n, order[n - 1], where) };
 }
 
-function binaryRows(verdict, chat, path, note) {
+const dimensionForQuestion = Object.fromEntries(splitDimensions.flatMap(dimension => Object.keys(splitQuestions[dimension]).map(key => [key, dimension])));
+
+function binaryRows(verdict, chat, path, note, split) {
   if (!object(verdict)) return {};
   return Object.fromEntries(Object.entries(binaryQuestions).map(([key, spec]) => {
     const row = verdict.answers?.[key];
     const field = `${path}.verdict.answers.${key}`;
     if (typeof row?.answer !== 'boolean') { note(`${field}.answer`, '缺少原始 Yes / No'); return [key, {}]; }
-    const ids = verdict.messageIds?.[key];
+    const dimension = dimensionForQuestion[key];
     const refs = [];
     for (const [slot, role] of Object.entries(spec.evidence)) {
-      const n = row.evidence?.[slot];
-      const id = ids?.[slot];
+      const shared = split && !Object.hasOwn(splitQuestions[dimension][key].evidence, slot);
+      if (shared && !row.answer && !Object.hasOwn(binaryGates, key)) continue;
+      const fromR1 = shared && key === 'R2' && slot === 'newFrame';
+      const question = fromR1 ? 'R1' : key;
+      const fromAnchor = shared && !fromR1;
+      const n = fromAnchor ? verdict.anchors?.[dimension]?.[slot] : verdict.answers?.[question]?.evidence?.[slot];
+      const id = fromAnchor ? verdict.anchorMessageIds?.[dimension]?.[slot] : verdict.messageIds?.[question]?.[slot];
       if (n === null && id === undefined && (!row.answer || spec.optional.includes(slot))) continue;
-      if (!row.answer) note(`${field}.evidence.${slot}`, 'No 的证据位必须为 null 且没有消息 ID');
-      const ref = chat.reference(n, id, `${field}.evidence.${slot} ↔ ${path}.verdict.messageIds.${key}.${slot}`, role);
+      const evidenceField = fromAnchor ? `anchors.${dimension}.${slot}` : `answers.${question}.evidence.${slot}`;
+      const idField = fromAnchor ? `anchorMessageIds.${dimension}.${slot}` : `messageIds.${question}.${slot}`;
+      if (!row.answer) note(`${path}.verdict.${evidenceField}`, 'No 的证据位必须为 null 且没有消息 ID');
+      const ref = chat.reference(n, id, `${path}.verdict.${evidenceField} ↔ ${path}.verdict.${idField}`, role);
       refs.push({ ...ref, valid: row.answer && ref.valid, slot });
     }
     const gate = Object.keys(binaryGates).find(gate => binaryGates[gate].includes(key));
@@ -160,14 +188,15 @@ function v3Rows(judge, chat, path, note) {
   }));
 }
 
-function loadCell(read, key, result, manifest, binary, note, compare) {
+function loadCell(read, key, result, manifest, format, note, compare) {
+  const binary = format !== 'v3';
   const judgePath = `${key}/${filenames.judge}`;
   const resultPath = `result.json.cells[${key}]`;
   const judge = read.json(judgePath);
   const raw = read.json(`${key}/${filenames.transcript}`, Array.isArray);
   const { binding } = judge ?? {};
-  const coordinates = { runId: manifest.id, ruler: manifest.identity.ruler, cell: key.split('/').at(-1),
-    ...(binary && { repetition: key.split('/')[0] }) };
+  const coordinates = { runId: manifest.id, ruler: manifest.identity.ruler, cell: format === 'stage3' ? key : key.split('/').at(-1),
+    ...(binary && { repetition: format !== 'stage3' && key.includes('/') ? key.split('/')[0] : undefined }) };
   let bindingMatches = object(binding);
   if (bindingMatches) {
     for (const [name, expected] of Object.entries(coordinates)) {
@@ -184,11 +213,12 @@ function loadCell(read, key, result, manifest, binary, note, compare) {
   const bindingValid = bindingMatches && matchingView && messageIdsMatch;
   const outcome = bindingValid ? (binary ? judge?.verdict : judge?.groups) : undefined;
   if ((result || judge) && !raw) note(`${key}/${filenames.transcript}`, '没有可读取的公开对话');
-  if (result?.scored && !outcome) note(judgePath, judge && !bindingValid ? '判决绑定无效，未用于矩阵' : 'result.json 已记录分数，但缺判定');
-  if (outcome && (!result || result.scored === false)) note(judgePath, `有判定，但 ${resultPath}.scored 未记录分数`);
+  const scored = format === 'stage3' && result ? result.status === 'scored' : result?.scored;
+  if (scored && !outcome) note(judgePath, judge && !bindingValid ? '判决绑定无效，未用于矩阵' : 'result.json 已记录分数，但缺判定');
+  if (outcome && (!result || scored === false)) note(judgePath, `有判定，但 ${resultPath} 未记录分数`);
   if (judge && !object(binding)) note(`${judgePath}.binding`, '缺少证据绑定');
   const chat = dialogue(raw, binding, key, note, bindingValid);
-  const rows = binary ? binaryRows(outcome, chat, judgePath, note) : v3Rows(bindingValid ? judge : undefined, chat, judgePath, note);
+  const rows = binary ? binaryRows(outcome, chat, judgePath, note, manifest.identity.ruler === splitBinaryRuler) : v3Rows(bindingValid ? judge : undefined, chat, judgePath, note);
   let scoring;
   if (binary) {
     const a = outcome?.scoring, b = result?.scoring;
@@ -245,6 +275,24 @@ function comparisons(result, cells, compare) {
   });
 }
 
+const gateStatus = value => ['pass', 'fail', 'inconclusive'].includes(value);
+
+function stage3Report(read, result, compare) {
+  const source = 'report.json';
+  const saved = read.json(source, value => object(value) && value.devScreenOnly === true && value.adoption === false && gateStatus(value.decision));
+  if (!saved) return {};
+  compare(`${source}.decision`, saved.decision, 'result.json.decision', result.decision);
+  const paired = (name, record, value) => ({ name, ...Object.fromEntries(['candidate', 'rhetoric'].map(arm => [arm, {
+    delta: number(record?.[arm]?.[value]) ? record[arm][value] : undefined,
+    pairs: count(record?.[arm]?.pairs) ? record[arm].pairs : undefined,
+  }])) });
+  const pairedDeltas = dimensions.map(key => paired(key, saved.dimensions?.[key]?.pairedFromBaseline, 'mean'));
+  pairedDeltas.push(paired('totalRate', saved.totalRate, 'points'));
+  const gates = ['machineA', 'cMean', 'cFakeHits', 'exposure', 'blindHits', 'blindGainPairs', 'p', 'v', 'total'];
+  return { pairedDeltas, gate: saved.decision === result.decision ? { source, decision: saved.decision,
+    checks: Object.fromEntries(gates.flatMap(key => gateStatus(saved.gates?.[key]?.status) ? [[key, saved.gates[key].status]] : [])) } : null };
+}
+
 export function readReport(root, id) {
   const issues = [];
   const note = (path, detail) => issues.push({ path, detail });
@@ -262,38 +310,47 @@ export function readReport(root, id) {
     }
   }
   if (!Array.isArray(result.cells)) throw Error('result.json.cells: 预期格子数组');
-  const binary = format === 'binary';
+  const binary = format !== 'v3';
   for (const key of ['id', 'scenario', 'taskId', 'mode', 'identityId']) compare(`manifest.json.${key}`, manifest[key], `result.json.${key}`, result[key]);
-  const summary = binary ? read.json('s1-binary-summary.json') : undefined;
+  const summary = format === 'binary' ? read.json('s1-binary-summary.json') : undefined;
   compare('manifest.json.identity.preregistrationSha256', manifest.identity.preregistrationSha256, 's1-binary-summary.json.preregistrationSha256', summary?.preregistrationSha256);
-  const savedVerification = read.json('verify-run.json');
-  let verification;
-  if (savedVerification) {
-    const belongsToRun = savedVerification.runId === id && savedVerification.mode === manifest.mode;
-    if (savedVerification.runId !== id) note('verify-run.json.runId', `与 manifest.json.id 不同：${shown(savedVerification.runId)} ≠ ${shown(id)}`);
-    if (savedVerification.mode !== manifest.mode) note('verify-run.json.mode', `与 manifest.json.mode 不同：${shown(savedVerification.mode)} ≠ ${shown(manifest.mode)}`);
-    if (belongsToRun) verification = savedVerification;
-  }
+  const freezeSource = 'freeze-retest-summary.json';
+  const freeze = format === 'freeze' ? read.json(freezeSource, value => object(value) && value.runId === id && value.mode === manifest.mode && typeof value.frozen === 'boolean') : undefined;
+  const verificationRecords = [['verify-run.json', read.json('verify-run.json')], [`${freezeSource}.details.verification`, freeze?.details?.verification]].filter(([source, data]) => {
+    if (!data) return false;
+    if (data.runId !== id) note(`${source}.runId`, `与 manifest.json.id 不同：${shown(data.runId)} ≠ ${shown(id)}`);
+    if (data.mode !== manifest.mode) note(`${source}.mode`, `与 manifest.json.mode 不同：${shown(data.mode)} ≠ ${shown(manifest.mode)}`);
+    return data.runId === id && data.mode === manifest.mode;
+  });
+  const [verificationSource, verification] = verificationRecords[0] ?? [];
   if (verification) {
-    if (typeof verification.verified !== 'boolean') note('verify-run.json.verified', '缺少布尔验真结果');
-    if (typeof verification.acceptance === 'boolean') compare('result.json.acceptance', result.acceptance, 'verify-run.json.acceptance', verification.acceptance);
-    for (const key of verifyFields) compare(`verify-run.json.${key}`, verification[key], `s1-binary-summary.json.verification.${key}`, summary?.verification?.[key]);
+    if (typeof verification.verified !== 'boolean') note(`${verificationSource}.verified`, '缺少布尔验真结果');
+    if (typeof verification.acceptance === 'boolean') compare('result.json.acceptance', result.acceptance, `${verificationSource}.acceptance`, verification.acceptance);
+    for (const [source, data] of [...verificationRecords.slice(1), ['s1-binary-summary.json.verification', summary?.verification]]) {
+      for (const key of verifyFields) compare(`${verificationSource}.${key}`, verification[key], `${source}.${key}`, data?.[key]);
+    }
   }
-  const cells = collectCells(binary, manifest, result, note).map(([key, outcome]) => loadCell(read, key, outcome, manifest, binary, note, compare));
-  const gate = savedGate(read, result, summary, binary, compare);
+  const cells = collectCells(format, manifest, result, note).map(([key, outcome]) => loadCell(read, key, outcome, manifest, format, note, compare));
+  const experiment = format === 'stage3' ? stage3Report(read, result, compare) : {};
+  const gate = format === 'stage3' ? experiment.gate : format === 'freeze' ? freeze && {
+    source: freezeSource, statement: freeze.frozen ? '冻结复测已过线' : '冻结复测未过线',
+    checks: picked(freeze.gates, ['realVerified', 'complete', 's1', 'directed', 'normal', 'repeats'], value => typeof value === 'boolean'),
+    ratePasses: count(freeze.details?.s1?.ratePasses) ? freeze.details.s1.ratePasses : undefined,
+    targetHits: picked(freeze.details?.s1?.targetHits, cellIds, count),
+  } : savedGate(read, result, summary, binary, compare);
   const usage = [['result.json.usage', result.usage], ['s1-binary-summary.json.usage', summary?.usage]];
   const usageReports = usage.map(([path, data]) => object(data?.usage) ? [`${path}.usage`, data.usage] : [path, data]);
   const [[left, a], [right, b]] = usageReports;
   for (const field of usageFields) compare(`${left}.${field}`, a?.[field], `${right}.${field}`, b?.[field]);
-  const requestSources = [['verify-run.json.requestCount', verification?.requestCount], ['s1-binary-summary.json.usage.requests', summary?.usage?.requests],
-    ['result.json.requestCount', result.requestCount], ['verify-run.json.observedRequestCount', verification?.observedRequestCount]].filter(([, n]) => count(n));
+  const requestSources = [[`${verificationSource}.requestCount`, verification?.requestCount], ['s1-binary-summary.json.usage.requests', summary?.usage?.requests],
+    ['result.json.requestCount', result.requestCount], [`${verificationSource}.observedRequestCount`, verification?.observedRequestCount]].filter(([, n]) => count(n));
   for (const [path, n] of requestSources.slice(1)) compare(requestSources[0][0], requestSources[0][1], path, n);
   const v3Comparisons = binary ? [] : comparisons(result, cells, compare);
-  return { id, format, cells, gate, issues, comparisons: v3Comparisons, mode: manifest.mode, scenario: manifest.scenario,
+  return { id, format, cells, gate, issues, comparisons: v3Comparisons, pairedDeltas: experiment.pairedDeltas, mode: manifest.mode, scenario: manifest.scenario,
     identityId: text(manifest.identityId) ? manifest.identityId : undefined, identity: picked(manifest.identity, ['ruler', 'version', 'judgeOutputContract'], text),
     preregistration: [manifest.identity.preregistrationSha256, summary?.preregistrationSha256].find(text),
     acceptance: typeof result.acceptance === 'boolean' ? result.acceptance : undefined,
-    verification: verification && { ...picked(verification, verifyFields, v => typeof v === 'boolean' || text(v) || count(v)),
+    verification: verification && { source: verificationSource, ...picked(verification, verifyFields, v => typeof v === 'boolean' || text(v) || count(v)),
       missing: Array.isArray(verification.missing) ? verification.missing.filter(text) : [], invalid: Array.isArray(verification.invalid) ? verification.invalid.filter(text) : [] },
     request: requestSources[0], usage: Object.assign({}, ...usageReports.map(([, data]) => picked(data, usageFields, count))),
     usageMeta: picked(summary?.usage ?? result.usage, ['attempts', 'retries', 'requestedOutputTokens', 'missingUsage'], count) };

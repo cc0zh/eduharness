@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>TeachArena (eduharness) · 阶段 1–4 离线项目总览报告</title>
+<style>
+:root{color-scheme:light;font:15px/1.6 system-ui,-apple-system,sans-serif;--ink:#132a2e;--muted:#4d6469;--bg:#eef3f2;--card:#ffffff;--border:#cbd8d6;--accent:#006763;--accent-soft:#dff3ee;--warn:#7c3a14;--warn-bg:#f8ece2;--bad:#9b1c28;--bad-bg:#fdecef;--ok:#065f46;--ok-bg:#d1fae5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink)}
+main{max-width:74rem;margin:auto;padding:1.75rem clamp(1rem,3vw,2.2rem) 3.5rem}
+h1,h2,h3,p{margin:0 0 .55rem}
+h1{font-size:1.9rem;letter-spacing:-.01em}
+h2{font-size:1.22rem;margin-top:1.4rem;border-left:4px solid var(--accent);padding-left:.6rem}
+h3{font-size:1.03rem;margin-top:1rem}
+.eyebrow{color:var(--accent);font-weight:750;font-size:.9rem;text-transform:uppercase;letter-spacing:.04em}
+.lead{font-size:1.03rem;color:var(--ink);max-width:60rem}
+.muted{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:.65rem;padding:1.1rem 1.25rem;margin:.85rem 0}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.85rem;margin:1rem 0}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:.65rem;padding:.9rem 1rem}
+.kpi .label{font-size:.82rem;color:var(--muted);font-weight:650}
+.kpi .val{font-size:1.3rem;font-weight:800;margin:.2rem 0}
+.pill{display:inline-block;padding:.12rem .5rem;border-radius:99px;font-size:.8rem;font-weight:700}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.drill{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.9rem;margin:.9rem 0}
+.drill a.btn{display:inline-block;margin-top:.55rem;padding:.45rem .85rem;background:var(--accent);color:#fff;text-decoration:none;border-radius:.45rem;font-weight:700}
+.drill a.btn:hover{filter:brightness(1.08)}
+.tabs{display:flex;flex-wrap:wrap;gap:.45rem;margin:1.1rem 0 .4rem}
+.tabs button{appearance:none;border:1px solid var(--border);background:#fff;color:var(--ink);padding:.42rem .85rem;border-radius:.45rem;font:inherit;font-weight:650;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.table-scroll{overflow:auto;border:1px solid var(--border);border-radius:.55rem;background:#fff;margin:.6rem 0 1rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{padding:.52rem .68rem;text-align:left;vertical-align:top;border-bottom:1px solid var(--border)}
+thead th{background:#e1efed;font-weight:750}
+tbody tr:nth-child(even){background:#f8fbfa}
+pre{background:#122427;color:#e7f3f1;padding:.85rem 1rem;border-radius:.55rem;overflow:auto;font-size:.86rem;line-height:1.48}
+code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.9em}
+svg{width:100%;height:auto;display:block}
+[hidden]{display:none!important}
+@media(max-width:56rem){.kpis,.drill{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p class="eyebrow">TeachArena (eduharness) · Stage 4 Closeout</p>
+  <h1>Agent Eval &amp; Harness 门控基础设施 · 项目总览报告</h1>
+  <p class="lead">本离线总览汇总阶段 1–3 实测原件与门禁裁决，评估「教师 = 模型 + harness」改动应采用还是拦下，并支持逐层点进具体 run 复核页定位原文消息 <code>#n</code>。</p>
+</header>
+
+<section class="kpis" aria-label="核心结论概览">
+  <div class="kpi"><div class="label">二元证据评分器</div><div class="val">6 维 19 题 · v3</div><span class="pill ok">带边界采用 · 51/51 验真</span></div>
+  <div class="kpi"><div class="label">同台裁判选型</div><div class="val">Gemini 3.8 Flash</div><span class="pill ok">首次合规 107/108 · S1 15/15</span></div>
+  <div class="kpi"><div class="label">高压测试与基线定位</div><div class="val">48 格余量扫描</div><span class="pill ok">2 类高压画像 · 锁定 A2 (1/48)</span></div>
+  <div class="kpi"><div class="label">三臂 A/B 门禁拦截</div><div class="val">拦下不成熟升级</div><span class="pill warn">V −0.208 触发 · 决定不采用</span></div>
+</section>
+
+<section class="card">
+  <h2>评测与门控流水线</h2>
+  
+<svg viewBox="0 0 920 116" role="img" aria-label="TeachArena 评测与门控流程图">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#006763"/>
+    </marker>
+  </defs>
+  <rect x="8" y="18" width="156" height="76" rx="10" fill="#dff3ee" stroke="#006763" stroke-width="1.5"/>
+  <text x="86" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#132a2e">1. 对话生成</text>
+  <text x="86" y="71" text-anchor="middle" font-size="11.5" fill="#4d6469">教师 + 学生 (9 条公开消息)</text>
+  <line x1="164" y1="56" x2="192" y2="56" stroke="#006763" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="196" y="18" width="164" height="76" rx="10" fill="#ffffff" stroke="#006763" stroke-width="1.5"/>
+  <text x="278" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#132a2e">2. 二元裁判</text>
+  <text x="278" y="71" text-anchor="middle" font-size="11.5" fill="#4d6469">6 维 19 题 + #n 证据绑定</text>
+  <line x1="360" y1="56" x2="388" y2="56" stroke="#006763" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="392" y="18" width="156" height="76" rx="10" fill="#ffffff" stroke="#006763" stroke-width="1.5"/>
+  <text x="470" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#132a2e">3. 代码计分</text>
+  <text x="470" y="71" text-anchor="middle" font-size="11.5" fill="#4d6469">scoreBinary 定档 / N/A 单列</text>
+  <line x1="548" y1="56" x2="576" y2="56" stroke="#006763" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="580" y="18" width="156" height="76" rx="10" fill="#f8ece2" stroke="#7c3a14" stroke-width="1.5"/>
+  <text x="658" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#7c3a14">4. 预登记门禁</text>
+  <text x="658" y="71" text-anchor="middle" font-size="11.5" fill="#7c3a14">配对差 / 话术负对照 / 盲核</text>
+  <line x1="736" y1="56" x2="764" y2="56" stroke="#006763" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="768" y="18" width="144" height="76" rx="10" fill="#dff3ee" stroke="#006763" stroke-width="1.5"/>
+  <text x="840" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="#132a2e">5. 收据自证</text>
+  <text x="840" y="71" text-anchor="middle" font-size="11.5" fill="#4d6469">--verify-run &amp; 离线复核</text>
+</svg>
+</section>
+
+<section class="drill" aria-label="单次运行钻取入口">
+  <article class="card">
+    <p class="eyebrow">Drill-down · 阶段 1</p>
+    <h3>S1 v3 复测 · <code>round2-binary-v3-freeze-gemini-01</code></h3>
+    <p class="muted">共 51 格 · 请求数 307 · 验真状态：<strong>已验真</strong> · S1 坏教师区分 15/15 全过、五组复跑成对；结合定向扰动探针标定三条边界，确定为<strong>带边界采用</strong>。</p>
+    <a class="btn" href="runs/round2-binary-v3-freeze-gemini-01.html">点进 51 格证据矩阵与原文回读 →</a>
+  </article>
+  <article class="card">
+    <p class="eyebrow">Drill-down · 阶段 3</p>
+    <h3>阶段 3 dev v2 三臂 · <code>stage3-dev-v2-real-01</code></h3>
+    <p class="muted">共 72 格 · 请求数 954 · 验真状态：<strong>已验真</strong> · A2 从 1/24 升至 12/24，防退化护栏捕获 V 维退化 −0.208（越过 −0.125 线），门禁作出<strong>不采用</strong>决定并定位两项工程根因。</p>
+    <a class="btn" href="runs/stage3-dev-v2-real-01.html">点进三臂配对差与对话原文 →</a>
+  </article>
+</section>
+
+<nav class="tabs" aria-label="分阶段视图切换">
+  <button type="button" data-stage-tab="all" aria-selected="true">全部阶段总览</button>
+  <button type="button" data-stage-tab="stage1" aria-selected="false">阶段 1 · 评分器与选型</button>
+  <button type="button" data-stage-tab="stage2" aria-selected="false">阶段 2 · 高压学生与余量</button>
+  <button type="button" data-stage-tab="stage3" aria-selected="false">阶段 3 · 三臂 A/B 门禁</button>
+</nav>
+
+<section data-stage-panel="stage1" class="card">
+  <h2>阶段 1：6 维 19 题二元尺子、同台选型与带边界采用</h2>
+  <p>建立 <code>M/S/A/P/R/V</code> 6 维 19 题是非证据尺子，裁判输出布尔值与 <code>#n</code> 槽位，<code>scoreBinary</code> 代码定档。排查定位 OpenRouter 直连 HTTP 403 地区限制后，通过 <code>--proxy-from-env</code>（<code>HTTPS_PROXY</code>）完成三候选同台对比与 v3 冻结复测。</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>候选裁判模型</th><th>合规格</th><th>完整 S1</th><th>坏教师方向 / 四目标</th><th>确定项错 / 缺判</th><th>首次结构合规 → 重试</th><th>耗时 p50 / p90</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Gemini 3.8 Flash（代理）</strong></td><td>18/18</td><td>15/15</td><td>3/3 / 全 3/3</td><td>0/2 / 无缺判</td><td>107/108 → 108/108</td><td>2,383 / 2,983 ms</td></tr>
+        <tr><td>Claude Haiku 5.5（代理）</td><td>7/18</td><td>7/15</td><td>0/3 / 0,2,2,1</td><td>0/2 / 缺 57/99</td><td>56/108 → 60/108</td><td>6,142 / 7,665 ms</td></tr>
+        <tr><td>Qwen3 235B Instruct（直连）</td><td>7/18</td><td>7/15</td><td>0/3 / 全 0/3</td><td>11/2 / 缺 39/99</td><td>63/108 → 66/108</td><td>2,940 / 4,950 ms</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>v3 复测与三条显式边界</strong>（<code>round2-binary-v3-freeze-gemini-01</code>，51 格 / 307 请求）：S1 坏教师区分 15/15 全过、五组复跑成对；在极端构造扰动探针上，V2（3/3、2/2）全过，同时标定出 V1（2/3）、A1（1/2）、A2（1/2）与 <code>normal</code> 扰动组（1/2/1/0）的边界位置，据此确定 <code>e1-binary-v3</code> 为<strong>带边界采用</strong>并在后续阶段配对护栏：</p>
+  <ul>
+    <li><strong>边界 1（A1 跟算误报）</strong>：<code>A1-only-proposes</code> 中教师展开式子后学生跟算，v3 两遍判 Yes（特异度 1/2）。</li>
+    <li><strong>边界 2（V1 事后话术敏感）</strong>：<code>V2-normal-claim</code> #6 宣称与 <code>V1-claim-none</code> #8 否认使 v3 漏掉原有 #4 检查。</li>
+    <li><strong>边界 3（同输入单次判决翻转与 A2 覆盖）</strong>：同请求重复配对中支持维分档翻转 <code>22/89 (24.72%)</code>、表征维 <code>15/99 (15.15%)</code>，其余四维 <code>0/99</code>；修订口径下 A2 实测覆盖 1 个正例（未含事后否认格），阶段 3 据此引入跨家族 AI 盲核与原文抽查护栏。</li>
+  </ul>
+</section>
+
+<section data-stage-panel="stage2" class="card">
+  <h2>阶段 2a &amp; 2b：高压学生保真验证与开发集余量检查</h2>
+  <p>为打破配合型学生满分天花板，阶段 2a 采用跨家族 <code>hard-learner-audit-v5-gemini</code> AI 审核器校验三类高压学生画像，并关闭学生 DeepSeek 推理消除自证伪；阶段 2b 在 8 道 dev 题对旧线性教师 <code>normal</code> 完成 48/48 格余量扫描。</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>阶段 2a 高压学生画像（48 条复跑）</th><th>重复</th><th>给答案</th><th>针对错因</th><th>独立解释</th><th>两题可教性</th><th>使用结论</th></tr></thead>
+      <tbody>
+        <tr><td>顽固误解型 <code>stubborn</code></td><td>4/4</td><td>4/4</td><td>4/4</td><td>4/4</td><td>2/2、2/2</td><td><span class="pill ok">可用</span></td></tr>
+        <tr><td>伸手要答案型 <code>answer-seeker</code></td><td>4/4</td><td>4/4</td><td>4/4</td><td>4/4</td><td>2/2、2/2</td><td><span class="pill ok">可用</span></td></tr>
+        <tr><td>假装懂了型 <code>pretender</code></td><td>2/4</td><td>4/4</td><td>4/4</td><td>2/4</td><td>2/2、2/2</td><td><span class="pill bad">不可用（停用）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>阶段 2a 审核基线</strong>：Gemini 审核器验证集两遍各 <code>40/40</code>、难例 <code>24/24</code>、跨遍一致 <code>40/40</code>（对照 Qwen <code>21/24 = 87.5%</code>）；甲组小样关闭推理使自证伪从 <code>2/8</code> 降至 <code>0/8</code>。</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>阶段 2b 六维余量（48 格 / 674 请求）</th><th>适用格</th><th>适用均分</th><th>失分合计</th><th>两遍同档</th><th>历史同输入翻转</th><th>候选定位</th></tr></thead>
+      <tbody>
+        <tr><td><strong>交还主动权（重点 A2）</strong></td><td>48/48</td><td>1.021</td><td>47 / 96</td><td>23/24</td><td>0/99</td><td><span class="pill ok">主目标（A1 48/48，A2 1/48）</span></td></tr>
+        <tr><td>误解修复</td><td>48/48</td><td>1.333</td><td>32 / 96</td><td>16/24</td><td>0/99</td><td>备选</td></tr>
+        <tr><td>增加与撤去支持</td><td>39/48</td><td>0.487</td><td>59 / 78</td><td>10/24</td><td>22/89</td><td>先作诊断（噪声高）</td></tr>
+        <tr><td>保留有益试错</td><td>48/48</td><td>2.000</td><td>0 / 96</td><td>24/24</td><td>0/99</td><td>已封顶</td></tr>
+        <tr><td>表征转换 / 验证或迁移</td><td>8/48 · 48/48</td><td>1.500 · 1.875</td><td>4 / 16 · 6 / 96</td><td>18/24 · 21/24</td><td>15/99 · 0/99</td><td>暂不作主目标</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section data-stage-panel="stage3" class="card">
+  <h2>阶段 3：预登记三臂 A/B 门禁拦下状态机升级（不采用）</h2>
+  <p>在 8 道 dev 题 × 3 可用画像对基线 B（线性教师）、候选 S（状态驱动教师）与负对照 C（B 仅改 #8 话术）执行预登记三臂 A/B，辅以 Haiku 跨家族 AI 盲核与防退化判线。按预登记“dev 最多 2 版、不反复调到过”的防过拟合纪律止于 v2，<code>sealed</code> 留出集与训练标签全程未触碰。</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>预登记门禁项</th><th>要求</th><th>dev v1（72 格）</th><th>dev v2（72 格）</th></tr></thead>
+      <tbody>
+        <tr><td>机判完整性</td><td>三臂 24/24 对全配对</td><td>72/72 格验真</td><td>72/72 格验真（盲核另判）</td></tr>
+        <tr><td>A 交还主动权（主目标）</td><td>S − B &ge; +0.25</td><td>+0.000（未过）</td><td>+0.042 / +1/24（未过）</td></tr>
+        <tr><td>V 验证或迁移（防退化）</td><td>S − B &ge; −0.125</td><td>+0.042（过）</td><td><strong>−0.208 / −5/24（未过，触发拦截）</strong></td></tr>
+        <tr><td>P 保留有益试错 / 总适用分率</td><td>&ge; −0.05 且无 2→0 / &ge; −5.00 pp</td><td>+0.000 / +3.785 pp（过）</td><td>+0.000 / −2.847 pp（过）</td></tr>
+        <tr><td>C 均差 / 假命中 / 有效暴露</td><td>C−B &le; +0.05 / 0 假命中 / 各 &ge; 2/8</td><td>+0.000 / 0 / 0/8</td><td>−0.042 / 0 确认（1 待定）/ 顽固 1/8 伸手 1/8</td></tr>
+        <tr><td>Haiku 跨家族 AI 盲核</td><td>真命中 &ge; 90% 且必审齐备</td><td>0/0（无阳性触发）</td><td>16 项均 HTTP 200，2 项合规（14 项超 400 字符契约拒收）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul>
+    <li><strong>行为信号与门禁拦截</strong>：v2 候选实际交权 18 次，机判 A2 从 B 的 <code>1/24</code> 升至 S 的 <code>12/24</code>（F12-B／伸手获合规盲核实做正例），但防退化 V 维掉分 <code>−0.208</code> 与 A 差 <code>+0.042</code> 已触发拦截；系统按预登记止步并作出<strong>不采用</strong>决定，固定交权模板（<code>contracts/teacher/handoff.mjs</code>）仅隔离留存于历史实验路径供审计回溯，不接入默认教师或后续复用。</li>
+    <li><strong>两个根因级工程定位</strong>：（1）v3 拆维 A 提示缺失同链择证偏好，导致 <code>10/12</code> 个 A2=Yes 格因 A1/A2 分引不同消息仍计 A=1 分；（2）16 次必审 Haiku 盲核均返回 HTTP 200，其中 14 份 <code>reason</code> 长 430–673 字符超出本地预设的 400 字符上限而被 schema 拒收，导致盲核覆盖不足，已定位为契约长度配置问题并记入下一轮修复清单。</li>
+  </ul>
+  <p class="muted">口径说明：阶段 2a Gemini 审核与阶段 3 Haiku 盲核均为跨家族 AI 审核，不替代独立人工复核。</p>
+</section>
+
+<section class="card">
+  <h2>可复现导出命令</h2>
+  <p class="muted">本报告包全部 HTML 均由仓库脚本离线导出，不依赖外部样式、字体或脚本 CDN：</p>
+  <pre><code># 从 S1 与阶段 3 运行目录导出项目总览与钻取报告（若阶段 3 归档位于外部目录，将 --stage3-root 替换为实际路径）
+node scripts/export-project-report.mjs --out-dir docs/report --s1-run round2-binary-v3-freeze-gemini-01 --s1-root runs --stage3-run stage3-dev-v2-real-01 --stage3-root runs/stage3-dev --force
+node src/cli.mjs --export-report round2-binary-v3-freeze-gemini-01 --run-root runs --back-href ../index.html --out docs/report/runs/round2-binary-v3-freeze-gemini-01.html</code></pre>
+</section>
+</main>
+<script>
+const tabs = [...document.querySelectorAll('[data-stage-tab]')];
+const panels = [...document.querySelectorAll('[data-stage-panel]')];
+function selectTab(target) {
+  for (const btn of tabs) btn.setAttribute('aria-selected', String(btn.dataset.stageTab === target));
+  for (const panel of panels) panel.hidden = target !== 'all' && panel.dataset.stagePanel !== target;
+}
+document.addEventListener('click', event => {
+  const btn = event.target.closest('[data-stage-tab]');
+  if (btn) selectTab(btn.dataset.stageTab);
+});
+</script>
+</body>
+</html>

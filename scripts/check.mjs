@@ -11,6 +11,10 @@ const before = snapshot();
 if (!scope) checkRulerChange();
 const boundary = spawnSync(process.execPath,['scripts/check-boundaries.mjs'],{cwd:checkout,stdio:'inherit'});
 if (boundary.status !== 0) process.exit(1);
+if (!scope) {
+  const docs = spawnSync(process.execPath,['scripts/check-docs.mjs'],{cwd:checkout,stdio:'inherit'});
+  if (docs.status !== 0) process.exit(1);
+}
 const safeTests = ['contracts/learner/contract.test.mjs', 'test/credentials.test.mjs', 'test/hard-learners.test.mjs', 'test/models.test.mjs', 'test/real-preflight.test.mjs'];
 const result = spawnSync(process.execPath,['--test','--test-reporter=tap',...(scope ? safeTests : [])],{cwd:checkout,encoding:'utf8',maxBuffer:8*1024*1024});
 process.stdout.write(result.stdout ?? '');
