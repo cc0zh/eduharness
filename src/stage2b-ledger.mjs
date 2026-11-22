@@ -5,7 +5,15 @@ import { splitMaxAttempts } from './split-judge-state.mjs';
 import { stage2bAttemptLimits, stage2bCallId, stage2bStop } from './stage2b-plan.mjs';
 
 export function stage2bLedger(limits, initialConcurrency, persist = () => {}) {
-  const roleLimits = stage2bAttemptLimits();
+  return createAdmissionLedger(limits, initialConcurrency, persist, {
+    roleLimits: stage2bAttemptLimits(), stopRules: stage2bStop, callIdFor: stage2bCallId,
+    calls: role => ({ teacher: policy.teacher.requestsPerTurn, learner: 1, judge: splitDimensions.length })[role],
+    maxAttempts: role => role === 'judge' ? splitMaxAttempts : Infinity,
+    allowedTurn: (role, turn) => turn >= 1 && turn <= rounds && (role !== 'judge' || turn === rounds),
+  });
+}
+
+export function createAdmissionLedger(limits, initialConcurrency, persist, { roleLimits, stopRules, callIdFor, calls, maxAttempts, allowedTurn }) {
   const used = { attempts: 0, requestedOutputTokens: 0 };
   const attempts = new Map(), completions = new Map(), logical = new Map(), active = new Set(), sent = [], downshifts = [];
   let stop = null, providerFailures = 0, consecutiveFailedCells = 0, failedCells = 0;
@@ -18,12 +26,11 @@ export function stage2bLedger(limits, initialConcurrency, persist = () => {}) {
     const { type, callId, limit, coordinates, failureKind, rateLimited, folder, status } = event;
     if (type === 'reserve' || type === 'budget_stop') {
       const { role, turn, call, attempt } = coordinates;
-      const maxCall = { teacher: policy.teacher.requestsPerTurn, learner: 1, judge: splitDimensions.length }[role];
       const base = callId.slice(0, callId.lastIndexOf(':'));
-      requireThat(!stop && callId === stage2bCallId(coordinates) && limit === roleLimits[role] && limit > 0
-        && Number.isInteger(turn) && turn >= 1 && turn <= rounds && (role !== 'judge' || turn === rounds)
-        && Number.isInteger(call) && call > 0 && call <= maxCall && Number.isInteger(attempt) && attempt === (logical.get(base) ?? 0) + 1
-        && (role !== 'judge' || attempt <= splitMaxAttempts) && !attempts.has(callId) && !completions.has(coordinates.folder)
+      requireThat(!stop && callId === callIdFor(coordinates) && limit === roleLimits[role] && limit > 0
+        && Number.isInteger(turn) && allowedTurn(role, turn)
+        && Number.isInteger(call) && call > 0 && call <= calls(role) && Number.isInteger(attempt) && attempt === (logical.get(base) ?? 0) + 1
+        && attempt <= maxAttempts(role, call) && !attempts.has(callId) && !completions.has(coordinates.folder)
         && !active.has(coordinates.folder) && active.size < concurrency, `invalid reservation: ${callId}`);
       if (type === 'budget_stop') {
         requireThat(!covers(limit), `premature budget stop: ${callId}`);
@@ -51,7 +58,7 @@ export function stage2bLedger(limits, initialConcurrency, persist = () => {}) {
       if (record.sent) {
         providerFailures = failureKind === 'provider_failure' ? providerFailures + 1 : 0;
         if (rateLimited && concurrency > 1) downshifts.push({ from: concurrency, to: --concurrency, callId });
-        if (providerFailures >= stage2bStop.providerFailures) exhausted('consecutive_provider_failures', record.coordinates.folder, callId);
+        if (providerFailures >= stopRules.providerFailures) exhausted('consecutive_provider_failures', record.coordinates.folder, callId);
       }
     } else if (type === 'cell') {
       requireThat(!completions.has(folder) && !active.has(folder) && ['scored', 'failed', 'paused'].includes(status)
@@ -60,8 +67,8 @@ export function stage2bLedger(limits, initialConcurrency, persist = () => {}) {
       if (status === 'failed') {
         consecutiveFailedCells++;
         failedCells++;
-        if (consecutiveFailedCells >= stage2bStop.consecutiveFailedCells) exhausted('consecutive_failed_cells', folder, callId);
-        else if (failedCells >= stage2bStop.failedCells) exhausted('failed_cells_limit', folder, callId);
+        if (consecutiveFailedCells >= stopRules.consecutiveFailedCells) exhausted('consecutive_failed_cells', folder, callId);
+        else if (failedCells >= stopRules.failedCells) exhausted('failed_cells_limit', folder, callId);
       } else if (status === 'scored') consecutiveFailedCells = 0;
     } else throw Error(`unknown stage 2b ledger event: ${type}`);
     try { persist(event); }
@@ -71,15 +78,15 @@ export function stage2bLedger(limits, initialConcurrency, persist = () => {}) {
   return {
     apply, attempts, completions, sent,
     reserve(coordinates, limit) {
-      const callId = stage2bCallId(coordinates);
-      if (stop) throw stopped('stage 2b batch stopped', { ...coordinates, callId });
+      const callId = callIdFor(coordinates);
+      if (stop) throw stopped('batch stopped', { ...coordinates, callId });
       const type = covers(limit) ? 'reserve' : 'budget_stop';
       apply({ type, callId, coordinates, limit });
       if (type === 'budget_stop') throw failure('budget_exhausted', { ...coordinates, callId }, 'remaining request budget cannot cover next attempt');
       return callId;
     },
     send(callId) {
-      if (stop) throw stopped('stage 2b batch stopped before send', { callId });
+      if (stop) throw stopped('batch stopped before send', { callId });
       apply({ type: 'send', callId });
     },
     settle(callId, failureKind, rateLimited) { apply({ type: 'settle', callId, failureKind, rateLimited }); },

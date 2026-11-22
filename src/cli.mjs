@@ -12,6 +12,7 @@ import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { bakeoffBudget, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario, judgeFreezeV4RunId, judgeFreezeV4Scenario, judgeFreezeV4SlotCount } from './judge-bakeoff-plan.mjs';
 import { stage2bScenario } from '../config/stage2b-headroom.mjs';
+import { stage3Scenario } from '../config/stage3.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
@@ -46,10 +47,11 @@ if (option('--export-report') >= 0) {
     emit({ verified: false, conclusion: 'invalid', missing: [], invalid: [error.message] });
     process.exitCode = 2;
   }
-} else if (optionValue('--scenario') === stage2bScenario) {
+} else if ([stage2bScenario, stage3Scenario].includes(optionValue('--scenario'))) {
   try {
-    const { stage2bCli } = await import('./stage2b-run.mjs');
-    const { value, exitCode } = await stage2bCli(argv);
+    const entry = optionValue('--scenario') === stage3Scenario
+      ? (await import('./stage3-run.mjs')).stage3Cli : (await import('./stage2b-run.mjs')).stage2bCli;
+    const { value, exitCode } = await entry(argv);
     emit(value);
     process.exitCode = exitCode;
   } catch (error) {

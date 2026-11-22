@@ -3,6 +3,7 @@ import { binaryQuestions, bindBinary } from '../contracts/judge/binary.mjs';
 import { binaryDimensionSchema, splitDimensions } from '../contracts/judge/binary-v3.mjs';
 
 const response = text => fauxAssistantMessage([fauxText(text)]);
+export { response as fauxReply };
 const learner = text => response(JSON.stringify({ text }));
 export const fauxJson = value => response(JSON.stringify(value));
 export function binaryOfflineResponses(condition) {

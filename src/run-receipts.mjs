@@ -15,10 +15,12 @@ import { verifyS1Artifacts } from './s1-binary-verification.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { stage2bScenario } from '../config/stage2b-headroom.mjs';
+import { stage3Scenario } from '../config/stage3.mjs';
 import { verifyStage2bArtifacts } from './stage2b-verification.mjs';
+import { verifyStage3Artifacts } from './stage3-verification.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--path-addendum', '--path-addendum-sha256', '--concurrency', '--judge-policy', '--learner-fix']);
-const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario, stage2bScenario]);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--path-addendum', '--path-addendum-sha256', '--concurrency', '--judge-policy', '--learner-fix', '--edition', '--estimate-id']);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario, stage2bScenario, stage3Scenario]);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -39,6 +41,7 @@ function parameterSummary(argv) {
     const safe = ['--mode', '--scenario', '--phase', '--harness'].includes(name) && safeValues.has(value)
       || name === '--judge-policy' && (Object.hasOwn(judgeCandidates, value) || Object.hasOwn(splitJudgeCandidates, value))
       || name === '--learner-fix' && learnerFixSelections.includes(value)
+      || name === '--edition' && ['1', '2'].includes(value)
       || (name.startsWith('--max-') || name === '--concurrency') && /^\d+$/.test(value)
       || name === '--freeze' && /^[a-f0-9]{40}$/.test(value)
       || ['--preregistration-sha256', '--path-addendum-sha256'].includes(name) && sha256(value);
@@ -240,8 +243,9 @@ export function verifyRun(root, id) {
   const evaluationReceiptPath = join(root, '_receipts', `${id}.json`);
   const launchScenario = start?.parameters?.values?.scenario;
   const stage2bReceipt = launchScenario === stage2bScenario;
-  let stage2b;
-  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || stage2bReceipt
+  const stage3Receipt = launchScenario === stage3Scenario;
+  let stage2b, stage3;
+  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || stage2bReceipt || stage3Receipt
     || ['ruler-expand', s1Scenario, hardLearnerScenario].includes(launchScenario) && typeof receipt.acceptance === 'boolean');
   if (requiresAnchor && !sha256(receipt.evaluationSha256)) invalid.push('process receipt missing valid evaluationSha256');
   if (receipt && (requiresAnchor || existsSync(evaluationReceiptPath))) {
@@ -261,7 +265,10 @@ export function verifyRun(root, id) {
           else invalid.push(`${path} could not be read`);
         }
       };
-      if (stage2bReceipt || evaluation.scenario === stage2bScenario) {
+      if (stage3Receipt || evaluation.scenario === stage3Scenario) {
+        try { stage3 = verifyStage3Artifacts({ id, start, receipt, evaluation, requests, checkArtifact }); }
+        catch (error) { invalid.push(error.message); }
+      } else if (stage2bReceipt || evaluation.scenario === stage2bScenario) {
         try { stage2b = verifyStage2bArtifacts({ id, start, receipt, evaluation, requests, checkArtifact }); }
         catch (error) { invalid.push(error.message); }
       } else if (launchScenario === hardLearnerScenario || evaluation.scenario === hardLearnerScenario) {
@@ -315,5 +322,6 @@ export function verifyRun(root, id) {
     ...(receipt && { exitCode: receipt.exitCode, endedAt: receipt.endedAt, requestCount: receipt.requestCount, acceptance: receipt.acceptance }),
     ...(requests && { observedRequestCount }),
     ...(stage2bReceipt && { scenario: stage2bScenario, ...(stage2b && { stage2b }) }),
+    ...(stage3Receipt && { scenario: stage3Scenario, ...(stage3 && { stage3 }) }),
   };
 }

@@ -32,9 +32,12 @@ export function workingJudgeFingerprint(sources) {
   return hash({ ruler, judgeOutputContract, policy, routes, judgeTransport, sources: judgingSources });
 }
 
-export function createWorkingJudge({ mode, responses, save, recorder, cell, beforeAttempt }) {
+export function createWorkingJudge({ mode, responses, save, recorder, cell, beforeAttempt, singleAgencyDecision = false }) {
   if (!['offline', 'real'].includes(mode)) throw new Error('working judge requires an explicit mode');
   const models = new Models({ mode, responses, save, recorder, cell, beforeAttempt, judgePolicy, roles: ['judge'],
     judgeProxySource: mode === 'real' ? workingJudge.judgeTransport.proxySource : undefined });
-  return (messages, scope) => gradeBinaryDimension(models, messages, { ...scope, ruler: workingJudge.ruler });
+  const judge = (messages, scope) => gradeBinaryDimension(models, messages, {
+    ...scope, ruler: workingJudge.ruler, singleAttempt: singleAgencyDecision && scope.dimension === 'agency_handoff',
+  });
+  return Object.assign(judge, { close: () => models.close() });
 }
