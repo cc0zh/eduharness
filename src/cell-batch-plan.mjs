@@ -11,7 +11,7 @@ import { splitBinaryIdentityVersion, splitBinaryOutputContract, splitBinaryRuler
 import { bind, directDimension, dimensions, parseNumberedJudgement, rubric } from '../contracts/judge/schema.mjs';
 import { assessS1, s1Path, s1Plan, s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, contrastFolders, judgeContrastScenario } from './judge-contrast-plan.mjs';
-import { bakeoffBudget, judgeBakeoffScenario } from './judge-bakeoff-plan.mjs';
+import { bakeoffBudget, judgeBakeoffScenario, validateBakeoffProxyIdentity } from './judge-bakeoff-plan.mjs';
 import { matchesJudgeParameters, matchesReportedRoute } from './judge-transport.mjs';
 
 export const batchVersion = 'cell-batch-v1';
@@ -51,6 +51,7 @@ export function validateBatchPlan(manifest) {
     : scenario === 'E2-judge-only' && same(planned, ['no_teach']) ? ['no_teach'] : contrast ? planned : scenario === s1Scenario ? s1Plan : cellIds;
   requireThat(same(planned, expected) && same(identity.planned, expected), 'batch plan differs from evaluation identity');
   requireThat(identityId === hash({ mode, scenario, identity }) && same(identity.limits, manifest.limits) && same(identity.dialogueSource, manifest.source), 'evaluation identity or budget mismatch');
+  validateBakeoffProxyIdentity(manifest);
   const callPolicy = batchPolicy(manifest);
   if (contrast) {
     requireThat(same(batchFolders(manifest), contrastFolders) && same(manifest.budget, split ? bakeoffBudget(callPolicy) : contrastBudget(callPolicy)), 'judge contrast sample plan or budget differs');

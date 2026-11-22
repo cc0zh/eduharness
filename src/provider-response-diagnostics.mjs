@@ -8,14 +8,26 @@ const QUOTED_SECRET_FIELD = new RegExp(`(["'])(${SECRET_FIELD_NAMES})\\1(\\s*:\\
 const PLAIN_QUOTED_SECRET_FIELD = new RegExp(`\\b(${SECRET_FIELD_NAMES})(\\s*[:=]\\s*)(["'])((?:\\\\.|(?!\\3)[\\s\\S])*)(?:\\3|$)`, 'gi');
 const PLAIN_SECRET_ASSIGNMENT = new RegExp(`(?<!["'])\\b(${SECRET_FIELD_NAMES})(\\s*[:=]\\s*)(?:(Bearer|Basic)\\s+)?([^\\s,;}"']+)`, 'gi');
 const AUTH_SCHEME = /^\s*(Bearer|Basic)\s+/i;
+const PROXY_USERINFO = /(\bhttps?:\/\/)[^\s/@:]+(?::[^\s/@]*)?@/gi;
 
-function redactText(value) {
+function scrubSecrets(value, secrets) {
+  return secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), value);
+}
+
+function sortedSecrets(secrets) {
+  return (Array.isArray(secrets) ? secrets : []).filter(secret => typeof secret === 'string' && secret.length > 0)
+    .sort((left, right) => right.length - left.length);
+}
+
+function redactText(value, secrets = []) {
   const redactField = (name, separator, quote, fieldValue, keyQuote = '') => {
     const scheme = AUTH_SCHEME.exec(fieldValue)?.[1];
     return `${keyQuote}${name}${keyQuote}${separator}${quote}${scheme ? `${scheme} ` : ''}[REDACTED]${quote}`;
   };
-  return value.replace(QUOTED_SECRET_FIELD, (_match, quote, name, separator, valueQuote, fieldValue) =>
-    redactField(name, separator, valueQuote, fieldValue, quote))
+  return scrubSecrets(value, secrets)
+    .replace(PROXY_USERINFO, '$1[PROXY CREDENTIALS REDACTED]@')
+    .replace(QUOTED_SECRET_FIELD, (_match, quote, name, separator, valueQuote, fieldValue) =>
+      redactField(name, separator, valueQuote, fieldValue, quote))
     .replace(PLAIN_QUOTED_SECRET_FIELD, (_match, name, separator, valueQuote, fieldValue) =>
       redactField(name, separator, valueQuote, fieldValue))
     .replace(PLAIN_SECRET_ASSIGNMENT, (_match, name, separator, scheme) => `${name}${separator}${scheme ? `${scheme} ` : ''}[REDACTED]`)
@@ -23,27 +35,29 @@ function redactText(value) {
     .replace(TOKEN_TEXT, '[REDACTED]');
 }
 
-function redactValue(value, fieldName = '') {
+function redactValue(value, fieldName = '', secrets = []) {
   if (SENSITIVE_NAME.test(fieldName)) return '[REDACTED]';
-  if (typeof value === 'string') return redactText(value);
+  if (typeof value === 'string') return redactText(value, secrets);
   if (Array.isArray(value)) {
     if (value.length === 2 && typeof value[0] === 'string'
       && SENSITIVE_NAME.test(value[0].replaceAll('_', '-'))) return [value[0], '[REDACTED]'];
-    return value.map(item => redactValue(item));
+    return value.map(item => redactValue(item, '', secrets));
   }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactValue(item, key)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [scrubSecrets(key, secrets), redactValue(item, key, secrets)]));
   }
   return value;
 }
 
-function diagnosticHeaders(headers) {
+export const redactProviderValue = (value, secrets) => redactValue(value, '', sortedSecrets(secrets));
+
+function diagnosticHeaders(headers, secrets = []) {
   const captured = {};
   headers?.forEach((value, name) => {
     const key = name.toLowerCase();
     if (!ALLOWED_HEADERS.has(key) && !key.startsWith('x-openrouter-')) return;
     if (SENSITIVE_NAME.test(key)) return;
-    captured[key] = redactText(value);
+    captured[scrubSecrets(key, secrets)] = redactText(value, secrets);
   });
   return Object.fromEntries(Object.entries(captured).sort(([left], [right]) => left.localeCompare(right)));
 }
@@ -92,19 +106,20 @@ function boundedUtf8(value, maxBytes) {
   return { value: '', truncated: true };
 }
 
-export async function captureProviderResponse(response, { maxBodyBytes = MAX_PROVIDER_DIAGNOSTIC_BODY_BYTES } = {}) {
+export async function captureProviderResponse(response, { maxBodyBytes = MAX_PROVIDER_DIAGNOSTIC_BODY_BYTES, secrets = [] } = {}) {
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1 || maxBodyBytes > MAX_PROVIDER_DIAGNOSTIC_BODY_BYTES) {
     throw new RangeError(`maxBodyBytes must be an integer from 1 through ${MAX_PROVIDER_DIAGNOSTIC_BODY_BYTES}`);
   }
+  const orderedSecrets = sortedSecrets(secrets);
   let body = '';
   let bodyTruncated = false;
   try {
     const read = await readBoundedBody(response, maxBodyBytes);
     bodyTruncated = read.truncated;
     try {
-      body = JSON.stringify(redactValue(JSON.parse(read.text)));
+      body = JSON.stringify(redactValue(JSON.parse(read.text), '', orderedSecrets));
     } catch {
-      body = redactText(read.text);
+      body = redactText(read.text, orderedSecrets);
     }
     const bounded = boundedUtf8(body, maxBodyBytes);
     body = bounded.value;
@@ -112,5 +127,5 @@ export async function captureProviderResponse(response, { maxBodyBytes = MAX_PRO
   } catch {
     body = '[REDACTED: response body unavailable]';
   }
-  return { status: response.status, headers: diagnosticHeaders(response.headers), body, bodyTruncated };
+  return { status: response.status, headers: diagnosticHeaders(response.headers, orderedSecrets), body, bodyTruncated };
 }

@@ -28,7 +28,7 @@ function parameterSummary(argv) {
   for (let index = 0; index < argv.length; index++) {
     const [name, inline] = argv[index].split('=', 2);
     if (!name.startsWith('--')) continue;
-    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost', '--generate-only', '--resume'].includes(name) ? name : '<unknown>');
+    flags.push(safeOptions.has(name) || ['--estimate-only', '--confirm-cost', '--generate-only', '--resume', '--proxy-from-env'].includes(name) ? name : '<unknown>');
     if (!safeOptions.has(name)) continue;
     const value = inline ?? (argv[index + 1]?.startsWith('--') ? undefined : argv[++index]);
     if (value === undefined) continue;

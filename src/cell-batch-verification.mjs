@@ -84,7 +84,9 @@ export function readBatch(root, id, { resume = false } = {}) {
         requireThat(candidate?.runId === (mode === 'real' ? id : identity.registeredId) && same(candidate.policy, identity.policy)
           && (mode === 'offline' || same(candidate.route, identity.routes.judge)) && plan.ruler === identity.ruler
           && same(candidate.limits, manifest.limits) && same(plan.sources, identity.sources) && same(plan.prior, manifest.source.prior)
-          && same(plan.queue, manifest.planned) && same(plan.stop, split.rules), 'judge bakeoff preregistration does not match the batch');
+          && same(plan.queue, manifest.planned) && same(plan.stop, split.rules)
+          && same(plan.judgeTransport, identity.judgeTransport) && plan.parentRegistrationSha256 === identity.parentRegistrationSha256,
+        'judge bakeoff preregistration does not match the batch');
       } else if (contrast) {
         const plan = contrastRegistration(markdown);
         requireThat(plan.runId === (mode === 'real' ? id : identity.registeredId) && plan.judgePolicy === identity.judgePolicy
@@ -117,6 +119,8 @@ export function readBatch(root, id, { resume = false } = {}) {
       requireThat(amount(concurrency, 1, 5), 'invalid startup concurrency');
       if (contrast) requireThat(launch.judge_policy === identity.judgePolicy && (mode !== 'real' || regSha && (processIndex > 1 || concurrency === 4)), 'judge contrast launch differs from registration');
       if (split) requireThat(launch.judge_policy === identity.judgePolicy && (mode !== 'real' || regSha && concurrency === bakeoffConcurrency), 'judge bakeoff launch differs from registration');
+      if (identity.judgeTransport) requireThat(indices.length === 1 && start.parameters.flags?.includes('--proxy-from-env')
+        && !start.parameters.flags?.includes('--resume'), 'proxy bakeoff requires one explicitly opted-in process');
       for (const [flag, limit, ceiling] of [['max_attempts', 'maxAttempts', 'maxCalls'], ['max_requested_output_tokens', 'maxRequestedOutputTokens', 'maxOutputTokens']]) {
         requireThat(Number(launch?.[flag] ?? manifest.budget[ceiling]) === manifest.limits[limit], `startup limits differ for ${flag}`);
       }

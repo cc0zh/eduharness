@@ -86,12 +86,15 @@ if (option('--export-report') >= 0) {
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
       phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
       harness: { type: 'string' }, 'source-root': { type: 'string' }, preregistration: { type: 'string' }, 'preregistration-sha256': { type: 'string' },
-      'judge-policy': { type: 'string' },
+      'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
     if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario].includes(values.scenario)) throw new Error('unknown scenario');
     const split = values.scenario === judgeBakeoffScenario;
     const contrast = split || values.scenario === judgeContrastScenario;
+    if (values['proxy-from-env'] && (!split || values.mode !== 'real' || !['haiku', 'gemini'].includes(values['judge-policy']) || values.resume)) {
+      throw new Error('--proxy-from-env is only for real Haiku or Gemini bakeoff runs without --resume');
+    }
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
@@ -113,6 +116,10 @@ if (option('--export-report') >= 0) {
       }
       contrastRunner = split ? await import('./judge-bakeoff.mjs') : await import('./judge-contrast.mjs');
       Object.assign(config, { judgePolicy, registration: values.preregistration, registrationDigest: values['preregistration-sha256'] });
+      if (values['proxy-from-env']) {
+        const { resolveOpenRouterProxySource } = await import('./openrouter-proxy.mjs');
+        config.judgeProxySource = resolveOpenRouterProxySource().source;
+      }
       ceiling = (split ? bakeoffBudget : contrastBudget)(candidates[judgePolicy].policy);
     } else if (values.scenario === s1Scenario) {
       if (!config.judgeOnly || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('S1-binary only admits --judge-only <frozen E2 run ID>');
@@ -166,6 +173,8 @@ if (option('--export-report') >= 0) {
         ...(s1Runner && { source: config.prepared.source }), ...(contrastRunner && { identityId: config.prepared.identityId,
           runId: config.prepared.candidate.runId, judgePolicy: config.judgePolicy, policyVersion: config.prepared.candidate.policy.version,
           route: config.prepared.candidate.route, preregistrationSha256: config.registrationDigest, concurrency: config.concurrency, retriesPerKind: config.prepared.plan.retriesPerKind,
+          ...(config.prepared.identity.judgeTransport && { judgeTransport: config.prepared.identity.judgeTransport,
+            parentRegistrationSha256: config.prepared.identity.parentRegistrationSha256 }),
           ...(config.prepared.plan.stop && { stop: config.prepared.plan.stop, maxAttemptsPerDimension: config.prepared.plan.maxAttemptsPerDimension }) }),
         ...rulerRunner?.holdoutEstimate(config.prepared) });
       else if (!process.exitCode) {

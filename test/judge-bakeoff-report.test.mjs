@@ -328,3 +328,86 @@ test('rendered candidate detail links every started cell and attempt to the veri
   assert.match(main, /\[detail\]\(qwen-report\.md\)/);
   assert.match(main, /108/);
 });
+
+const ORIGINAL_DIGEST = '46395637d0dfc7e4a382117f6818f4dc7ecec9848a4c312a0d533f5e021d8114';
+const ADDENDUM_DIGEST = 'c'.repeat(64);
+
+function proxyEntry(key, { id, mode = 'real', verified = true, digest, judgeTransport, parentRegistrationSha256,
+  planned = plan, table = expectations } = {}) {
+  const identity = {
+    ...(digest !== undefined && { preregistrationSha256: digest }),
+    ...(judgeTransport !== undefined && { judgeTransport }),
+    ...(parentRegistrationSha256 !== undefined && { parentRegistrationSha256 }),
+  };
+  return { key, batch: { manifest: { id: id ?? `round2-bakeoff-${key}-proxy-01`, mode, identity, planned } },
+    verification: { verified }, expectations: table };
+}
+
+function proxySet(overrides = {}) {
+  return [
+    proxyEntry('haiku', { id: 'round2-bakeoff-haiku-proxy-01', digest: ADDENDUM_DIGEST,
+      judgeTransport: { proxied: true, proxySource: 'HTTPS_PROXY' }, parentRegistrationSha256: ORIGINAL_DIGEST, ...overrides.haiku }),
+    proxyEntry('gemini', { id: 'round2-bakeoff-gemini-proxy-01', digest: ADDENDUM_DIGEST,
+      judgeTransport: { proxied: true, proxySource: 'HTTPS_PROXY' }, parentRegistrationSha256: ORIGINAL_DIGEST, ...overrides.gemini }),
+    proxyEntry('qwen', { id: 'round2-bakeoff-qwen-01', digest: ORIGINAL_DIGEST, ...overrides.qwen }),
+  ];
+}
+
+const proxyArgs = overrides => ({ entries: proxySet(overrides), proxyAddendumSha256: ADDENDUM_DIGEST,
+  originalRegistrationSha256: ORIGINAL_DIGEST });
+
+test('proxy provenance accepts a matching real verified cohort with correct parent, addendum and transport', () => {
+  assert.equal(typeof report.proxyProvenance, 'function', 'proxyProvenance must be exported');
+  const result = report.proxyProvenance(proxyArgs());
+  assert.equal(result.cohort, 'proxy-vs-original');
+  assert.equal(result.plannedCount, 18);
+  assert.equal(result.proxyAddendumSha256, ADDENDUM_DIGEST);
+  assert.equal(result.originalRegistrationSha256, ORIGINAL_DIGEST);
+  assert.equal(result.candidates.haiku.cohort, 'proxy');
+  assert.equal(result.candidates.haiku.runId, 'round2-bakeoff-haiku-proxy-01');
+  assert.equal(result.candidates.haiku.preregistrationSha256, ADDENDUM_DIGEST);
+  assert.equal(result.candidates.haiku.parentRegistrationSha256, ORIGINAL_DIGEST);
+  assert.deepEqual(result.candidates.haiku.judgeTransport, { proxied: true, proxySource: 'HTTPS_PROXY' });
+  assert.equal(result.candidates.gemini.cohort, 'proxy');
+  assert.equal(result.candidates.qwen.cohort, 'original');
+  assert.equal(result.candidates.qwen.preregistrationSha256, ORIGINAL_DIGEST);
+  assert.equal(result.candidates.qwen.parentRegistrationSha256, null);
+  assert.equal(result.candidates.qwen.judgeTransport, null);
+  assert.match(result.historicalOriginals, /not measured/i);
+});
+
+test('proxy provenance fails closed when a run is missing, unverified, offline or misregistered', () => {
+  assert.throws(() => report.proxyProvenance({ ...proxyArgs(), entries: proxySet().slice(0, 2) }), /three runs/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ haiku: { verified: false } })), /verified/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ gemini: { mode: 'offline' } })), /real/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ haiku: { digest: 'a'.repeat(64) } })), /addendum/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ qwen: { digest: ADDENDUM_DIGEST } })), /original/);
+  assert.throws(() => report.proxyProvenance({ ...proxyArgs(), proxyAddendumSha256: 'not-a-digest' }), /addendum/);
+});
+
+test('proxy provenance fails closed when proxy transport, parent or original identity is wrong', () => {
+  assert.throws(() => report.proxyProvenance(proxyArgs({ haiku: { judgeTransport: undefined } })), /judgeTransport/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ gemini: { judgeTransport: { proxied: false, proxySource: 'HTTPS_PROXY' } } })), /proxied/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ haiku: { judgeTransport: { proxied: true } } })), /proxySource/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ haiku: { parentRegistrationSha256: 'b'.repeat(64) } })), /parent/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ qwen: { judgeTransport: { proxied: true, proxySource: 'HTTPS_PROXY' } } })), /judgeTransport/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ qwen: { parentRegistrationSha256: ORIGINAL_DIGEST } })), /parent/);
+});
+
+test('proxy provenance fails closed when the 18-slot plan or expectation table differs', () => {
+  assert.throws(() => report.proxyProvenance(proxyArgs({ gemini: { planned: plan.slice(0, 17) } })), /planned/);
+  assert.throws(() => report.proxyProvenance(proxyArgs({ gemini: { table: { normal: {} } } })), /expectation/);
+});
+
+test('proxy cohort report exposes machine provenance, correct ①h infrastructure attribution and the addendum reproduction command', () => {
+  const result = report.analysis(fixture());
+  result.provenance = report.proxyProvenance(proxyArgs());
+  const markdown = report.renderReport(result, { root: 'runs', outDir: '.tmp/scratch/judge-bakeoff' });
+  assert.match(markdown, /Cohort provenance/);
+  assert.match(markdown, /proxy-vs-original/);
+  assert.match(markdown, /HTTPS_PROXY/);
+  assert.match(markdown, /infrastructure-only failures/);
+  assert.match(markdown, /①h Haiku and Gemini direct runs/);
+  assert.doesNotMatch(markdown, /①g whole-pack originals are infrastructure only/);
+  assert.match(markdown, /--proxy-addendum-sha256 c{64}/);
+});

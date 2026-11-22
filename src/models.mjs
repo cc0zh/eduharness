@@ -1,6 +1,7 @@
 import { createAssistantMessageEventStream, createModels, fauxProvider } from '@earendil-works/pi-ai';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
+import { ProxyAgent } from 'undici';
 import { failure } from '../contracts/core/schema.mjs';
 import { policy, routes } from '../config/e1.mjs';
 import { make403Probe } from '../config/judge-bakeoff-probe.mjs';
@@ -8,20 +9,31 @@ import { judgeModelMetadata, splitJudgeCandidates } from '../config/judge-bakeof
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
 import { judgeParameters, matchesJudgeParameters, matchesReportedRoute, retryFeedbackCode, retryFeedbackCodes, splitRetryPrompt } from './judge-transport.mjs';
-import { captureProviderResponse } from './provider-response-diagnostics.mjs';
+import { resolveOpenRouterProxySource } from './openrouter-proxy.mjs';
+import { captureProviderResponse, redactProviderValue } from './provider-response-diagnostics.mjs';
 import { trackedFetch } from './run-receipts.mjs';
 
 const textOf = message => message.content.filter(b => b.type === 'text').map(b => b.text).join('');
 const roleConfig = role => role === 'regrade' ? 'judge' : role;
 const nonempty = text => typeof text === 'string' && text.length > 0;
 
-function observeJudge(elapsed) {
+function proxySecretsOf(proxy) {
+  const url = new URL(proxy);
+  const user = decodeURIComponent(url.username);
+  const password = decodeURIComponent(url.password);
+  return [proxy, url.origin, url.username, url.password, user, password,
+    user && password ? `${user}:${password}` : undefined,
+    user && password ? Buffer.from(`${user}:${password}`).toString('base64') : undefined,
+  ].filter(secret => typeof secret === 'string' && secret.length > 0);
+}
+
+function observeJudge(elapsed, dispatcher) {
   const phaseMs = { requestSent: null, headersReceived: null, firstByte: null, firstReasoning: null, lastReasoning: null, firstVisible: null, ended: null };
   let reportedOutputTokens = null;
   return {
     async fetch(input, init) {
       phaseMs.requestSent = elapsed();
-      const response = await globalThis.fetch(input, init);
+      const response = await globalThis.fetch(input, dispatcher ? { ...init, dispatcher } : init);
       phaseMs.headersReceived = elapsed();
       if (!response.body) return response;
       const body = response.body.pipeThrough(new TransformStream({ transform(chunk, controller) {
@@ -87,10 +99,14 @@ export class Models {
   #policy;
   #judgeRoute;
   #judgeTimeoutMs;
+  #judgeProxySource;
+  #judgeProxy;
+  #proxyAgent;
+  #proxySecrets;
   #split;
   #probe;
 
-  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, judgePolicy, judgeProbeStep, beforeAttempt }) {
+  constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false, judgePolicy, judgeProbeStep, judgeProxySource, beforeAttempt }) {
     const probe = judgeProbeStep === undefined ? undefined : make403Probe(judgePolicy, judgeProbeStep);
     const split = Object.hasOwn(splitJudgeCandidates, judgePolicy) ? splitJudgeCandidates[judgePolicy] : undefined;
     const candidate = probe ?? split ?? (Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined);
@@ -110,6 +126,28 @@ export class Models {
     this.#split = Boolean(split || probe);
     this.#probe = probe;
     this.#judgeTimeoutMs = judgeTimeoutMs;
+    if (judgeProxySource !== undefined) {
+      const coords = { role: 'judge', turn: 0, call: 0 };
+      if (typeof judgeProxySource !== 'string' || judgeProxySource.length === 0) {
+        throw failure('configuration', coords, 'judge proxy source requires an explicit environment variable name');
+      }
+      if (mode !== 'real') throw failure('configuration', coords, 'judge proxy requires a real run');
+      if (!roles.includes('judge') || this.#judgeRoute.provider !== 'openrouter') {
+        throw failure('configuration', coords, 'judge proxy requires the OpenRouter judge');
+      }
+      let resolved;
+      try {
+        resolved = resolveOpenRouterProxySource(process.env);
+      } catch {
+        throw failure('configuration', coords, 'judge proxy unavailable: set HTTPS_PROXY or HTTP_PROXY to an http(s) URL with TLS verification enabled');
+      }
+      if (resolved.source !== judgeProxySource) {
+        throw failure('configuration', coords, 'judge proxy source does not match the active proxy setting');
+      }
+      this.#judgeProxySource = judgeProxySource;
+      this.#judgeProxy = resolved.proxy;
+      this.#proxySecrets = proxySecretsOf(resolved.proxy);
+    }
     this.#save = save;
     this.#reserve = reserve;
     this.#beforeAttempt = beforeAttempt;
@@ -146,6 +184,12 @@ export class Models {
   }
 
   model(role) { return this.#roles[roleConfig(role)]; }
+
+  #proxyDispatcher() {
+    if (!this.#judgeProxySource) return undefined;
+    this.#proxyAgent ??= new ProxyAgent(this.#judgeProxy);
+    return this.#proxyAgent;
+  }
 
   usesStructuredJudgement(role) {
     return roleConfig(role) === 'judge' && this.model(role).provider === 'openrouter' && this.#judgeRoute.responseFormat === 'json_schema';
@@ -210,18 +254,22 @@ export class Models {
       const request = split
         ? (feedback === null ? context : { ...context, systemPrompt: splitRetryPrompt(context.systemPrompt, feedback) })
         : priorValidation ? { ...context, systemPrompt: `${context.systemPrompt}\nPrevious response rejected: ${priorValidation}. Correct that problem and submit a complete replacement judgement for the same evidence view.` } : context;
-      const raw = { ...coordinates, context: request, ...(scope.binding && { binding:scope.binding }) };
+      const proxyTag = canonical === 'judge' && this.#judgeProxySource ? { proxied: true, proxySource: this.#judgeProxySource } : undefined;
+      const raw = { ...coordinates, context: request, ...(scope.binding && { binding:scope.binding }), ...proxyTag };
       let requestLimit = config.maxTokens, finish_reason = null, reasoningTokens = null, httpStatus = null;
       const startedAt = new Date().toISOString();
       const start = performance.now();
       const elapsed = () => Math.round(performance.now() - start);
-      const observation = canonical === 'judge' && model.provider === routes.judge.provider ? observeJudge(elapsed) : undefined;
+      const observation = canonical === 'judge' && model.provider === routes.judge.provider ? observeJudge(elapsed, this.#proxyDispatcher()) : undefined;
       const signal = AbortSignal.timeout(timeoutMs);
       const transport = observation?.fetch ?? globalThis.fetch;
       const send = this.#recorder ? trackedFetch(transport, this.#recorder, `${this.#cell}:${canonical}:${turn}:${call}:${attempt}`) : transport;
+      const diagnosticSecrets = canonical === 'judge'
+        ? [this.#keys?.[canonical], ...(this.#proxySecrets ?? [])].filter(secret => typeof secret === 'string' && secret.length > 0)
+        : [];
       const diagnosticFetch = async (input, init) => {
         const response = await send(input, init);
-        if (!response.ok || probe) raw.providerResponsePending = captureProviderResponse(response);
+        if (!response.ok || probe) raw.providerResponsePending = captureProviderResponse(response, { secrets: diagnosticSecrets });
         return response;
       };
       let outboundRejection, responseRouteMismatch, reportedProvider = null, reportedModel = null;
@@ -304,6 +352,10 @@ export class Models {
         raw.providerResponse = await raw.providerResponsePending;
         delete raw.providerResponsePending;
       }
+      if (proxyTag && response) {
+        const { errorMessage, ...content } = response;
+        response = { ...redactProviderValue(content, diagnosticSecrets), errorMessage };
+      }
       const text = response ? textOf(response) : '';
       if (response) {
         failureKind = stopFailure(response, text, reasoningTokens, requestLimit, finish_reason);
@@ -318,6 +370,7 @@ export class Models {
               validationCode = retryFeedbackCode(error);
               detail = `judge validation ${validationCode}`;
               raw.validationDetail = error instanceof Error ? error.message : String(error);
+              if (proxyTag) raw.validationDetail = redactProviderValue(raw.validationDetail, diagnosticSecrets);
               feedback = validationCode;
             } else detail = error instanceof SyntaxError ? 'invalid JSON document' : error.message;
           }
@@ -338,14 +391,17 @@ export class Models {
         ...raw, response: response ? { ...response, errorMessage: undefined } : null,
         ...(parsed?.normalized !== undefined && { normalized: parsed.normalized }),
       }, {
-        ...coordinates, ...this.identity(role), policyVersion: callPolicy.version, requestLimit, finish_reason, httpStatus,
+        ...coordinates, ...this.identity(role), policyVersion: callPolicy.version, requestLimit,
+        finish_reason: proxyTag ? redactProviderValue(finish_reason, diagnosticSecrets) : finish_reason, httpStatus,
         startedAt, elapsedMs: elapsed(), timeoutMs, ...timing,
         normalized: originalOrder.length > 0, originalOrder,
         ...(split && { retryFeedback: appliedFeedback ?? null, validationCode, normalizations }),
         ...(canonical === 'judge' && { judgementMode: schema ? 'json_schema' : 'text_json' }),
         ...(raw.outbound && { reasoningLimit: raw.outbound.reasoning?.max_tokens ?? null }),
-        ...(route.routing && { reportedProvider, reportedModel }),
+        ...(route.routing && (proxyTag && responseRouteMismatch ? redactProviderValue({ reportedProvider, reportedModel }, diagnosticSecrets)
+          : { reportedProvider, reportedModel })),
         ...(scope.binding && { binding:scope.binding }),
+        ...proxyTag,
         stopReason: response?.stopReason ?? null, reasoningTokens, usage, retryCount: split ? attempt - 1 : retries,
         visibleTokens: usage && reasoningTokens !== null && usage.output >= reasoningTokens ? usage.output - reasoningTokens : null,
         failureKind: failureKind ?? null, detail: detail ?? null,

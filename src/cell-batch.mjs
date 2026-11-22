@@ -97,6 +97,7 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
     const control = {
       judgeReasoningOff: !split && Boolean(policy.judge.reasoning),
       judgePolicy: manifest.identity.judgePolicy,
+      judgeProxySource: manifest.identity.judgeTransport?.proxySource,
       ...(split && { splitMaxAttempts, splitNext() {
         const next = splitNext(split, folder);
         return next && { ...next, dimension: splitDimensions[next.call - 1] };

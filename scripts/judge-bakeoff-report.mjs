@@ -1,11 +1,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { isDeepStrictEqual as same } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { requireThat } from '../contracts/core/schema.mjs';
 import { constructExpectations } from '../src/s1-binary-plan.mjs';
 
 export const candidateOrder = Object.freeze(['haiku', 'gemini', 'qwen']);
+const isSha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const proxyCohorts = Object.freeze({ haiku: 'proxy', gemini: 'proxy', qwen: 'original' });
 export const reasoningCaps = Object.freeze({ haiku: 1_536, gemini: 3_072, qwen: 0 });
 export const adoption = Object.freeze({
   firstCells: 18,
@@ -420,6 +423,55 @@ export function selection(candidates, order = candidateOrder) {
   };
 }
 
+export function proxyProvenance({ entries, proxyAddendumSha256, originalRegistrationSha256, plannedCount = 18 } = {}) {
+  requireThat(isSha256(proxyAddendumSha256), 'proxy addendum sha256 must be a 64-character hex digest');
+  requireThat(isSha256(originalRegistrationSha256), 'original registration sha256 must be a 64-character hex digest');
+  requireThat(Array.isArray(entries) && entries.length === 3, 'proxy cohort needs exactly three runs');
+  const byKey = Object.fromEntries(entries.map(entry => [entry?.key, entry]));
+  requireThat(candidateOrder.every(key => byKey[key]), 'proxy cohort is missing a candidate run');
+  const planned = byKey[candidateOrder[0]].batch?.manifest?.planned;
+  requireThat(Array.isArray(planned) && planned.length === plannedCount,
+    `proxy cohort manifest.planned must have exactly ${plannedCount} slots`);
+  const expectations = byKey[candidateOrder[0]].expectations;
+  const candidates = {};
+  for (const key of candidateOrder) {
+    const { batch, verification } = byKey[key];
+    const mode = batch?.manifest?.mode;
+    requireThat(mode === 'real', `${key} cohort run must be a real run`);
+    requireThat(verification?.verified === true, `${key} cohort run must be verified`);
+    requireThat(same(batch.manifest.planned, planned), `${key} manifest.planned differs within the cohort`);
+    requireThat(same(byKey[key].expectations, expectations), `${key} expectation table differs within the cohort`);
+    const identity = batch.manifest.identity ?? {};
+    const digest = identity.preregistrationSha256;
+    const transport = identity.judgeTransport;
+    const parent = identity.parentRegistrationSha256;
+    if (key === 'qwen') {
+      requireThat(digest === originalRegistrationSha256, 'qwen must carry the original registration digest');
+      requireThat(transport === undefined, 'qwen must not carry judgeTransport');
+      requireThat(parent === undefined, 'qwen must not carry parentRegistrationSha256');
+    } else {
+      requireThat(digest === proxyAddendumSha256, `${key} must carry the proxy addendum registration digest`);
+      requireThat(transport?.proxied === true && typeof transport.proxySource === 'string' && transport.proxySource.length > 0,
+        `${key} must carry a proxied judgeTransport with a proxySource env name`);
+      requireThat(parent === originalRegistrationSha256, `${key} must name the original registration as parent`);
+    }
+    candidates[key] = {
+      cohort: proxyCohorts[key], runId: batch.manifest.id, mode,
+      preregistrationSha256: digest,
+      parentRegistrationSha256: parent ?? null,
+      judgeTransport: transport
+        ? { proxied: transport.proxied === true, proxySource: transport.proxySource }
+        : null,
+    };
+  }
+  return {
+    cohort: 'proxy-vs-original',
+    proxyAddendumSha256, originalRegistrationSha256, plannedCount,
+    candidates,
+    historicalOriginals: 'not measured in this proxy cohort',
+  };
+}
+
 function historicalComparison(qwen, historical) {
   if (!historical?.batch || historical.verification?.verified !== true) return { available: false, error: historical?.error ?? 'verified historical run unavailable' };
   const oldSelected = historical.batch.selected;
@@ -602,6 +654,8 @@ export function renderCandidateReport(candidate, { root = 'runs', outDir = '.' }
 }
 
 export function renderReport(result, { root = 'runs', outDir = '.' } = {}) {
+  const provenance = result.provenance;
+  const proxyCohort = provenance?.cohort === 'proxy-vs-original';
   const rows = result.candidates.map(candidate => [
     `[detail](${candidate.key}-report.md)`, candidate.label, `\`${candidate.runId}\``, candidate.mode ?? '—', candidate.verified ? 'yes' : 'no',
     `${candidate.counts.qualified}/${candidate.counts.planned}`, `${candidate.counts.s1Complete}/${candidate.counts.s1Planned}`,
@@ -637,22 +691,42 @@ export function renderReport(result, { root = 'runs', outDir = '.' } = {}) {
       result.dimensions.map(dimension => `${dimension}=${score(row.splitScores[dimension])}`).join('; '),
       result.dimensions.map(dimension => `${dimension}=${score(row.historicalScores[dimension])}`).join('; '), `${row.same}/6`]))
     : 'No matched complete cells to compare.';
+  const provenanceSection = provenance ? [
+    `## Cohort provenance`,
+    `Registered cohort: \`${provenance.cohort}\`. ${proxyCohort
+      ? 'Two proxied candidates are compared against the untouched original Qwen run under identical gates and ranking. Every value below is read from each run manifest identity and its registered preregistration, not inferred.'
+      : 'Provenance is read from each run manifest identity and its registered preregistration.'}`,
+    table(['Candidate', 'Cohort', 'Run', 'Mode', 'Preregistration SHA256', 'Parent SHA256', 'Judge transport', 'Proxy source'],
+      candidateOrder.filter(key => provenance.candidates?.[key]).map(key => {
+        const row = provenance.candidates[key];
+        return [key, row.cohort, `\`${row.runId}\``, row.mode, `\`${row.preregistrationSha256}\``,
+          row.parentRegistrationSha256 ? `\`${row.parentRegistrationSha256}\`` : '—',
+          row.judgeTransport ? (row.judgeTransport.proxied ? 'proxied' : 'direct') : 'none',
+          row.judgeTransport?.proxySource ?? '—'];
+      })),
+    ...(proxyCohort
+      ? [`Addendum preregistration \`${provenance.proxyAddendumSha256}\` parents the original registration \`${provenance.originalRegistrationSha256}\` on the ${provenance.plannedCount} shared slots. The original ①h Haiku and Gemini direct runs are infrastructure-only failures and are not measured; this proxy supplement re-measures them through the registered transport. Original ①g whole-pack observations remain available as comparison context.`]
+      : []),
+  ].join('\n\n') : null;
   return [
-    '# Judge bakeoff ①h · three-candidate adoption report',
+    proxyCohort
+      ? '# Judge bakeoff ①h proxy supplement · Haiku/Gemini proxied versus original Qwen'
+      : '# Judge bakeoff ①h · three-candidate adoption report',
     `Selection: **${result.selection.selected ?? 'none'}**. ${result.selection.selected ? `Eligible candidates: ${result.selection.eligible.join(', ')}.` : 'No candidate passed every gate on verified real artifacts.'}`,
     `## Selection rule\n\n${result.selection.rule}`,
+    ...(provenanceSection ? [provenanceSection] : []),
     `## Candidate table\n\n${gateTable}`,
     `## Candidate-to-candidate per-question agreement\n\nEach denominator counts matched complete cells where both candidates answered that question. This compares split runs; it is not a correctness score.\n\n${pairAgreement}`,
     `## Usage and verification\n\n${usageTable}`,
     `## Gates\n\n- (a) 18/18 complete cells. For each of the six dimensions, the successful settled attempt (first or retry) was actually sent, passed local validation, and returned its full visible JSON within 120 s of send; reported reasoning stays within that candidate's cap. A cross-dimension conflict does not qualify.\n- (b) At least 14/15 complete S1 cells; any locally valid complete cell counts.\n- (c) 3/3 repetitions have all four bad teachers strictly below the same-repetition normal applicable score rate.\n- (d) Each target dimension is strictly lower in at least 2/3 repetitions.\n- (e) Definite construction false positives plus false negatives at most 2; missing bits are separate.\n\nThe five gates follow the ①d preregistration, with (a) and (b) updated for ①h as supplied. Construction truth uses only complete cells. First-attempt and after-retry compliance are descriptive; the first-attempt count is only a tie-break.`,
-    `## Qwen split versus ①g whole-pack\n\n${comparisonTable}`,
-    ...(comparison?.available ? [
+    `## Qwen split versus ①g whole-pack\n\n${proxyCohort ? 'Not recomputed in this proxy cohort. This supplement compares proxy Haiku and Gemini against the original Qwen run under the same gates. The original ①h Haiku and Gemini direct runs are infrastructure-only failures, while the original ①g whole-pack run keeps its own comparison observations as historical context.' : comparisonTable}`,
+    ...(proxyCohort ? [] : comparison?.available ? [
       `Matched complete cells: ${comparison.matched}. Split complete: ${comparison.splitComplete}/${comparison.planned}. ①g complete: ${comparison.historicalComplete}/${comparison.historicalPlanned}. Split-only: ${comparison.splitOnly.join(', ') || 'none'}. ①g-only: ${comparison.historicalOnly.join(', ') || 'none'}.`,
       `Dimension agreement on matched cells: ${Object.keys(comparison.dimensionAgreement).length ? Object.entries(comparison.dimensionAgreement).map(([dimension, row]) => `${dimension} ${fraction(row.same, row.total)}`).join(', ') : 'none (no matched complete cells)'}.`,
       `Per-question agreement on matched cells: ${Object.keys(comparison.questionAgreement).length ? Object.entries(comparison.questionAgreement).map(([question, row]) => `${question} ${fraction(row[0], row[1])}`).join(', ') : 'none (no matched complete cells)'}.`,
       `**Caveat.** ${comparison.caveat}`,
     ] : [`**Caveat.** ${comparison?.error ?? 'Historical ①g run unavailable.'} The historical absence is shown rather than imputed.`]),
-    `## Reproduction\n\n\`\`\`sh\nnode scripts/judge-bakeoff-report.mjs --run-root ${root} --out ${outDir}\n\`\`\``,
+    `## Reproduction\n\n\`\`\`sh\nnode scripts/judge-bakeoff-report.mjs --run-root ${root} --out ${outDir}${proxyCohort ? ` --proxy-addendum-sha256 ${provenance.proxyAddendumSha256}` : ''}\n\`\`\``,
     `Machine data: [bakeoff.json](bakeoff.json). Per-candidate details: ${result.candidates.map(candidate => `[${candidate.key}](${candidate.key}-report.md)`).join(', ')}.`,
   ].join('\n\n') + '\n';
 }
@@ -670,7 +744,7 @@ function write(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-export async function main({ runRoot = 'runs', outDir = '.tmp/scratch/judge-bakeoff' } = {}) {
+export async function main({ runRoot = 'runs', outDir = '.tmp/scratch/judge-bakeoff', proxyAddendumSha256 = null } = {}) {
   const { splitJudgeCandidates } = await import('../config/judge-bakeoff.mjs');
   const { splitDimensions } = await import('../contracts/judge/binary-v3.mjs');
   const { readBatch } = await import('../src/cell-batch-verification.mjs');
@@ -678,36 +752,57 @@ export async function main({ runRoot = 'runs', outDir = '.tmp/scratch/judge-bake
   const root = resolve(runRoot);
   const out = resolve(outDir);
   mkdirSync(out, { recursive: true });
-  let expectations, sharedRegistration;
+  let proxyPlan = null;
+  if (proxyAddendumSha256) {
+    const plan = await import('../src/judge-bakeoff-plan.mjs');
+    proxyPlan = { runIds: plan.proxyBakeoffRunIds, original: plan.originalBakeoffRegistrationSha256 };
+    requireThat(proxyPlan.runIds?.haiku && proxyPlan.runIds?.gemini && isSha256(proxyPlan.original),
+      'proxy bakeoff plan exports (proxyBakeoffRunIds, originalBakeoffRegistrationSha256) are unavailable');
+  }
+  const runIds = Object.fromEntries(candidateOrder.map(key => [key, splitJudgeCandidates[key].runId]));
+  if (proxyPlan) { runIds.haiku = proxyPlan.runIds.haiku; runIds.gemini = proxyPlan.runIds.gemini; }
+  let expectations, sharedRegistration, provenance = null;
   const runs = {};
+  const entries = [];
   for (const key of candidateOrder) {
-    const candidate = { key, ...splitJudgeCandidates[key] };
+    const candidate = { key, ...splitJudgeCandidates[key], runId: runIds[key] };
     const run = {};
     try {
-      const verification = verifyRun(root, candidate.runId);
-      const batch = readBatch(root, candidate.runId);
+      const verification = verifyRun(root, runIds[key]);
+      const batch = readBatch(root, runIds[key]);
       const digest = batch.manifest.identity.preregistrationSha256;
-      const expected = constructExpectations(readFileSync(join(root, candidate.runId, 'preregistration.md'), 'utf8'));
-      requireThat(!sharedRegistration || sharedRegistration === digest, 'candidate preregistration digest differs');
-      sharedRegistration = digest;
+      const expected = constructExpectations(readFileSync(join(root, runIds[key], 'preregistration.md'), 'utf8'));
+      if (!proxyPlan) {
+        requireThat(!sharedRegistration || sharedRegistration === digest, 'candidate preregistration digest differs');
+        sharedRegistration = digest;
+      }
       expectations = expected;
       Object.assign(run, { batch, verification });
-      write(join(out, `${candidate.runId}.verify-run.json`), verification);
-      write(join(out, `${candidate.runId}.pid-check.json`), { runId: candidate.runId, ...checkPids(batch.processes ?? []) });
+      write(join(out, `${runIds[key]}.verify-run.json`), verification);
+      write(join(out, `${runIds[key]}.pid-check.json`), { runId: runIds[key], ...checkPids(batch.processes ?? []) });
+      entries.push({ key, batch, verification, expectations: expected });
     } catch (error) {
       run.error = error.message;
     }
     runs[key] = run;
   }
   let historical = null;
-  try {
-    historical = { batch: readBatch(root, 'round2-qwen-judge-01'), verification: verifyRun(root, 'round2-qwen-judge-01') };
-  } catch (error) { historical = { error: error.message }; }
-  const candidates = candidateOrder.map(key => ({ key, ...splitJudgeCandidates[key] }));
+  if (proxyPlan) {
+    const failed = candidateOrder.map(key => runs[key].error).filter(Boolean);
+    requireThat(!failed.length, `proxy cohort run failed: ${failed.join('; ')}`);
+    provenance = proxyProvenance({ entries, proxyAddendumSha256, originalRegistrationSha256: proxyPlan.original });
+    expectations = entries.find(entry => entry.key === 'qwen')?.expectations ?? entries[0].expectations;
+  } else {
+    try {
+      historical = { batch: readBatch(root, 'round2-qwen-judge-01'), verification: verifyRun(root, 'round2-qwen-judge-01') };
+    } catch (error) { historical = { error: error.message }; }
+  }
+  const candidates = candidateOrder.map(key => ({ key, ...splitJudgeCandidates[key], runId: runIds[key] }));
   const result = analysis({ candidates, dimensions: splitDimensions, expectations, targets: {
     answer_dump: 'productive_struggle', lecture: 'agency_handoff', sycophant_close: 'verification_or_transfer',
     no_teach: 'misconception_repair',
   }, runs, historical });
+  if (provenance) result.provenance = provenance;
   for (const candidate of result.candidates) if (candidate.pids.length) candidate.pidCheck = checkPids(candidate.pids);
   write(join(out, 'bakeoff.json'), result);
   writeFileSync(join(out, 'bakeoff-report.md'), renderReport(result, { root, outDir: out }));
@@ -717,8 +812,8 @@ export async function main({ runRoot = 'runs', outDir = '.tmp/scratch/judge-bake
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { 'run-root': { type: 'string', default: 'runs' }, out: { type: 'string', default: '.tmp/scratch/judge-bakeoff' } } });
-  main({ runRoot: values['run-root'], outDir: values.out })
+  const { values } = parseArgs({ options: { 'run-root': { type: 'string', default: 'runs' }, out: { type: 'string', default: '.tmp/scratch/judge-bakeoff' }, 'proxy-addendum-sha256': { type: 'string' } } });
+  main({ runRoot: values['run-root'], outDir: values.out, proxyAddendumSha256: values['proxy-addendum-sha256'] ?? null })
     .then(result => console.log(JSON.stringify(result)))
     .catch(error => { console.error(error.stack ?? error.message); process.exitCode = 1; });
 }

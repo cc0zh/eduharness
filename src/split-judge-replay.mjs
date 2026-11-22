@@ -5,6 +5,12 @@ import { parseBinaryDimension, splitDimensions } from '../contracts/judge/binary
 import { binaryDimensionPayload, binaryDimensionPrompt } from './binary-judge-v3.mjs';
 import { matchesJudgeParameters, matchesReportedRoute, retryFeedbackCode, splitRetryPrompt } from './judge-transport.mjs';
 
+export function verifySplitTransport(identity, raw, meter, label) {
+  const expected = identity.judgeTransport;
+  requireThat([raw, meter].every(row => row.proxied === expected?.proxied && row.proxySource === expected?.proxySource),
+    `proxy evidence differs from the evaluation identity at ${label}`);
+}
+
 export function splitBinding(manifest, folder, view) {
   const { condition, repetition, sourceRunId } = manifest.planned.find(row => row.id === folder);
   return { runId: manifest.id, cell: condition ?? folder, ruler: manifest.identity.ruler, viewHash: view.id,
@@ -13,6 +19,7 @@ export function splitBinding(manifest, folder, view) {
 
 export function replaySplitJudge(manifest, folder, messages, meter, raw) {
   const label = `${meter.callId} (process ${meter.processIndex})`;
+  verifySplitTransport(manifest.identity, raw, meter, label);
   const view = bindBinary(messages);
   const dimension = splitDimensions[meter.call - 1];
   const binding = { ...splitBinding(manifest, folder, view), dimension };

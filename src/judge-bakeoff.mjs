@@ -7,7 +7,7 @@ import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { splitBinaryIdentityVersion, splitBinaryOutputContract, splitBinaryRuler, splitDimensions } from '../contracts/judge/binary-v3.mjs';
 import { prepareContrast, readLocked } from '../scripts/reasoning-off-plan.mjs';
 import { runCellBatch } from './cell-batch.mjs';
-import { bakeoffBudget, bakeoffConcurrency, judgeBakeoffScenario } from './judge-bakeoff-plan.mjs';
+import { bakeoffBudget, bakeoffConcurrency, judgeBakeoffScenario, originalBakeoffRegistrationSha256, proxyBakeoffRunIds } from './judge-bakeoff-plan.mjs';
 import { contrastFolders, contrastRegistration } from './judge-contrast-plan.mjs';
 import { splitBinaryOfflineResponses } from './offline.mjs';
 import { checkout } from './real-preflight.mjs';
@@ -81,22 +81,59 @@ ${JSON.stringify(plan, null, 2)}
   return { plan, inputs, bytes: Buffer.from(markdown) };
 }
 
-export function prepareJudgeBakeoff(config, estimating) {
-  const { judgePolicy, registration, registrationDigest, mode, id, root, concurrency, limits } = config;
-  requireThat(registration && registrationDigest, 'judge bakeoff requires its shared preregistration path and SHA256');
+export function deriveBakeoffProxyAddendum(original, sources, proxySource) {
+  requireThat(/^(HTTPS_PROXY|HTTP_PROXY|https_proxy|http_proxy)$/.test(proxySource), 'invalid proxy source');
+  const markdown = original.toString('utf8');
+  const parent = contrastRegistration(markdown);
+  const plan = { ...parent, sources, parentRegistrationSha256: hash(original), judgeTransport: { proxied: true, proxySource },
+    candidates: { ...parent.candidates,
+      ...Object.fromEntries(Object.entries(proxyBakeoffRunIds).map(([key, runId]) => [key, { ...parent.candidates[key], runId }])),
+    } };
+  const parentProse = markdown.slice(0, markdown.lastIndexOf('## 机器清单'));
+  const header = `# 第二轮 ①h 代理补跑预登记附录
+
+锁定原预登记 SHA256：\`${plan.parentRegistrationSha256}\`。只有 Haiku 和 Gemini 的 OpenRouter 传输经显式环境代理（\`${proxySource}\`）；不留代理地址和凭据。两批使用新评测身份及新 run ID \`${proxyBakeoffRunIds.haiku}\`、\`${proxyBakeoffRunIds.gemini}\`。各为单进程，并发 4，不续跑。模型、提供方、预算、样本、采用线 a–e、选优规则和两层停线不变。
+
+原 Haiku/Gemini 批次保存为「基础设施未通，未测到」。Qwen 使用原 \`${parent.candidates.qwen.runId}\` 判决，不再发请求。选优仅使用这两个补跑批次和原 Qwen 批次，三方按原判线合并比较。无胜者则不启动冻结。出口地区拒绝按原供应商失败规则停线。
+
+以下原预登记正文逐字保留；其中旧 run ID 仅供核对，不作补跑指令。执行使用本附录的机器清单。
+
+`;
+  const bytes = Buffer.from(`${header}${parentProse}## 机器清单\n\n\`\`\`json\n${JSON.stringify(plan, null, 2)}\n\`\`\`\n`);
+  return { plan, bytes };
+}
+
+export function makeBakeoffProxyRegistration(proxySource) {
+  const parent = readLocked(join(archiveRoot, splitJudgeCandidates.qwen.runId, 'preregistration.md'), originalBakeoffRegistrationSha256);
   const { plan, inputs, bytes } = makeBakeoffRegistration();
+  const withoutSources = ({ sources: _, ...fixed }) => fixed;
+  const locked = contrastRegistration(parent.toString('utf8'));
+  const prose = bytes => bytes.toString('utf8').split('## 机器清单\n')[0];
+  requireThat(same(withoutSources(plan), withoutSources(locked)) && prose(bytes) === prose(parent), 'the original bakeoff plan or gates changed');
+  const sources = { ...plan.sources, 'src/openrouter-proxy.mjs': hash(readFileSync(new URL('./openrouter-proxy.mjs', import.meta.url))) };
+  return { ...deriveBakeoffProxyAddendum(parent, sources, proxySource), inputs };
+}
+
+export function prepareJudgeBakeoff(config, estimating) {
+  const { judgePolicy, judgeProxySource, registration, registrationDigest, mode, id, root, concurrency, limits } = config;
+  requireThat(registration && registrationDigest, 'judge bakeoff requires its shared preregistration path and SHA256');
+  requireThat(judgeProxySource === undefined || mode === 'real' && Object.hasOwn(proxyBakeoffRunIds, judgePolicy) && !config.resume,
+    '--proxy-from-env is only for real Haiku or Gemini bakeoff runs without --resume');
+  const { plan, inputs, bytes } = judgeProxySource === undefined ? makeBakeoffRegistration() : makeBakeoffProxyRegistration(judgeProxySource);
   const preregistration = readFileSync(registration);
   requireThat(hash(preregistration) === registrationDigest && preregistration.equals(bytes), 'bakeoff preregistration, sources, or samples changed');
-  const candidate = splitJudgeCandidates[judgePolicy];
+  const candidate = { ...splitJudgeCandidates[judgePolicy], runId: plan.candidates[judgePolicy].runId };
   const ceiling = bakeoffBudget(candidate.policy);
   requireThat(same(limits, caps(ceiling)), 'use both registered hard limits for the judge bakeoff');
   if (mode === 'real' && !estimating) requireThat(id === candidate.runId && root === archiveRoot && concurrency === bakeoffConcurrency, 'use the registered ID, root and concurrency');
-  else requireThat(!Object.values(splitJudgeCandidates).some(candidate => id.toLowerCase() === candidate.runId), 'estimate and offline runs require a separate ID');
+  else requireThat(!Object.values(splitJudgeCandidates).some(candidate => id.toLowerCase() === candidate.runId)
+    && !Object.values(proxyBakeoffRunIds).includes(id.toLowerCase()), 'estimate and offline runs require a separate ID');
   const source = { prior: plan.prior };
-  const base = evaluationIdentity({ mode, limits, provenance: source, sources: sourceFiles });
+  const base = evaluationIdentity({ mode, limits, provenance: source, sources: Object.keys(plan.sources) });
   const identity = { ...base, version: splitBinaryIdentityVersion, ruler: splitBinaryRuler, judgeOutputContract: splitBinaryOutputContract,
     policy: candidate.policy, routes: mode === 'real' ? { judge: candidate.route } : 'pi-ai-faux', judgePolicy, registeredId: candidate.runId,
-    planned: plan.queue, preregistrationSha256: registrationDigest };
+    planned: plan.queue, preregistrationSha256: registrationDigest,
+    ...(plan.judgeTransport && { judgeTransport: plan.judgeTransport, parentRegistrationSha256: plan.parentRegistrationSha256 }) };
   return { plan, inputs, candidate, ceiling, identity, identityId: hash({ mode, scenario: judgeBakeoffScenario, identity }), source, preregistration };
 }
 

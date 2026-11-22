@@ -108,7 +108,8 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     fixtures ??= mode === 'offline' ? offlineResponses(variant) : undefined;
     const roles = frozen ? ['judge'] : generateOnly ? ['teacher', 'learner'] : undefined;
     const models = new Models({ mode, responses: frozen && !control?.judgePolicy ? fixtures?.slice(-1) : fixtures, roles, save, reserve, recorder, cell,
-      judgeTimeoutMs, judgeReasoningOff: control?.judgeReasoningOff, judgePolicy: control?.judgePolicy, beforeAttempt: control?.before });
+      judgeTimeoutMs, judgeReasoningOff: control?.judgeReasoningOff, judgePolicy: control?.judgePolicy,
+      judgeProxySource: control?.judgeProxySource, beforeAttempt: control?.before });
     if (!frozen) {
       const teach = createTeacher({ models, variant, operatorPolicy, saveEvent: event => push(filenames.events, events, event), improved });
       const { instructions, persona } = task.user_scenario;
