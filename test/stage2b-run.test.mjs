@@ -45,6 +45,23 @@ test('only registered dev files are loaded, and only a missing source or wrong m
   assert.throws(() => loadStage2bDev(input), /manifest.*SHA256/);
 });
 
+test('stage 2b can override the default holdout root without an implicit fallback', t => {
+  const { primary, backup, manifestSha256, dev } = fixture(t);
+  const prior = process.env.TEACHARENA_STAGE2_HOLDOUT_ROOT;
+  t.after(() => {
+    if (prior === undefined) delete process.env.TEACHARENA_STAGE2_HOLDOUT_ROOT;
+    else process.env.TEACHARENA_STAGE2_HOLDOUT_ROOT = prior;
+  });
+  process.env.TEACHARENA_STAGE2_HOLDOUT_ROOT = backup;
+  const locked = { manifestSha256, dev };
+  const corpus = loadStage2bDev(locked);
+  assert.equal(corpus.directory, join(backup, 'dev'));
+  assert.equal(corpus.tasks.size, 8);
+  assert.equal(loadStage2bDev({ ...locked, primary }).directory, join(primary, 'dev'));
+  writeFileSync(join(backup, 'manifest.json'), 'wrong');
+  assert.throws(() => loadStage2bDev(locked), /manifest.*SHA256/);
+});
+
 test('48 cells use the registered upper bounds, not 3x the no-tool request count', () => {
   assert.deepEqual(stage2bBudget(), { typicalCalls: 672, logicalCalls: 864, maxCalls: 2592, maxOutputTokens: 11999232 });
   assert.deepEqual(stage2bLimits, { maxAttempts: 2592, maxRequestedOutputTokens: 11999232 });

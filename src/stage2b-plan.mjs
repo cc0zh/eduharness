@@ -2,6 +2,7 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual as same } from 'node:util';
 import { policy, rounds } from '../config/e1.mjs';
+import { stage2bHoldoutRoot } from '../config/stage2b-headroom.mjs';
 export { stage2bScenario } from '../config/stage2b-headroom.mjs';
 import { exact, hash, requireThat } from '../contracts/core/schema.mjs';
 import { readTask } from '../contracts/dataset/schema.mjs';
@@ -55,7 +56,7 @@ function entry(path) {
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
 
-export function loadStage2bDev({ primary, backup, manifestSha256, dev }) {
+export function loadStage2bDev({ primary = process.env.TEACHARENA_STAGE2_HOLDOUT_ROOT?.trim() || stage2bHoldoutRoot, backup, manifestSha256, dev }) {
   stage2bPlan(dev);
   requireThat(sha(manifestSha256), 'invalid dataset manifest SHA256');
   for (const [source, root] of [['primary', primary], ['backup', backup]]) {
@@ -87,7 +88,7 @@ export function loadStage2bDev({ primary, backup, manifestSha256, dev }) {
     }));
     return { source, directory, manifestSha256, dev, tasks };
   }
-  throw Error('stage 2b dev or matching manifest SHA256 unavailable on both authorized roots');
+  throw Error('no configured stage 2b root has dev and the matching manifest SHA256');
 }
 
 export const stage2bCallId = ({ folder, role, turn, call, attempt }) => `${folder.replaceAll('/', ':')}:${role}:${turn}:${call}:${attempt}`;

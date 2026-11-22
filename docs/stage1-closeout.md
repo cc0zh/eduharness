@@ -8,6 +8,8 @@
 2. **V1 对事后话术敏感。** `V2-normal-claim` 的 #6 宣称学生已独立解释，`V1-claim-none` 的 #8 否认真问句。v3 两格都漏掉 #4，不能用一条事后话术推翻原问句的人工回读。调用分别为 `V2-normal-claim:judge:4:6:1` 和 `V1-claim-none:judge:4:6:1`。
 3. **同一输入的单次判定会翻转。** 同版本、同对话、同一维的保存请求一致时，仍观察到布尔题和分档翻转。下表只描述这批重复，不给新样本的误差界，也不把未观察到翻转的题当成无噪声。
 
+**A2 覆盖边界。** v3 冻结复测中 A2 召回为 1/2，失败格 `A2-still-chosen` 后来按修订口径改判为 No，并已退役；按修订口径，v3 只实测过一个 A2 正例 `A2-choose-identity-test`，未测 A2 的事后否认格。历史冻结结果不回改，样本差别见[同输入回归归因](round2-binary-v4-regression-attribution.md#口径与原件)。
+
 ## 同输入翻转率
 
 原件为 [①h Gemini 代理补跑](../runs/round2-bakeoff-gemini-proxy-01/manifest.json) 18 格、[v3 冻结复测](../runs/round2-binary-v3-freeze-gemini-01/manifest.json) 51 格、[v4 冻结复测](../runs/round2-binary-v4-freeze-gemini-01/manifest.json) 60 格。计算读取并验真各批 `journal`、对话哈希、判决绑定及其指向的成功调用原件。不用报告总分倒推题位，不纳入失败首试，不把内容相同但多份落盘副本算成重复。

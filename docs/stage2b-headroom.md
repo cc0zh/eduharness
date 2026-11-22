@@ -4,7 +4,7 @@
 
 ## 输入与收据
 
-主位置 `%TEMP%\teacharena\stage2-holdout\dev` 的 8 道题均匹配 manifest，并用 `readTask` 加载。4 个家族各两题。manifest SHA256 为 `b6650ca5b87e84740a2e2f17340bbc472f697cbd2bb75e407d57e6d539ffe677`。未用备份，未打开、列举或哈希任何 `sealed` 文件，未读训练标签。
+原运行只加载了与 manifest 匹配的 8 道 dev 题，4 个家族各两题，均经 `readTask` 校验。manifest SHA256 为 `b6650ca5b87e84740a2e2f17340bbc472f697cbd2bb75e407d57e6d539ffe677`。原运行未用备份，未打开、列举或哈希任何 `sealed` 文件，未读训练标签。现行默认位置为 `D:\Archive\teacharena\stage2-holdout\dev`。
 
 原[方法登记](../runs/stage2b-headroom-real-01/preregistration.md) SHA256 `b820f7360bf23399e5c9aadf102d0b8359f690247c88bec75892f02211f7d8c9`。[路径附录](../runs/stage2b-headroom-real-01/preregistration-addendum-path.md) SHA256 `18e764fd389caed3f7b3d00223866b01a16520f41f7c40ec52b7e4967031f194`，先锁后预检，只补路径、manifest SHA 和 dev 清单。口径和额度不变。
 

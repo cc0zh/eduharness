@@ -4,13 +4,19 @@
 
 主目标为交还主动权 A，重点为学生自己提出方法或检验并说明理由（A2）。[预登记](research/stage3/preregistration.md)已确认并[锁定 SHA256](research/stage3/preregistration.sha256)。功能分支用独立小判断员、代码门控和保守回退。三臂显式使用带边界采用的 `e1-binary-v3`，每格只判一次 A。话术侧回放基线，仅改教师 #8；跨家族盲核另判原创和独立执行。
 
-已接入[离线入口和验真](runbook.md#阶段-3-状态驱动教师)。未运行真实 dev。离线合成结果不能证明教学改善，也不决定采用。迁移合入、开发集预检和费用授权另做；本任务不接触 `sealed` 或训练标签。
+已接入[离线入口和验真](runbook.md#阶段-3-状态驱动教师)。未运行真实 dev。离线合成结果不能证明教学改善，也不决定采用。已获第 1 版开发集运行授权，须先完成迁移合入与零请求预检。本任务不接触 `sealed` 或训练标签。
+
+## 研究归档与阶段 1 复核补记（2026-11-22）
+
+[研究归档](research/README.md)收入 67 份原件，67/67 与归档 `SHA256SUMS.txt` 一致。阶段 2b 改用[正式 holdout 目录](runbook.md#阶段-2b-开发集余量检查)，允许显式覆写。离线核验匹配登记的 manifest SHA256，`readTask` 只加载 8 道 dev 题（4 家族）。未读 `sealed` 或训练标签，未发模型请求。
+
+[阶段 1 收口](stage1-closeout.md#三条已知边界)补记 A2 退役格及未测范围，不改原冻结结论。工作评分器回归新增两种配置拒绝：无代理、仅 `HTTP_PROXY`。两例均在发请求前抛出配置错误，评分实现未改。
 
 <a name="stage2b-headroom"></a>
 
 ## 阶段 2b 开发集余量检查
 
-**真跑收齐 48/48 格，验真通过。** 更正路径后，只从 `%TEMP%/teacharena/stage2-holdout/dev` 加载 8 题、4 家族。旧 `normal` 用 4 轮和 9 条消息，面对默认学生和两类可用高压学生各跑两遍。v3 仍为带边界采用的工作评分器。
+**真跑收齐 48/48 格，验真通过。** 原运行只加载 dev 的 8 题、4 家族；现行默认位置为 `D:\Archive\teacharena\stage2-holdout\dev`。旧 `normal` 用 4 轮和 9 条消息，面对默认学生和两类可用高压学生各跑两遍。v3 仍为带边界采用的工作评分器。
 
 交还主动权失 47 分，两遍同档 23/24，适合作候选，重点回读 A2。误解修复失 32 分、同档 16/24，作为备选。支持维失 59 分，但历史同输入翻转 22/89；不把最大余量当作最可靠目标。阶段 3 主目标维未选定。[六维余量、分母和候选证据](stage2b-headroom.md)
 
@@ -272,7 +278,7 @@ HY4 的 11 次请求均出现推理 delta，7 次实报推理超过 16,384。5 �
 - Qwen 预登记 SHA256 `ab178183a97c64cf1f563bce5681bda8ada894e305270c1fadf89a4aecae5745`。身份 `fc1e1c9482aa67bf825cdf1d17a37f7cfbeb8e2542541dbcf3ea966ab2d7a484`。干净 `d9f946f` 标准检查 157/157。[预登记](../runs/round2-qwen-judge-01/preregistration.md) · [验真](../runs/round2-qwen-judge-01/verify-run.json) · [PID](../runs/round2-qwen-judge-01/pid-check.json) · [检查收据](../runs/_receipts/check-d9f946f3085e56d0b65facea7b6ebead0935e16e.json)
 - HY4 预登记 SHA256 `e70072dd771a4275bfbecd3b913068622ac77e924c6ed92ea4a453d91d03ea3e`。身份 `b7ea5cb7f06d424ca2c1fe1cf2194fa4ffc10277ec081439ae7a130ccc1fa4b6`。干净 `14a0d91` 标准检查 158/158。[预登记](../runs/round2-hy4-capped-01/preregistration.md) · [验真](../runs/round2-hy4-capped-01/verify-run.json) · [PID](../runs/round2-hy4-capped-01/pid-check.json) · [检查收据](../runs/_receipts/check-14a0d910323179d493c467ed93848288a16db780.json)
 
-**停在候选选择。** 本机调研 `%TEMP%\teacharena\round2\judge-model\survey.md` 列出的未实测候选包括 Qwen3-Next 80B Instruct（DeepInfra FP8）、Mistral Small 4（Mistral ZDR）、Gemini 2.5 Flash-Lite（AI Studio）。[Qwen3-Next 端点](https://openrouter.ai/api/v1/models/qwen/qwen3-next-80b-a3b-instruct/endpoints) · [Mistral 端点](https://openrouter.ai/api/v1/models/mistralai/mistral-small-2603/endpoints) · [Gemini 端点](https://openrouter.ai/api/v1/models/google/gemini-2.5-flash-lite/endpoints)
+**停在候选选择。** [裁判选型调研](research/round2/judge-model/survey.md)列出的未实测候选包括 Qwen3-Next 80B Instruct（DeepInfra FP8）、Mistral Small 4（Mistral ZDR）、Gemini 2.5 Flash-Lite（AI Studio）。[Qwen3-Next 端点](https://openrouter.ai/api/v1/models/qwen/qwen3-next-80b-a3b-instruct/endpoints) · [Mistral 端点](https://openrouter.ai/api/v1/models/mistralai/mistral-small-2603/endpoints) · [Gemini 端点](https://openrouter.ai/api/v1/models/google/gemini-2.5-flash-lite/endpoints)
 
 裁判选定后，用最终身份重跑 S1 与 V1/V2/A1/A2 的定向扰动，另复核 `normal` 的 V2 #4/#5 疑点。两项均通过后冻结。
 
@@ -487,9 +493,9 @@ v3 初评 manifest SHA256 为 `a8a68385fc5b6aa9e92dd043492fcb924bd4cc9844a2c9cf7
 | 生成 | [start](../runs/_receipts/ruler-train-gen-v1.start.json)、[requests](../runs/_receipts/ruler-train-gen-v1.requests.jsonl)、[process](../runs/_receipts/ruler-train-gen-v1.process.json) | 120 / 396 | 563,520 / 1,881,216 | 84,689 / 129,280 / 61,894 / 275,863 |
 | 初评 | [start](../runs/_receipts/ruler-train-score-v1.start.json)、[requests](../runs/_receipts/ruler-train-score-v1.requests.jsonl)、[process](../runs/_receipts/ruler-train-score-v1.process.json) | 15 / 45 | 983,040 / 2,949,120 | 48,063 / 1,024 / 185,526 / 234,613 |
 
-重试和用量缺报均为 0。两阶段合计实报 510,476 token。原 20 条最省档估算来自本机 `%TEMP%/teacharena/ruler-expand/plan.md` 第 6 节（SHA256 `59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22`），生成 295,800、初评 379,000，合计约 674,800 token。按 15 条线性折算，生成约 221,850 token，实报高 24.3%；初评约 284,250 token，实报低 17.5%。实际请求输出额度均低于预检上限。15 次裁判请求未观察到推理 token 超出请求推理上限。
+重试和用量缺报均为 0。两阶段合计实报 510,476 token。原 20 条最省档估算来自[补尺子计划](research/ruler-expand/plan.md)第 6 节（SHA256 `59a501ce1df6c0e731c4c22c3c0e847438b83dac9c3b126b7efb2ce6a9ea0c22`），生成 295,800、初评 379,000，合计约 674,800 token。按 15 条线性折算，生成约 221,850 token，实报高 24.3%；初评约 284,250 token，实报低 17.5%。实际请求输出额度均低于预检上限。15 次裁判请求未观察到推理 token 超出请求推理上限。
 
-复核材料在本机 `%TEMP%/teacharena/ruler-expand/labeling/ruler-train-score-v1/`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。v4 的变更引用保留在 `git show 3bd3b17:contracts/judge/ruler-change.json`，绑定原生成 run 和同 SHA256 的 `labels-locked.csv`。切回 v3 后 `npm run check` 仍校验原 v3 指纹，任何新尺子变更仍须提供训练引用。
+复核材料仅在仓库外的归档 `D:\Archive\teacharena\ruler-expand\labeling\ruler-train-score-v1\`。五份交接文件的摘要见 `.tmp/scratch/ruler-expand/verify-delivery.log`。先在评分 run 下锁定 `labels.csv` 再揭分。v4 的变更引用保留在 `git show 3bd3b17:contracts/judge/ruler-change.json`，绑定原生成 run 和同 SHA256 的 `labels-locked.csv`。切回 v3 后 `npm run check` 仍校验原 v3 指纹，任何新尺子变更仍须提供训练引用。
 
 ## 未见题验证结果
 
@@ -696,7 +702,7 @@ r1 未上报用量的四次调用均收到 HTTP 200 后触发本地 180 秒超�
 
 ### 尺子范围和已知问题
 
-当前尺子只覆盖整段公开对话的六维评分，六项等权，合计 0–12。旧 v6 的单轮评价（35%）、规则轨迹指标（16%）、学生变化（25%）和完成乘子 `p` 均未接入。旧版整段裁判层（24%）内的任务义务同样未接入。依据为本机 `%TEMP%\teacharena\ruler-old-vs-new.md` 的静态对照，现行契约见裁判 README。旧 v6 与当前分数采用各自口径回读。[裁判契约](../contracts/judge/README.md)
+当前尺子只覆盖整段公开对话的六维评分，六项等权，合计 0–12。旧 v6 的单轮评价（35%）、规则轨迹指标（16%）、学生变化（25%）和完成乘子 `p` 均未接入。旧版整段裁判层（24%）内的任务义务同样未接入。依据为[旧 v6 与新 v3 尺子静态对照](research/round1/ruler-old-vs-new.md)，现行契约见裁判 README。旧 v6 与当前分数采用各自口径回读。[裁判契约](../contracts/judge/README.md)
 
 - **S1。** 整段六维验证固定场景中的四项方向和证据回读。单轮质量、规则轨迹、学习增量和完成状态在当前验收范围之外。
 - **第 4 步的反馈边界。** 对 harness 的反馈限于同一尺子和预登记目标的整段分档。轮级退化、规则轨迹、学习增量和完成状态需要各自的诊断证据，才可归因到具体改动。

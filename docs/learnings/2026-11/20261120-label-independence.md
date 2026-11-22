@@ -4,7 +4,7 @@
 
 **根因与边界。** 已证实审阅者复核的是已有预标，不是先写一份独立标签；也没有隔天重标的稳定性数据。两份 CSV 相同不能说明用户是独立想到同一分档，还是认可预标，不能从零修改推断其判断过程。
 
-**证据。** `3bd3b17` 的训练初评记录和[初评与复评](../../status.md#补尺子训练初评和复评)。`runs/ruler-train-score-v1/label-lock.json` 含同一 SHA256 的锁定标签和预标稿及 `byteEqual: true`；同 run 的 `calibration-results.json` 为 90 个配对且 `edits` 为空。原方案见本机 `%TEMP%/teacharena/ruler-expand/plan.md:89–92`。
+**证据。** `3bd3b17` 的训练初评记录和[初评与复评](../../status.md#补尺子训练初评和复评)。`runs/ruler-train-score-v1/label-lock.json` 含同一 SHA256 的锁定标签和预标稿及 `byteEqual: true`；同 run 的 `calibration-results.json` 为 90 个配对且 `edits` 为空。原方案见[补尺子计划第 89–92 行](../../research/ruler-expand/plan.md#L89-L92)。
 
 **修复或现状。** 把本轮结果表述为用户认可的跨模型一致性，不称人工独立校准，也不把用户复核写成多人共识。训练通过线不变，未取得独立人工结果。
 
