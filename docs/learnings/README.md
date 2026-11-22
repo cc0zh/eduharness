@@ -21,10 +21,15 @@
 | 2026-11 | [构造矩阵零错不代表学生证据充分](2026-11/20261121-construction-truth-coverage.md) | 第二轮 S1 `b0fc4d3`、`s1-binary-round2-01` |
 | 2026-11 | [定向扰动后要核对裁判是否换了引用](2026-11/20261121-counterfactual-anchor-switch.md) | 第二轮 ①b `round2-perturbation-01`，`normal` #4–#7 |
 | 2026-11 | [延长观察不等于救回判决](2026-11/20261121-deadline-reveals-reasoning-exhaustion.md) | 第二轮 ①c `round2-timeout-v2-01`，四次 `length` |
+| 2026-11 | [模型目录能解析不等于审核路由可访问](2026-11/20261121-auditor-catalog-not-access.md) | 阶段 2a `stage2a-hard-learners-01`，三次 HTTP 403 |
+| 2026-11 | [原字引文匹配不等于找对知识来源](2026-11/20261121-quote-match-not-knowledge-source.md) | 阶段 2a `stage2a-hard-learners-02`，#8/#9 和审核标签对照 |
+| 2026-11 | [JSON mode 仍需有界本地校验](2026-11/20261121-json-mode-needs-bounded-repair.md) | 阶段 2a `stage2a-hard-learners-04/05`，裸文本、LaTeX 反斜线与 JSON mode 重跑 |
 | 2026-11 | [推理为零、正文及时，仍须校验证据锚](2026-11/20261121-reasoning-off-binding-failure.md) | 第二轮 ①d `round2-reasoning-off-01` 的 `r1/normal`，三次 M2 锚不匹配 |
 | 2026-11 | [判决与格提交要在同一条结算记录](2026-11/20261121-atomic-ruling-commit.md) | 第二轮 ①e 强杀和同 ID 续跑 |
 | 2026-11 | [压低总输出上限仍会被推理占满](2026-11/20261121-capped-output-reasoning-exhaustion.md) | 第二轮 ①g `round2-hy4-capped-01`，五次 `length` |
 | 2026-11 | [构造题零错不替代冻结复测](2026-11/20261122-bakeoff-pass-is-not-freeze.md) | ①h `round2-bakeoff-gemini-proxy-01`、`round2-binary-v3-freeze-gemini-01` |
+| 2026-11 | [连续满分也可能漏掉审核边界](2026-11/20261122-audit-validation-needs-boundary-cases.md) | 阶段 2a `stage2a-audit-validation-2`、`stage2a-hard-learners-05` |
+| 2026-11 | [自证伪减少不等于画像达线](2026-11/20261122-self-falsification-is-not-profile-fidelity.md) | 阶段 2a `stage2a-learner-fix-pilot-01`、`stage2a-learner-fix-full-01` |
 
 ## 目录与命名
 

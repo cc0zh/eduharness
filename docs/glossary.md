@@ -11,6 +11,8 @@
 | 证据序号 `message number` | `e1-numbered-evidence-v2` 下当前可见窗口中从 1 开始的整数引用。 | 不是跨窗口稳定的消息 ID。 | 裁判 `message_numbers` 或 `opportunity_numbers`，通过 `binding.messageIds[n-1]` 映射。 | judge |
 | 消息 ID `message ID` | 一条公开消息在原始对话中的完整标识。 | 不是裁判输出的证据序号。 | `transcript.json` 的 `id`；落盘裁判引用以该 ID 回读。 | core / judge |
 | 学生生成契约故障 `simulator_generation_contract` | 学生输出未通过完整 JSON 和结构检查。 | 不是模拟学生作答错误。 | 末次学生尝试与校验失败分类。 | core / learner |
+| 学生保真 `learner fidelity` | 学生在固定刺激下按私有画像行动，且能在有针对性的教学下进步。 | 不是教师分数或掌握度估计。 | 固定开发题前缀、学生 #9、独立 AI 审核引用和预登记判线。 | [learner](../contracts/learner/README.md) |
+| 保真审核契约故障 `fidelity_audit_contract` | 保真审核输出未通过完整 JSON、字段或公开引文校验。 | 不是对学生画像的负面结论。 | 审核尝试和校验失败分类。 | core / learner |
 | 推理耗尽 `reasoning_exhausted_empty` | 达到输出上限、没有可见正文，且 provider 明确报告所有输出 token 均为推理。 | 不根据长度上限或正文为空猜原因。 | 调用遥测的停止原因、请求上限、`reasoningTokens` 和 `usage.output`。 | core |
 | 尺子 `ruler` | 固定的评分规则、证据校验和计分方法，用于解释 harness 改动。 | 不是教师本身，也不是名次。 | `identity.ruler`。从 `e1-numbered-evidence-v3` 起使用明确的主动权分档边界和理由引用。旧版与新版分档不可直接比较。 | [judge](../contracts/judge/README.md) |
 | 评测身份 `evaluation identity` | 定义可比较条件的版本化快照。 | 单独的 run ID 或模型名不足以标识。 | `manifest.json` 的 `identity`、`identityId`、`scenario` 与 `mode`。本次启用 `identity.version: evaluation-identity-v2`，纳入新版尺子和调用策略。 | [artifacts](../contracts/artifacts/README.md#评测身份) |

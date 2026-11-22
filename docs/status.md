@@ -1,5 +1,143 @@
 # 当前状态
 
+<a name="stage2a-learner-fix"></a>
+
+## 阶段 2a 学生自证伪修复（20261122）
+
+**阶段 2a 已合入本地 `main`。** 甲组复跑的结论不变：顽固误解型、伸手要答案型能用，假装懂了型不可用。按预登记停止，不补跑或再改画像。甲组仅在高压学生场景中关闭 DeepSeek Flash 的 `thinking`，不加共享条款，三张画像哈希不变。保真审核仍用 `hard-learner-audit-v5-gemini`，提示、端点、预算和代理条件不变。[学生配置](../config/hard-learners.mjs) · [原判线](#stage2a-gemini-audit)
+
+合并改变了默认 E1/E2 的 `identityId` 和二元尺子 v4 的 `judgeFingerprint`。原因是 `src/models.mjs` 等文件的源码哈希变化，身份计算规则未改。离线固定输入下，E1/E2、S1 和二元尺子 v2/v3/v4 的 82 个出站请求体逐字一致，端点和代理选择不变。抽查的四份历史 run 验真均通过。阶段 1 下轮预登记使用合并后的身份；v4 不冻结。[本地合并复核](../.tmp/scratch/merge-stage2a/progress.md)
+
+**四组小样。** S0-01/independent 中，只有亲自做了未指定的特例、再据此修正或动摇原误解，才计自证伪。先盲读 #9 再解盲。S0-06/targeted 每组两条，检查学生确实使用老师给的坐标。四次同条件重复复用提示、温度为 0，只用于本轮选优。
+
+| 配置 | 自证伪 | 独立解释命中 | 针对错因命中 | 指定代值通过 |
+| --- | ---: | ---: | ---: | ---: |
+| 对照：low、无共享条款 | 2/8 | 7/8 | 2/2 | 2/2 |
+| 甲：off、无共享条款 | 0/8 | 4/8 | 2/2 | 2/2 |
+| 乙：low、有共享条款 | 1/8 | 6/8 | 2/2 | 2/2 |
+| 丙：off、有共享条款 | 0/8 | 4/8 | 2/2 | 2/2 |
+
+甲与丙两条代值均通过，自证伪均为 0/8。预登记的平手顺序是甲、乙、丙，因此选甲。画像命中不用于平手，也不能用自证伪减少代替完整验收。[40 条 #9、标签和 callId](../runs/stage2a-learner-fix-pilot-01/pilot-report.md)
+
+**甲组 48 条复跑。** 每画像审齐 16/16。顺序为重复、给答案、针对错因、独立解释，每项需 ≥3/4。三类两题可教性均 2/2、2/2，无跃迁或泄漏。比较基线是 run 05 的 Gemini 重审，不是旧 Qwen 结果。
+
+| 画像 | run 05 Gemini | 本轮 | 结论 |
+| --- | --- | --- | --- |
+| 顽固误解型 | 4/4、4/4、4/4、4/4 | 4/4、4/4、4/4、4/4 | 能用 → 能用 |
+| 伸手要答案型 | 3/4、4/4、4/4、4/4 | 4/4、4/4、4/4、4/4 | 能用 → 能用 |
+| 假装懂了型 | 4/4、4/4、4/4、2/4 | 2/4、4/4、4/4、2/4 | 不可用 → 不可用 |
+
+假装懂了型的四个未命中都在 S0-01。两遍独立解释只提议代入 `z=1`，仍主张六项该相消；两遍重复却主动摊开不理解之处。由 `repair` 变为 `misconception` 仍不命中该画像的独立解释要求。保留全部审核标签，未续跑。[逐条件与 48 条对比](../runs/stage2a-learner-fix-full-01/hard-learner-fidelity-report.md)
+
+**收据。** 小样登记 SHA256 `75f696270bc8847b10937fa40f07baefb48f9703708b1e47cae18fae9234a1fb`，复跑登记 `7eef0d9ab043dc65864623fb6393ae14788f59ee32c5e437c225bf5f3ccfd11e`，均先于零请求预检和真实启动。两次均在干净 `ba2dbc0` 上通过 42 项范围检查。两份 `manifest.json` 各保存当次收据，公用[收据路径](../runs/_receipts/check-hard-learners-ba2dbc01b5321fe41602715dca472c005215e4d4.json)保留最近一次检查。`--verify-run` 均通过；启动、进程、manifest、调用原件与遥测的 PID 一致，无停线、重试或总用量缺报。关闭推理的学生回包未报推理用量，不能把缺报读成零。
+
+| 运行 | PID | 实发／上限 | 请求输出 token／上限 | 实报总 token |
+| --- | ---: | ---: | ---: | ---: |
+| [40 条小样](../runs/stage2a-learner-fix-pilot-01/pid-usage-check.json) | 50892 | 56／168 | 229,376／688,128 | 78,895 |
+| [48 条复跑](../runs/stage2a-learner-fix-full-01/pid-usage-check.json) | 53208 | 60／180 | 245,760／737,280 | 74,517 |
+| 合计 | | 116／348 | 475,136／1,425,408 | 153,412 |
+
+[本地进度、预检与审查](../.tmp/scratch/hard-learners/learner-fix/progress.md)
+
+<a name="stage2a-gemini-audit"></a>
+
+## 阶段 2a Gemini 审核（20261122）
+
+**采用 Gemini 重审 run 05。伸手要答案型由不可用转为能用。** 这不是新学生配置的结论。源 run 05 使用 DeepSeek Flash、`thinking: low`；48 条新审核绑定相同的 48 份转录和 12 份原审核证据视图，未生成学生回复。顽固误解型仍能用，假装懂了型仍不可用。
+
+`fidelity_audit` 使用 `google/gemini-3.8-flash` / `google-ai-studio`、`reasoning.effort: low`、温度 0、每请求 4,096 输出 token、120 秒 deadline。出站为严格 `json_schema`、`require_parameters: true`、`allow_fallbacks: false`，显式使用 `HTTPS_PROXY`。策略 `hard-learner-audit-v5-gemini` 与评测身份绑定路由、预算、传输、源对话和预登记。审核提示 v2 SHA256 `c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0` 不变。既有学生生成入口的 Qwen 默认不变。[策略](../config/fidelity-audit.mjs)
+
+**验证。** 保留原 16 条，加独立复核的 24 条原创难例，四类各 6 条。Gemini 两遍各 **40/40**，难例各 **24/24**，跨遍一致 **40/40**；达到各 36/40、22/24、36/40 的预登记线。Qwen v2 难例 **21/24**（87.5%，描述性对照）。D01、D02、D03 把有验算但没有修正的回复误判为 `correctionWithBasis=true`，派生为 `repair`。[Gemini 验证](../runs/stage2a-gemini-audit-validation-01/validation-report.md) · [Qwen 逐条错因](../runs/stage2a-qwen-hard-audit-validation-01/validation-report.md) · [难例真值冻结](../.tmp/scratch/hard-learners/audit-validation/hard-truth-review.md)
+
+**48 条重审。** 每画像审核齐 16/16。按原登记，每条件须 ≥3/4，两题可教性各须 ≥1/2，跃迁和泄漏须为零。两侧三画像在两题上的可教性均 2/2，均无跃迁或泄漏。条件顺序为重复／给答案／针对错因／独立解释。
+
+| 画像 | Qwen 条件命中 | Gemini 条件命中 | 使用结论旧 → 新 |
+| --- | --- | --- | --- |
+| 顽固误解型 | 3/4、4/4、4/4、3/4 | 4/4、4/4、4/4、4/4 | 能用 → 能用 |
+| 伸手要答案型 | 4/4、2/4、4/4、3/4 | 3/4、4/4、4/4、4/4 | 不可用 → 能用 |
+| 假装懂了型 | 4/4、4/4、4/4、2/4 | 4/4、4/4、4/4、2/4 | 不可用 → 不可用 |
+
+四标签在 11/48 条上有变化。七个事前反例与复核参考全部相符：两条给答案改判 `answer-dependence`，一条选定候选改判 `attempt`，一条卡住却仍坚持旧规则改判 `misconception`，一条验算仍坚持改判 `misconception / attempt`。两条假装懂了型仍判 `repair`，不命中独立解释条件。伸手型另有一条重复条件新判 `exposed-gap` 而未命中，原话也有询问下一步；不事后重标。构造题全对不代表原件每个标签正确。[48 条对照与七例](../runs/stage2a-hard-learners-05-gemini-reaudit-01/reaudit-report.md) · [逐字段及引文](../runs/stage2a-hard-learners-05-gemini-reaudit-01/result.json)
+
+验证预登记 SHA256 `993776d46eb8a868abd6f10ace96e6cdc6ad09355226f384237b5fdeed7364ca`；过线后另锁重审预登记 `0e4edbeee6d856f53fd9287fbc46d294eb572111c1906331576dabf87d6d9c63`。三次零请求预检及 PID 见[进度](../.tmp/scratch/hard-learners/gemini-audit/progress.md)。三次真实运行使用干净 `14c3e91` 的 [316 项检查收据](../runs/_receipts/check-14c3e918eff87384d78c12ac60d40898351fc9aa.json)，`--verify-run` 均通过。启动、进程、manifest、请求事件和遥测的 PID 一致；没有重试、停线或用量缺报。
+
+| 运行复核 | PID | 实发／该侧上限 | 请求输出 token／该侧上限 | 实报总 token |
+| --- | ---: | ---: | ---: | ---: |
+| [Qwen 难例](../runs/stage2a-qwen-hard-audit-validation-01/verify-run.json) | 51360 | 24／72 | 98,304／294,912 | 33,827 |
+| [Gemini 两遍](../runs/stage2a-gemini-audit-validation-01/verify-run.json) | 41652 | 80／240 | 327,680／983,040 | 111,279 |
+| [Gemini 重审](../runs/stage2a-hard-learners-05-gemini-reaudit-01/verify-run.json) | 51288 | 12／36 | 49,152／147,456 | 37,344 |
+| 合计／任务授权 | | 116／312 | 475,136／1,277,952 | 182,450 |
+
+<a name="stage2a-json-mode-rerun"></a>
+
+## 阶段 2a JSON mode 正式续跑（20261121）
+
+**`stage2a-hard-learners-05` 收齐 48/48 条生成和审核。** 本轮只更换学生 JSON 输出协议及技术停线，不动画像、条件、行为判线或审核第 2 版。学生输出评测身份为 `hard-learner-fidelity-v2`：DeepSeek `json_object`、有界清理、歧义转义拒绝；三类画像哈希与正式审核提示 SHA256 `c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0` 沿用原值。预登记合并 SHA256 `aa1bd23f82d2c92923034008daaab57ef56fca9f49a95b899e5d5d787027f2b1`。[预登记](../.tmp/scratch/hard-learners/preregistration-json-mode.md) · [逐条报告和第三轮对照](../runs/stage2a-hard-learners-05/hard-learner-fidelity-report.md)
+
+| 画像 | 重复 | 给答案 | 针对错因 | 独立解释 | 两题可教性 | 跃迁／泄漏 | 机器判线 | 本轮使用结论 |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |
+| 顽固误解型 | 3/4 | 4/4 | 4/4 | 3/4 | 2/2、2/2 | 0／0 | 能用 | 能用 |
+| 伸手要答案型 | 4/4 | 2/4 | 4/4 | 3/4 | 2/2、2/2 | 0／0 | 需改 | 不可用 |
+| 假装懂了型 | 4/4 | 4/4 | 4/4 | 2/4 | 2/2、2/2 | 0／0 | 需改 | 不可用 |
+
+逐条分母为已审核有效回复，均为 4；每类已审 16/16。失败回复 0，审核故障 0，格式清理 0。只有机器判线完整达到「能用」的画像可用；其余按本次预登记记为不可用，不把失败或未审核项当作行为反例。本次到此停止，不续改画像。
+
+与第三轮的逐条件、两题可教性和行为例见报告；三轮后有假装懂了型澄清和审核第 2 版变化，本轮再增加 JSON 输出身份，比较仅作描述性结果。第三轮机器结论为 `需改 / 需改 / 需改`；本轮为 `能用 / 需改 / 需改`。
+
+运行于干净 HEAD `a5ad7cb8808aa6818f8997350625a0172a965b79`，范围检查 33/33，预检 0 请求。正式进程 PID `34236`，exit 0、60 请求、`acceptance=true`、`--verify-run verified=true`。硬上限 180 次和 737,280 请求输出 token；实际 60 次、245,760 请求输出额度，实报输出 17,430、实报总量 84,372 token，无缺报、无重试。[范围收据](../runs/_receipts/check-hard-learners-a5ad7cb8808aa6818f8997350625a0172a965b79.json) · [零请求预检](../runs/_receipts/stage2a-hard-learners-estimate-06.process.json) · [正式复核](../runs/stage2a-hard-learners-05/verify-run.json)
+
+<a name="stage2a-audit-validation-rerun"></a>
+
+## 阶段 2a 审核验证与正式重跑停线（20261121）
+
+**审核验证通过，正式小样按停线退出。第三轮结论和判线保持原样。** Qwen 审核对 16 条冻结构造样本两遍均为 16/16 四字段全对，跨遍一致 16/16。之前提示 v0 为 10/16、8/16、14/16；v1 为 14/16、14/16、16/16，均未过 15/16 线。本批样本曾用于两次提示修订，验证结论仅限这 16 条。[全版本报告](../runs/stage2a-audit-validation-2/audit-validation-report.md) · [构造真值和预登记](../.tmp/scratch/hard-learners/audit-validation/preregistration.md)
+
+审核复审 v2/v3/v4 整条一致率分别为 10/12、9/12 和 11/12。v2 与 v4 的共同 11 条都同判 10 条。v4 的构造验证通过，但只支持这批刻意构造的样本，不能证明审核对所有回复一致或正确。校准结果及限制见[本地记录](../.tmp/scratch/hard-learners/progress.md)。
+
+审核通过后仅修改假装懂了型。给答案时要有可识别的理解表态；独立解释时先尝试、暴露原误解所在的缺口，并让这个缺口保持未解。新提示及判线沿用 v4 审核和冻结门槛。单轮正式小样只完成 25/48 条生成和 24/48 条审核，第二遍 S0-01 顽固误解型独立解释发生同类 JSON 故障停线。因此三类本轮均记 **不可用，正式小样未完成**。这不意味着已审核的半批行为都不合格。
+
+`stage2a-hard-learners-04` 第三次 `simulator_generation_contract` / `invalid JSON document` 故障在 `r2/S0-01/stubborn/independent` 的第二次尝试停止；此前 `r1/S0-06/stubborn/targeted` 已有一次同类失败。未重启或换模型。进程退出 1、PID `43448`、34/72 请求、139,264/294,912 输出请求额度、实报 45,950 token、无用量缺报。`--verify-run` 中 `verified=true` 与 `conclusion=complete` 只说明已落盘部分的收据一致；同一结果仍是 `acceptance=false` 且 exit 1，不代表 48 条矩阵完成。[报告、逐条证据及部分分母](../runs/stage2a-hard-learners-04/hard-learner-fidelity-report.md) · [收据核验](../runs/stage2a-hard-learners-04/verify-run.json) · [正式预登记](../runs/stage2a-hard-learners-04/preregistration.md)
+
+干净 `2a63f11` 的范围检查通过 23 项，预检 `stage2a-hard-learners-estimate-05` 为零请求，硬上限 72 次和 294,912 请求输出 token。[范围收据](../runs/_receipts/check-hard-learners-2a63f11134217eedbc7148eab22e0aabd5425574.json) · [预检收据](../runs/_receipts/stage2a-hard-learners-estimate-05.process.json)
+
+本轮画像修改次数已用完。审核验证、本轮停线和画像使用结论均已记录。第三轮原报告、判线、画像和 run 原件未改，后续不得在无新决定前重启或追加画像轮次。
+
+<a name="stage2a-hard-learners-revision"></a>
+
+## 阶段 2a 画像单轮修订与审核校准（20261121）
+
+**`stage2a-hard-learners-03` 审核齐 48/48，三类画像最终均为不可用。** 原样本的重复审核整条同判为 10/12。只改提示的 v3 为 9/12，停在审核校准。v4 结构化提交尝试、修正依据和新增事实原字，复审同判 11/12，几何两例均同为 `repair` 且无跃迁，两条教师给数的跃迁位均为 false。`r2/S0-06/pretender/answer` 仍有一个进步标签分歧。新旧共有 11 条，两版均同判 10 条。闸门通过后才修订各画像一次。[原口径复审](../runs/stage2a-audit-original-01/result.json) · [v3 复审](../runs/stage2a-audit-calibrated-01/result.json) · [v4 复审](../runs/stage2a-audit-calibrated-02/result.json)
+
+| 画像 | 重复 | 给答案 | 针对错因 | 独立解释 | 两题可教性 | 跃迁标记／泄漏 | 最终 |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 顽固误解型 | 4/4 | 3/4 | 4/4 | 2/4 | 2/2、1/2 | 1／0 | 不可用 |
+| 伸手要答案型 | 4/4 | 2/4 | 4/4 | 4/4 | 2/2、2/2 | 0／0 | 不可用 |
+| 假装懂了型 | 3/4 | 0/4 | 4/4 | 1/4 | 2/2、1/2 | 1／0 | 不可用 |
+
+对照原小样，三类的重复条件均过 3/4，两题可教性均达到各至少一次。审核仍把两条由 5 与 3 的比较支撑的局部修正标为跃迁，两条明确索步骤的回复被判表面理解。报告保留标签及前后数值，另列 #8/#9 回读。画像修订额度已用完。原 run 和结论在下节保留。[正式报告](../runs/stage2a-hard-learners-03/hard-learner-fidelity-report.md) · [预登记与附录](../runs/stage2a-hard-learners-03/preregistration.md)
+
+附录合并 SHA256 `9d0bd249eef81b2e822d76a7c16f2d502b683ea75bb5ec25e3273a293e25e2b5`。干净 `27f004d` 范围检查 22/22，预检 0 请求。正式 run 退出 0，`--verify-run` 通过，启动、进程、manifest 与尝试遥测均为 PID `33336`。62/72 次请求、253,952/294,912 请求输出 token，实报 80,396 token，无缺报。两次学生 JSON 契约重试恢复。[复核](../runs/stage2a-hard-learners-03/verify-run.json) · [预检收据](../runs/_receipts/stage2a-hard-learners-estimate-04.process.json)
+
+<a name="stage2a-hard-learners"></a>
+
+## 阶段 2a 高压学生保真（20261121）
+
+**重跑收齐 48/48 条审核，没有画像能用于考教师。** `stubborn` 在针对错因的反例或换表征后才修正；`answer-seeker` 在教师交还具体任务时尝试；`pretender` 在独立检查时露出卡点。有针对性教学时三类都允许局部进步。旧学生提示、公共九条与 #7 边界不变。[学生契约](../contracts/learner/README.md)
+
+`stage2a-hard-learners-01` 在 GPT-4.1 mini 经 OpenRouter 的审核请求三次 HTTP 403 后停线，4/48 生成、0/48 审核。仅能确认请求被拒；旧原件不含错误体或实际上游。原[报告](../runs/stage2a-hard-learners-01/hard-learner-fidelity-report.md)和[复核](../runs/stage2a-hard-learners-01/verify-run.json)保留。
+
+`stage2a-hard-learners-02` 按附录从头生成，不复用四条旧回复。`568e0c1` 锁定跨家族审核 `openrouter/qwen/qwen3-235b-a22b-2507` 和 `parasail/fp8`，严格 JSON，不发送推理或允许回退。12 次成功审核每次覆盖四条回复，均流报 Parasail，推理实报为 0。审核不是人工评审，不出教师分数。[预登记与附录](../runs/stage2a-hard-learners-02/preregistration.md) · [报告及 #8/#9 引用](../runs/stage2a-hard-learners-02/hard-learner-fidelity-report.md)
+
+| 画像 | 重复 | 直接答案 | 针对错因 | 独立解释 | 两题可教性 | 跃迁标记／泄漏 | 结论 |
+| --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 顽固误解型 | 2/4 | 2/4 | 3/4 | 2/4 | 2/2、0/2 | 1／0 | 不可用 |
+| 伸手要答案型 | 0/4 | 4/4 | 4/4 | 4/4 | 2/2、2/2 | 1／0 | 需改 |
+| 假装懂了型 | 1/4 | 2/4 | 4/4 | 4/4 | 2/2、2/2 | 1／0 | 需改 |
+
+表中是冻结判线的 AI 审核结果，每类审核齐 16/16。前四列各需 3/4；两题分别至少有一条有依据的进步；跃迁与泄漏均须为 0。S0-06 的顽固误解型 `targeted` 两遍 #9 都比较出 5 和 3 并松动，但一遍 `repair` 被标跃迁，另一遍只给 `attempt`，因此 0/2 不能断言教不会。另两条跃迁标记引用了 #8 已给的数值，和预登记相冲突。保留原标签和判线。弱刺激仍有反例，本轮无预算重测，未修改画像。
+
+附录合并后 SHA256 `74ea73ac0a508b2143e05ed8cdbf03fdcf116b964b4048263dddc928e6d2f6c8`。[零请求预检](../runs/_receipts/stage2a-hard-learners-estimate-03.process.json)；干净 `568e0c1` 的[范围检查收据](../runs/_receipts/check-hard-learners-568e0c1a8182f08f443ce1d8ef2bed79836ced92.json) 21/21。默认全量检查会读混合题库，未启动。实跑退出 0，`acceptance=true` 仅表示收齐。`--verify-run` 通过，同 PID `46064`。用量 62/62 请求、253,952/253,952 请求输出 token，实报 76,817 token；两次审核 429 恢复，均缺报。[逐原件复核](../runs/stage2a-hard-learners-02/verify-run.json)
+
 <a name="round2-judge-bakeoff"></a>
 
 ## 第二轮 ①h 六维裁判对照与冻结复测

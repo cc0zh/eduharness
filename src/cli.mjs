@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { hardLearnerCheckScope, hardLearnerScenario, learnerFixSelections } from '../config/hard-learners.mjs';
 import { modes, runId } from '../contracts/artifacts/schema.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 import { checkout, loadCredentials, requireCheckReceipt } from './real-preflight.mjs';
@@ -82,7 +83,7 @@ if (option('--export-report') >= 0) {
   };
   const { budget, run, scenarioName } = await import('./run.mjs');
 
-  let config, estimate, rulerRunner, s1Runner, contrastRunner, ceiling;
+  let config, estimate, rulerRunner, s1Runner, fidelityRunner, contrastRunner, ceiling;
   try {
     const { values } = parseArgs({ options: {
       mode: { type: 'string', default: 'offline' }, 'run-root': { type: 'string', default: 'runs' },
@@ -92,26 +93,34 @@ if (option('--export-report') >= 0) {
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
       phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
       harness: { type: 'string' }, 'source-root': { type: 'string' }, preregistration: { type: 'string' }, 'preregistration-sha256': { type: 'string' },
-      'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' },
+      'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' }, 'learner-fix': { type: 'string' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
-    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario].includes(values.scenario)) throw new Error('unknown scenario');
+    const scenarios = ['E1', 'E2', 'ruler-expand', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario];
+    if (!scenarios.includes(values.scenario)) throw new Error(`scenario must be one of: ${scenarios.join(', ')}`);
     const freezeV4 = values.scenario === judgeFreezeV4Scenario;
     if (reservedV4Id && (!freezeV4 || values['estimate-only'] || id !== judgeFreezeV4RunId)) throw new Error('the registered v4 ID is reserved for its real run');
     const freezeRetest = freezeV4 || values.scenario === judgeFreezeScenario;
     const split = freezeRetest || values.scenario === judgeBakeoffScenario;
     const contrast = split || values.scenario === judgeContrastScenario;
-    if (values['proxy-from-env'] && (!split || values.mode !== 'real' || !['haiku', 'gemini'].includes(values['judge-policy']) || values.resume)) {
-      throw new Error('--proxy-from-env is only for real Haiku or Gemini bakeoff runs without --resume');
+    const learnerFix = values['learner-fix'];
+    if (learnerFix !== undefined && (values.scenario !== hardLearnerScenario || !learnerFixSelections.includes(learnerFix))) {
+      throw new Error('--learner-fix requires hard-learner-fidelity and one of pilot, a, b, c');
+    }
+    const proxyBakeoff = split && ['haiku', 'gemini'].includes(values['judge-policy']);
+    if (values['proxy-from-env'] && (values.mode !== 'real' || !(proxyBakeoff || learnerFix) || values.resume)) {
+      throw new Error('--proxy-from-env is only for real Haiku/Gemini bakeoff or learner-fix runs without --resume');
     }
     if (freezeRetest && !values['proxy-from-env']) throw new Error('freeze retest requires the winning proxy transport via --proxy-from-env');
+    if (learnerFix && values.mode === 'real' && !values['proxy-from-env']) throw new Error('learner-fix requires Gemini audit via --proxy-from-env');
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
     if (e2Replay ? !['no_teach', 'all'].includes(judgeCell) : judgeCell !== undefined) throw new Error('E2 judge-only requires --judge-cell no_teach or all');
     if (!values['run-root'].trim()) throw new Error('run-root cannot be empty');
     if ((values.harness !== undefined || values['source-root'] !== undefined) && (values.scenario !== 'ruler-expand' || values.phase !== 'ab')) throw new Error('--harness and --source-root require ruler-expand --phase ab');
-    if ((values.preregistration !== undefined || values['preregistration-sha256'] !== undefined) && !contrast && values.scenario !== s1Scenario) throw new Error('preregistration flags require a binary scenario');
+    if ((values.preregistration !== undefined || values['preregistration-sha256'] !== undefined)
+      && !contrast && ![s1Scenario, hardLearnerScenario].includes(values.scenario)) throw new Error('preregistration flags require a registered audit or binary scenario');
     if (values['judge-policy'] !== undefined && !contrast) throw new Error('--judge-policy requires S1-judge-contrast or S1-judge-bakeoff');
     estimate = values['estimate-only'];
     if (values.resume && (!values.id || estimate)) throw new Error('--resume requires --id and cannot be combined with --estimate-only');
@@ -137,6 +146,19 @@ if (option('--export-report') >= 0) {
       config.registration = values.preregistration;
       config.registrationDigest = values['preregistration-sha256'];
       ceiling = s1Runner.s1Budget();
+    } else if (values.scenario === hardLearnerScenario) {
+      if (hasJudgeSource || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('hard-learner-fidelity uses the fixed development plan');
+      if (values.resume || values.concurrency !== undefined) throw new Error('--resume and --concurrency are not supported for hard-learner-fidelity');
+      fidelityRunner = await import('./hard-learner-run.mjs');
+      const { fidelityBudget } = await import('./hard-learner-plan.mjs');
+      config.registration = values.preregistration;
+      config.registrationDigest = values['preregistration-sha256'];
+      config.learnerFix = learnerFix;
+      if (learnerFix && values['proxy-from-env']) {
+        const { resolveOpenRouterProxySource } = await import('./openrouter-proxy.mjs');
+        config.fidelityProxySource = resolveOpenRouterProxySource().source;
+      }
+      ceiling = fidelityBudget(learnerFix);
     } else if (values.scenario === 'ruler-expand') {
       rulerRunner = await import('./ruler-run.mjs');
       config.phase = values.phase;
@@ -167,7 +189,8 @@ if (option('--export-report') >= 0) {
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
     if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
-    if (freezeV4) config.prepared = (await import('./judge-freeze-v4.mjs')).prepareJudgeFreezeV4(config, estimate);
+    else if (fidelityRunner) config.prepared = fidelityRunner.prepareHardLearners(config, estimate);
+    else if (freezeV4) config.prepared = (await import('./judge-freeze-v4.mjs')).prepareJudgeFreezeV4(config, estimate);
     else if (freezeRetest) config.prepared = (await import('./judge-freeze-retest.mjs')).prepareJudgeFreeze(config, estimate);
     else if (contrastRunner) config.prepared = (contrastRunner.prepareJudgeBakeoff ?? contrastRunner.prepareJudgeContrast)(config, estimate);
   } catch (error) {
@@ -176,13 +199,13 @@ if (option('--export-report') >= 0) {
 
   if (config && !process.exitCode) {
     try {
-      if (estimate || rulerRunner) config.recorder = openRun();
+      if (estimate || rulerRunner || fidelityRunner) config.recorder = openRun();
       if (config.phase === 'test' || config.phase === 'ab') {
         try { config.prepared = rulerRunner.prepareRulerRun(config, { estimate }); }
         catch (error) { rejectInput(error); }
       }
       if (!process.exitCode && estimate) emit({ scenario: s1Runner ? s1Scenario : scenarioName(config), typicalCalls: ceiling.typicalCalls, maxCalls: config.limits.maxAttempts, maxOutputTokens: config.limits.maxRequestedOutputTokens,
-        ...(s1Runner && { source: config.prepared.source }), ...(contrastRunner && { identityId: config.prepared.identityId,
+        ...(s1Runner && { source: config.prepared.source }), ...(fidelityRunner && { logicalCalls: ceiling.logicalCalls }), ...(contrastRunner && { identityId: config.prepared.identityId,
           runId: config.prepared.candidate.runId, judgePolicy: config.judgePolicy, policyVersion: config.prepared.candidate.policy.version,
           route: config.prepared.candidate.route, preregistrationSha256: config.registrationDigest, concurrency: config.concurrency, retriesPerKind: config.prepared.plan.retriesPerKind,
           ...(config.prepared.identity.judgeTransport && { judgeTransport: config.prepared.identity.judgeTransport,
@@ -194,18 +217,20 @@ if (option('--export-report') >= 0) {
       else if (!process.exitCode) {
         const prepared = config.prepared ?? rulerRunner?.prepareRulerRun(config);
         if (config.mode === 'real') {
-          config.checkReceipt = requireCheckReceipt(checkout, recorder ? [recorder.startPath, recorder.requestPath] : []);
+          config.checkReceipt = requireCheckReceipt(checkout, recorder ? [recorder.startPath, recorder.requestPath] : [], fidelityRunner ? hardLearnerCheckScope : undefined);
           if (recorder && (!recorder.start.clean || config.checkReceipt.head !== recorder.start.head)) throw failure('preflight_failed', {}, 'checkout changed after startup');
-          loadCredentials(config.judgeOnly || contrastRunner ? ['judge'] : config.phase === 'train' ? ['teacher', 'learner'] : undefined);
+          loadCredentials(fidelityRunner ? ['learner', 'fidelity_audit'] : config.judgeOnly || contrastRunner ? ['judge'] : config.phase === 'train' ? ['teacher', 'learner'] : undefined);
         }
-        const result = contrastRunner ? await (contrastRunner.runJudgeBakeoff ?? contrastRunner.runJudgeContrast)(config, prepared) : s1Runner ? await s1Runner.runS1(config, prepared)
+        const result = fidelityRunner ? await fidelityRunner.runHardLearners(config, prepared)
+          : contrastRunner ? await (contrastRunner.runJudgeBakeoff ?? contrastRunner.runJudgeContrast)(config, prepared) : s1Runner ? await s1Runner.runS1(config, prepared)
           : rulerRunner ? await rulerRunner.runRuler(config, prepared) : await run(config);
         acceptance = result.acceptance;
         emit(rulerRunner ? rulerRunner.publicRulerResult(result) : result);
         if (!result.acceptance) {
-          const failed = result.cells.find(cell => cell.failure);
-          const problem = failed?.failure;
-          if (s1Runner || contrastRunner) console.error(problem ? `${problem.kind} at ${[failed.repetition, failed.id].filter(Boolean).join('/')}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
+          const failed = result.cells?.find(cell => cell.failure);
+          const problem = result.failure ?? failed?.failure;
+          if (fidelityRunner) console.error(problem ? `${problem.stopRule ?? problem.kind} at ${problem.path}: ${problem.detail}` : `hard-learner-fidelity audited ${result.audited}/${result.planned} replies`);
+          else if (s1Runner || contrastRunner) console.error(problem ? `${problem.kind} at ${[failed?.repetition, failed?.id].filter(Boolean).join('/')}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
           else if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
           else console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);
           process.exitCode = 1;

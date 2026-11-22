@@ -4,6 +4,7 @@ import { binaryDimensionSchema, splitDimensions } from '../contracts/judge/binar
 
 const response = text => fauxAssistantMessage([fauxText(text)]);
 const learner = text => response(JSON.stringify({ text }));
+export const fauxJson = value => response(JSON.stringify(value));
 export function binaryOfflineResponses(condition) {
   const fixture = {
     normal: { M0: [1], M1: [1, 2], M2: [1, 3], S0: [3], A1: [5], P0: [1], P2: [1, 2, 3], V1: [8], V2: [9, 8] },

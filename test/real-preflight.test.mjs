@@ -17,8 +17,12 @@ test('paid preflight requires a clean checkout and a passing receipt for this HE
   const denied = error => error.failure.kind === 'preflight_failed';
   assert.throws(() => requireCheckReceipt(root), denied);
   const head = git('rev-parse', 'HEAD');
+  assert.equal(publishCheckReceipt(head, 2, root, 'hard-learners'), true);
+  assert.equal(requireCheckReceipt(root, [], 'hard-learners').passed, 2);
+  assert.throws(() => requireCheckReceipt(root), denied);
   publishCheckReceipt(head, 3, root);
   assert.equal(requireCheckReceipt(root).passed, 3);
+  assert.equal(requireCheckReceipt(root, [], 'hard-learners').passed, 2);
   const startup = join(root, 'review-output', '_receipts', 'sample.start.json');
   mkdirSync(join(root, 'review-output', '_receipts'), { recursive: true });
   writeFileSync(startup, '{}');

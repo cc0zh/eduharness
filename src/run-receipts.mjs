@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { hardLearnerScenario, learnerFixSelections } from '../config/hard-learners.mjs';
 import { cellIds, filenames } from '../contracts/artifacts/schema.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 import { verifyBatchRun } from './cell-batch-verification.mjs';
 import { checkSnapshot, checkout } from './real-preflight.mjs';
+import { verifyHardLearnerArtifacts } from './hard-learner-verification.mjs';
 import { atomicBytes, atomicJson, readRequestEvents, receiptPaths } from './receipt-files.mjs';
 import { s1Scenario } from './s1-binary-plan.mjs';
 import { judgeContrastScenario } from './judge-contrast-plan.mjs';
@@ -13,8 +15,8 @@ import { verifyS1Artifacts } from './s1-binary-verification.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--concurrency', '--judge-policy']);
-const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario]);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--concurrency', '--judge-policy', '--learner-fix']);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario]);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -34,6 +36,7 @@ function parameterSummary(argv) {
     if (value === undefined) continue;
     const safe = ['--mode', '--scenario', '--phase', '--harness'].includes(name) && safeValues.has(value)
       || name === '--judge-policy' && (Object.hasOwn(judgeCandidates, value) || Object.hasOwn(splitJudgeCandidates, value))
+      || name === '--learner-fix' && learnerFixSelections.includes(value)
       || (name.startsWith('--max-') || name === '--concurrency') && /^\d+$/.test(value)
       || name === '--freeze' && /^[a-f0-9]{40}$/.test(value)
       || name === '--preregistration-sha256' && sha256(value);
@@ -234,7 +237,7 @@ export function verifyRun(root, id) {
   }
   const evaluationReceiptPath = join(root, '_receipts', `${id}.json`);
   const launchScenario = start?.parameters?.values?.scenario;
-  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || ['ruler-expand', s1Scenario].includes(launchScenario) && typeof receipt.acceptance === 'boolean');
+  const requiresAnchor = receipt && (Object.hasOwn(receipt, 'evaluationSha256') || ['ruler-expand', s1Scenario, hardLearnerScenario].includes(launchScenario) && typeof receipt.acceptance === 'boolean');
   if (requiresAnchor && !sha256(receipt.evaluationSha256)) invalid.push('process receipt missing valid evaluationSha256');
   if (receipt && (requiresAnchor || existsSync(evaluationReceiptPath))) {
     const evaluation = load(evaluationReceiptPath, 'evaluation receipt', receipt.evaluationSha256);
@@ -253,7 +256,9 @@ export function verifyRun(root, id) {
           else invalid.push(`${path} could not be read`);
         }
       };
-      if (launchScenario === s1Scenario || evaluation.scenario === s1Scenario) {
+      if (launchScenario === hardLearnerScenario || evaluation.scenario === hardLearnerScenario) {
+        verifyHardLearnerArtifacts({ id, start, receipt, evaluation, requests, checkArtifact, invalid });
+      } else if (launchScenario === s1Scenario || evaluation.scenario === s1Scenario) {
         verifyS1Artifacts({ id, start, receipt, evaluation, requests, checkArtifact, invalid });
       } else if (launchScenario === 'ruler-expand' || ['ruler-expand', 'ruler-expand-judge-only'].includes(evaluation.scenario)) {
         checkArtifact(filenames.manifest, evaluation.manifestSha256);
