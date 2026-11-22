@@ -1,2 +1,6 @@
 /data/upstream/** -text
+/data/ruler-expand-v1.json text eol=lf
+/contracts/judge/schema.mjs text eol=lf
+/src/judge.mjs text eol=lf
+/config/e1.mjs text eol=lf
 /docs/research/*/** -text

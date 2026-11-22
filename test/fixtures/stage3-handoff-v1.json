@@ -1,0 +1,14 @@
+[
+  {
+    "source": "stage3-dev-v1-real-01/candidate/TA2B-F01-A/answer-seeker/transcript.json#6",
+    "text": "84 is right — the buried 5 cm line loses both copies.\n\nTo confirm you're not just trusting the subtraction, trace it a different way: walk the outline. The bottom of piece 1 is 18; its top edge is 18 minus the 5 that piece 2 covers; piece 2 adds its 13 + 5 + 13 on the remaining three sides; and add the two 11 cm ends of piece 1. Does that walk give you 84, and does each of those stretches appear exactly once?"
+  },
+  {
+    "source": "stage3-dev-v1-real-01/candidate/TA2B-F01-A/stubborn/transcript.json#6",
+    "text": "Yes — that's the clean version of the reasoning: the shared segment is trapped inside the joined shape, so it contributes nothing to the outside, and both copies have to go.\n\nQuick check before you go: suppose the second piece only touched along 3 cm of that edge instead of all 5. What would the border be then?"
+  },
+  {
+    "source": "stage3-dev-v1-real-01/candidate/TA2B-F18-B/default/transcript.json#6",
+    "text": "Right — as long as the smallest value stays below 33, it swaps positions with nothing and the third entry is still 33. The boundary worth noting: if you'd changed 24 to something *above* 33, the order would reshuffle and the median would move. Your reasoning holds because the change was downward.\n\nThat's the whole technique here: a signed difference of mean minus median shifts only by how much the mean moves, provided the median stays anchored — and the median only stays anchored when the edited value doesn't cross the middle entry.\n\nNothing further to resolve."
+  }
+]

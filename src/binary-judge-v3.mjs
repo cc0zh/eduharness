@@ -53,7 +53,7 @@ export function binaryDimensionPrompt(view, dimension, ruler = splitBinaryRuler)
 }
 
 export async function gradeBinaryDimension(models, messages, {
-  turn, runId, cell, sourceRunId, repetition, dimension, nextAttempt, retryFeedback, ruler = splitBinaryRuler,
+  turn, runId, cell, sourceRunId, repetition, dimension, nextAttempt, retryFeedback, singleAttempt, ruler = splitBinaryRuler,
 }) {
   const call = splitDimensions.indexOf(dimension) + 1;
   requireThat(call > 0, 'structure', 'unknown binary dimension');
@@ -74,7 +74,7 @@ export async function gradeBinaryDimension(models, messages, {
     systemPrompt: binaryDimensionPrompt(view, dimension, ruler),
     messages: [{ role: 'user', timestamp: Date.now(), content: JSON.stringify(payload) }],
   };
-  const scope = { role: 'judge', turn, call, binding, nextAttempt, retryFeedback };
+  const scope = { role: 'judge', turn, call, binding, nextAttempt, retryFeedback, singleAttempt };
   const { value: verdict, location } = await models.complete(scope, context,
     (text, _response, audit) => parseBinaryDimension(text, view, dimension, audit, ruler),
     models.usesStructuredJudgement('judge') ? schema : undefined);

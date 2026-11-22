@@ -32,6 +32,12 @@
 | 2026-11 | [自证伪减少不等于画像达线](2026-11/20261122-self-falsification-is-not-profile-fidelity.md) | 阶段 2a `stage2a-learner-fix-pilot-01`、`stage2a-learner-fix-full-01` |
 | 2026-11 | [同对话的重复评测也要核对请求内容](2026-11/20261122-repeat-pairs-require-same-request.md) | ①h Gemini 补跑、v3 冻结复测的两次支持维重试 |
 | 2026-11 | [分档稳定时仍要找出实际失分的题位](2026-11/20261122-headroom-by-question.md) | `stage2b-headroom-real-01`，交还主动权 23/24 对同档 |
+| 2026-11 | [锁原件摘要也要锁检出字节](2026-11/20261122-freeze-needs-byte-stable-checkout.md) | 阶段 3 worktree 的 `npm run check` 与 `fa6b501` 冻结 blob |
+| 2026-11 | [选中交权动作不等于真把方法交给学生](2026-11/20261122-handoff-action-is-not-learner-choice.md) | `stage3-dev-v1-real-01`，门控与 #6/#7 原话 |
+| 2026-11 | [盲核理由的长度也是覆盖条件](2026-11/20261122-blind-audit-length-is-coverage.md) | `stage3-dev-v2-real-01`，16 个必审、14 个 `reason` 契约拒收 |
+| 2026-11 | [拆分裁判提示要核对同链择证](2026-11/20261122-split-judge-chain-priority.md) | `stage3-dev-v2-real-01`，F12-B／伸手裁判 A 与盲核原件 |
+| 2026-11 | [交权后核对验证机会落在哪一轮](2026-11/20261122-handoff-verification-opportunity.md) | `stage3-dev-v2-real-01`，V 三个 2→0 配对 |
+| 2026-11 | [观察器多字段与缺状态要分开诊断](2026-11/20261122-observer-extra-key-masks-state.md) | `stage3-dev-v2-real-01`，F01-A／默认、F01-B／默认第 2 轮调用 |
 
 ## 目录与命名
 

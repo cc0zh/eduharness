@@ -11,6 +11,7 @@ import { make403Probe } from '../config/judge-bakeoff-probe.mjs';
 import { judgeModelMetadata, splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { reasoningOffPolicy } from '../config/judge-reasoning-off.mjs';
+import { agencyAudit, observerPolicy, observerRoute, stage3ProxySource } from '../config/stage3.mjs';
 import { judgeParameters, matchesJudgeParameters, matchesReportedRoute, retryFeedbackCode, retryFeedbackCodes, splitRetryPrompt } from './judge-transport.mjs';
 import { resolveOpenRouterProxySource } from './openrouter-proxy.mjs';
 import { captureProviderResponse, redactProviderValue } from './provider-response-diagnostics.mjs';
@@ -118,6 +119,8 @@ export class Models {
   #learnerJsonMode;
   #learnerThinking;
   #audit;
+  #auditRole;
+  #boundedRetries;
   #proxyRole;
   #proxySource;
   #proxy;
@@ -127,7 +130,7 @@ export class Models {
   #probe;
 
   constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false,
-    judgePolicy, judgeProbeStep, judgeProxySource, beforeAttempt, learnerJsonMode = false, learnerThinking, fidelityAuditPolicy, fidelityProxySource }) {
+    judgePolicy, judgeProbeStep, judgeProxySource, beforeAttempt, learnerJsonMode = false, learnerThinking, fidelityAuditPolicy, fidelityProxySource, boundedRetries = false }) {
     const probe = judgeProbeStep === undefined ? undefined : make403Probe(judgePolicy, judgeProbeStep);
     const split = Object.hasOwn(splitJudgeCandidates, judgePolicy) ? splitJudgeCandidates[judgePolicy] : undefined;
     const candidate = probe ?? split ?? (Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined);
@@ -155,19 +158,26 @@ export class Models {
     this.#split = Boolean(split || probe);
     this.#probe = probe;
     this.#judgeTimeoutMs = judgeTimeoutMs;
+    const agency = roles.includes('agency_audit');
+    this.#auditRole = agency ? 'agency_audit' : 'fidelity_audit';
+    this.#boundedRetries = boundedRetries;
     const audit = fidelityAuditPolicy === undefined ? 'qwen' : fidelityAuditPolicy;
-    const auditCoords = { role: 'fidelity_audit', turn: 0, call: 0 };
+    const auditCoords = { role: this.#auditRole, turn: 0, call: 0 };
+    if (agency && (roles.length !== 1 || fidelityAuditPolicy !== undefined || fidelityProxySource !== undefined || judgeProxySource !== undefined)) {
+      throw failure('configuration', auditCoords, 'agency audit requires its own pinned role');
+    }
     if (typeof audit !== 'string' || !Object.hasOwn(fidelityAuditPolicies, audit) || fidelityAuditPolicy !== undefined && !roles.includes('fidelity_audit')) {
       throw failure('configuration', auditCoords, 'invalid fidelity audit policy or role');
     }
-    this.#audit = fidelityAuditPolicies[audit];
-    const requiresAuditProxy = roles.includes('fidelity_audit') && this.#audit.requiresProxy && mode === 'real';
-    if (requiresAuditProxy !== (fidelityProxySource !== undefined) || fidelityProxySource !== undefined && judgeProxySource !== undefined) {
+    this.#audit = agency ? agencyAudit : fidelityAuditPolicies[audit];
+    const auditProxySource = agency && mode === 'real' ? stage3ProxySource : fidelityProxySource;
+    const requiresAuditProxy = roles.includes(this.#auditRole) && this.#audit.requiresProxy && mode === 'real';
+    if (requiresAuditProxy !== (auditProxySource !== undefined) || auditProxySource !== undefined && judgeProxySource !== undefined) {
       throw failure('configuration', auditCoords, 'Gemini fidelity audit requires its own explicit proxy source in real mode');
     }
-    const proxySource = fidelityProxySource === undefined ? judgeProxySource : fidelityProxySource;
+    const proxySource = auditProxySource === undefined ? judgeProxySource : auditProxySource;
     if (proxySource !== undefined) {
-      const role = fidelityProxySource === undefined ? 'judge' : 'fidelity_audit';
+      const role = auditProxySource === undefined ? 'judge' : this.#auditRole;
       const coords = { role, turn: 0, call: 0 };
       if (typeof proxySource !== 'string' || proxySource.length === 0) {
         throw failure('configuration', coords, `${role} proxy source requires an explicit environment variable name`);
@@ -202,7 +212,8 @@ export class Models {
       this.#roles = Object.fromEntries(roles.map(role => [role, faux.getModel()]));
       return;
     }
-    const selected = roles.map(role => [role, role === 'judge' ? this.#judgeRoute : role === 'fidelity_audit' ? this.#audit.route : routes[role]]);
+    const selected = roles.map(role => [role, role === 'judge' ? this.#judgeRoute
+      : role === this.#auditRole ? this.#audit.route : role === 'teacher_observer' ? observerRoute : routes[role]]);
     this.#keys = Object.fromEntries(selected.map(([role, route]) => {
       const key = process.env[route.key]?.trim();
       if (!key) throw failure('configuration', { role, turn: 0, call: 0 }, `missing ${route.key}`);
@@ -212,7 +223,7 @@ export class Models {
     this.#pi.setProvider(deepseekProvider());
     this.#pi.setProvider(router);
     this.#roles = Object.fromEntries(selected.map(([role, route]) => {
-      const needsPin = this.#split && role === 'judge' || role === 'fidelity_audit' && this.#audit.requiresProxy;
+      const needsPin = this.#split && role === 'judge' || role === this.#auditRole && this.#audit.requiresProxy;
       const pinned = needsPin ? judgeModelMetadata[route.id] : undefined;
       if (needsPin && !pinned) throw failure('configuration', { role, turn: 0, call: 0 }, 'configured pinned model metadata absent');
       const model = pinned ?? this.#pi.getModel(route.provider, route.id) ?? (role === 'judge' && route.id === routes.judge.id ? {
@@ -232,6 +243,8 @@ export class Models {
     this.#proxyAgent ??= new ProxyAgent(this.#proxy);
     return this.#proxyAgent;
   }
+
+  close() { return this.#proxyAgent?.close(); }
 
   usesStructuredJudgement(role) {
     return roleConfig(role) === 'judge' && this.model(role).provider === 'openrouter' && this.#judgeRoute.responseFormat === 'json_schema';
@@ -263,11 +276,14 @@ export class Models {
     const { role, turn, call } = scope;
     const canonical = roleConfig(role);
     const callPolicy = this.#policy;
-    const auditRoute = canonical === 'fidelity_audit' ? this.#audit.route : undefined;
-    const config = auditRoute ? this.#audit.policy : callPolicy[canonical];
+    const auditRoute = canonical === this.#auditRole ? this.#audit.route : undefined;
+    const observer = canonical === 'teacher_observer';
+    const agency = canonical === 'agency_audit';
+    const config = auditRoute ? this.#audit.policy : observer ? observerPolicy : callPolicy[canonical];
     const model = this.model(role);
     const learnerJsonMode = this.#learnerJsonMode && canonical === 'learner';
-    const learnerThinking = learnerJsonMode ? this.#learnerThinking : undefined;
+    const learnerThinking = observer ? observerPolicy.thinking : learnerJsonMode ? this.#learnerThinking : undefined;
+    const jsonObject = observer || learnerJsonMode;
     const thinkingType = learnerThinking === undefined ? undefined : learnerThinking === 'off' ? 'disabled' : 'enabled';
     const learnerRequest = learnerJsonMode && { ...context, systemPrompt: `${context.systemPrompt}${learnerJsonExample}` };
     const strictAudit = auditRoute && model.provider === auditRoute.provider;
@@ -278,7 +294,7 @@ export class Models {
     const structuredJudge = route && (schema || probe);
     const nextAttempt = scope.nextAttempt;
     const initialFeedback = scope.retryFeedback;
-    const maxAttempts = callPolicy.maxAttemptsPerCall ?? 3;
+    const maxAttempts = observer || agency || scope.singleAttempt === true ? 1 : callPolicy.maxAttemptsPerCall ?? 3;
     if (split) {
       if (nextAttempt !== undefined && (!Number.isSafeInteger(nextAttempt) || nextAttempt < 1 || nextAttempt > maxAttempts)) {
         throw failure('configuration', { role, turn, call }, `split judge recovery attempt must be 1..${maxAttempts}`);
@@ -292,8 +308,10 @@ export class Models {
     if (route && !probe && (split || config.reasoning || callPolicy.retriesPerKind !== undefined) && model.provider === route.provider && !schema) {
       throw failure('configuration', { role, turn, call }, 'judge policy requires a structured OpenRouter judgement');
     }
+    if (agency && !schema) throw failure('configuration', { role, turn, call }, 'agency audit requires a structured schema');
     const { reasoning, provider } = route ? judgeParameters(route, config) : {};
-    const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure', fidelity_audit: 'fidelity_audit_contract' }[canonical];
+    const contractFailure = { teacher: 'teacher_generation_contract', learner: 'simulator_generation_contract', judge: 'judge_partial_failure',
+      fidelity_audit: 'fidelity_audit_contract', teacher_observer: 'teacher_observation_contract', agency_audit: 'agency_audit_contract' }[canonical];
     const timeoutMs = (canonical === 'judge' ? this.#judgeTimeoutMs : undefined) ?? config.timeoutMs ?? callPolicy.timeoutMs;
     let priorValidation, retries = 0, feedback = initialFeedback ?? null;
     for (let attempt = split ? (nextAttempt ?? 1) : 1; ; attempt++) {
@@ -335,7 +353,7 @@ export class Models {
             && body.provider.only?.length === 1 && body.provider.only[0] === auditRoute.endpoint
             && format?.type === 'json_schema' && format.json_schema?.strict === true;
         if (!pinned) {
-          outboundRejection = 'outbound fidelity audit route, budget or schema mismatch';
+          outboundRejection = `outbound ${agency ? 'agency' : 'fidelity'} audit route, budget or schema mismatch`;
           throw new Error(outboundRejection);
         }
         raw.outbound = {
@@ -346,14 +364,14 @@ export class Models {
         const response = await (proxyTag ? diagnosticFetch : send)(input, init);
         if (!response.ok && !proxyTag) auditError = await auditErrorFields(response, auditRoute);
         return response;
-      } : learnerJsonMode && model.provider === routes.learner.provider ? (input, init) => {
+      } : jsonObject && model.provider === routes.learner.provider ? (input, init) => {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
-        if (body.model !== routes.learner.id || cap !== requestLimit || body.response_format?.type !== 'json_object'
+        if (body.model !== (observer ? observerRoute.id : routes.learner.id) || cap !== requestLimit || body.response_format?.type !== 'json_object'
           || thinkingType !== undefined && (body.thinking?.type !== thinkingType || Object.keys(body.thinking).length !== 1
             || body.reasoning_effort !== (learnerThinking === 'low' ? 'low' : undefined))
           || !body.messages.some(message => message.role === 'system' && message.content === request.systemPrompt)) {
-          outboundRejection = 'outbound learner JSON mode, prompt, thinking or budget mismatch';
+          outboundRejection = `outbound ${observer ? 'observer' : 'learner'} JSON mode, prompt, thinking or budget mismatch`;
           throw new Error(outboundRejection);
         }
         raw.outbound = { model: body.model,
@@ -386,7 +404,7 @@ export class Models {
         ...agentOptions, signal: agentOptions.signal ? AbortSignal.any([signal, agentOptions.signal]) : signal,
         ...(fetch && { fetch }),
         ...(this.#keys && { apiKey: this.#keys[canonical] }),
-        identity: { attribution: null }, temperature: route?.temperature === null ? undefined : route?.temperature ?? auditRoute?.temperature ?? 0, maxTokens: requestLimit, maxRetries: 0,
+        identity: { attribution: null }, temperature: (route ?? auditRoute)?.temperature === null ? undefined : route?.temperature ?? auditRoute?.temperature ?? 0, maxTokens: requestLimit, maxRetries: 0,
         reasoning: learnerThinking ?? (stream ? agentOptions.reasoning : config.thinking),
         onPayload(payload) {
           const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
@@ -395,11 +413,11 @@ export class Models {
           if (strictAudit) {
             const { reasoning: _reasoning, ...request } = payload;
             return { ...request, ...(config.reasoning && { reasoning: config.reasoning }), provider: auditProvider,
-              response_format: { type: 'json_schema', json_schema: { name: 'teacharena_fidelity', strict: true, schema: schema ?? fidelityAuditSchema } } };
+              response_format: { type: 'json_schema', json_schema: { name: agency ? 'teacharena_agency_audit' : 'teacharena_fidelity', strict: true, schema: schema ?? fidelityAuditSchema } } };
           }
-          if (learnerJsonMode) {
+          if (jsonObject) {
             if (model.provider !== routes.learner.provider) {
-              outboundRejection = 'learner JSON mode requires the configured DeepSeek route';
+              outboundRejection = `${observer ? 'observer' : 'learner'} JSON mode requires the configured DeepSeek route`;
               throw new Error(outboundRejection);
             }
             return { ...payload, response_format: { type: 'json_object' } };
@@ -483,7 +501,7 @@ export class Models {
       }
       if (outboundRejection || responseRouteMismatch) {
         failureKind = 'configuration';
-        detail = outboundRejection ?? `response ${auditRoute ? 'fidelity audit' : 'judge'} route mismatch`;
+        detail = outboundRejection ?? `response ${agency ? 'agency audit' : auditRoute ? 'fidelity audit' : 'judge'} route mismatch`;
       } else if (failureKind === 'provider_failure') {
         httpStatus = Number(response?.errorMessage?.match(/^(?:\w+Error: )?(?:status(?: code)?[ :]+)?([45]\d\d)(?:\b|$)/i)?.[1]) || httpStatus;
         detail = signal.aborted ? 'local request timeout' : agentOptions.signal?.aborted ? 'agent request cancelled' : httpStatus >= 400 ? `provider HTTP ${httpStatus}` : response?.stopReason === 'aborted' ? 'provider request aborted' : 'provider request failed';
@@ -520,10 +538,10 @@ export class Models {
         }
         return { value: parsed, location: { ...coordinates, attemptPath } };
       }
-      const stop = split
+      const stop = maxAttempts === 1 || this.#boundedRetries && attempt >= maxAttempts || (split
         ? failureKind === 'configuration' || agentOptions.signal?.aborted || attempt >= maxAttempts
         : (callPolicy.retriesPerKind !== undefined || strictAudit) && failureKind === 'configuration'
-          || !rateLimited && retries++ >= callPolicy.retries || agentOptions.signal?.aborted;
+          || !rateLimited && retries++ >= callPolicy.retries || agentOptions.signal?.aborted);
       if (stop) {
         throw failure(failureKind, { ...coordinates, attemptPath }, detail);
       }

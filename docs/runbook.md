@@ -40,6 +40,21 @@ node .tmp/scratch/hard-learners/gemini-audit/re-audit.mjs --verify-run stage2a-h
 2. 按授权移除 `--estimate-only`，加 `--confirm-cost`，换为正式 ID `stage2b-headroom-real-01`。正式启动要求前一步收据绑定同一个干净 HEAD、dev 清单、两个登记摘要和评测身份。不复用 run ID，不续跑或换路由。
 3. 对正式 ID 运行 `node src/cli.mjs --verify-run <ID>`，核对启动、结束、manifest 与逐调用 PID。`acceptance` 只表示 48 格全部交付判决；技术停线后也核对已存产物，然后用 `node scripts/stage2b-headroom-report.mjs <ID>` 读实际观察。缺判不计零、也不计 `N/A`，比较时同时看[同输入裁判波动](stage1-closeout.md#同输入翻转率)和两遍生成后的差异。
 
+## 阶段 3 状态驱动教师
+
+入口 `--scenario stage3-state-machine` 只支持 dev，不提供留出集入口。先读[锁定预登记](research/stage3/preregistration.md)。离线只用合成题和固定模型回包，不加载真实开发集、凭据或代理：
+
+```sh
+node src/cli.mjs --scenario stage3-state-machine --mode offline --id stage3-offline-01 --run-root runs/stage3-offline
+node src/cli.mjs --verify-run stage3-offline-01 --run-root runs/stage3-offline
+```
+
+真实 dev 前，先把迁移合入功能分支，提交后在干净 HEAD 上跑 `npm run check`。以下参数在预检和正式启动中保持一致：`--scenario stage3-state-machine --mode real --run-root runs/stage3-dev --edition 1 --concurrency 4 --proxy-from-env --max-attempts 3072 --max-requested-output-tokens 13449216 --preregistration-sha256 <原预登记摘要>`。第 2 版改为 `--edition 2` 并加 `--preregistration-addendum-sha256 <附录摘要>`。原预登记不改。[附录 01](research/stage3/preregistration-addendum-01.md)只改变 C 有效暴露门槛适用的画像。修订前的第 2 版预检只作历史记录，不能用来启动真跑。
+
+1. 加 `--estimate-only --id <新预检 ID>`。核对八个 dev 文件、manifest 摘要、评测身份和零请求验真。硬上限包括三臂、观察器、暴露检查与最多 72 份盲核。按两层停线执行。不得自行放宽额度、换路由或重开已消费的版本。
+2. 获当次授权后，移除 `--estimate-only`，加 `--confirm-cost --estimate-id <已验真预检 ID> --id <新正式 ID>`。每版真实启动只有一份本地占用记录。预检不占用该版。不使用 `--resume`。
+3. 用 `--verify-run <正式 ID> --run-root runs/stage3-dev` 核对 `stage3.pid`、`used` 和逐角色的 `usage`。打开 `report.json` 查看三臂配对、所有判线、分歧与 #n 示例。用 `blind-verdicts.json` 和本地 `blind-map.json` 回读分歧。把 `report.json` 的 `decision` 当作 dev 筛选结论；`acceptance` 只表示必要原件齐备，两者均不能用于决定采用。
+
 ## E2 冻结对话复核
 
 E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --judge-cell no_teach`。运行器把冻结对话与源裁判请求的消息和绑定核对，即使源裁判未产出分数也可复核。新 run 单列裁判结果，完整 E2 验收仍按场景卡核对。
