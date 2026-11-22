@@ -1,1 +1,2 @@
 /data/upstream/** -text
+/docs/research/*/** -text

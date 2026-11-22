@@ -18,10 +18,14 @@ test('a change to the working entry is part of its judge fingerprint', () => {
     workingJudgeFingerprint({ ...sources, 'src/working-judge.mjs': 'b'.repeat(64) }));
 });
 
-function capture(t, replies) {
-  for (const [key, value] of Object.entries({ OPENROUTER_API_KEY: 'fixture', HTTPS_PROXY: 'http://127.0.0.1:9', NODE_TLS_REJECT_UNAUTHORIZED: undefined })) {
+function capture(t, replies, proxy = { HTTPS_PROXY: 'http://127.0.0.1:9' }) {
+  const env = { OPENROUTER_API_KEY: 'fixture', NODE_TLS_REJECT_UNAUTHORIZED: undefined,
+    https_proxy: undefined, http_proxy: undefined, HTTPS_PROXY: undefined, HTTP_PROXY: undefined, ...proxy };
+  for (const key of Object.keys(env)) {
     const old = process.env[key];
     t.after(() => { if (old === undefined) delete process.env[key]; else process.env[key] = old; });
+  }
+  for (const [key, value] of Object.entries(env)) {
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
   const mock = new MockAgent();
@@ -42,6 +46,18 @@ function capture(t, replies) {
     return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n');
   });
   return requests;
+}
+
+for (const [setting, proxy] of [['no proxy', {}], ['only HTTP_PROXY', { HTTP_PROXY: 'http://127.0.0.1:9' }]]) {
+  test(`working entry refuses real mode with ${setting}`, t => {
+    const requests = capture(t, [], proxy);
+    assert.throws(() => createWorkingJudge({ mode: 'real', save() {} }), error => {
+      assert.equal(error.failure?.kind, 'configuration');
+      assert.match(error.message, /judge proxy/);
+      return true;
+    });
+    assert.equal(requests.length, 0);
+  });
 }
 
 test('working entry sends the v3 prompt and fixed Gemini route through an explicit proxy', async t => {

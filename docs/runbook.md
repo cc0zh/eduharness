@@ -34,7 +34,7 @@ node .tmp/scratch/hard-learners/gemini-audit/re-audit.mjs --verify-run stage2a-h
 
 ## 阶段 2b 开发集余量检查
 
-`--scenario stage2b-headroom` 只准入路径附录登记的 8 个 dev 文件。主位置是 `%TEMP%\teacharena\stage2-holdout\dev`。主位置缺失或 manifest SHA256 不符时才核对只读备份 `D:\Archive\teacharena\stage2-holdout\dev`。两处都先校验 manifest 摘要；仅从 dev 清单读文件，不复制完整 manifest。阶段 2b 不生成保真审核，也不使用 v4。
+`--scenario stage2b-headroom` 只准入路径附录登记的 8 个 dev 文件。holdout 根目录默认为 `D:\Archive\teacharena\stage2-holdout\`。可用 `TEACHARENA_STAGE2_HOLDOUT_ROOT` 指向同一锁定语料的副本，值为含 `manifest.json` 和 `dev/` 的根目录。所选根缺失或摘要不符时直接失败，不回退到临时目录。加载器先核对 manifest SHA256，再按登记清单逐题校验并用 `readTask` 加载，只读取 `dev/` 下的任务文件，不复制完整 manifest。阶段 2b 不生成保真审核，也不使用 v4。
 
 1. 将方法和路径附录保留在 `.tmp/scratch/stage2b-headroom/`。在干净 HEAD 上运行 `npm run check`。正式模式与预检均带 `--mode real --proxy-from-env --concurrency 4 --max-attempts 2592 --max-requested-output-tokens 11999232`、`--preregistration`、`--path-addendum`、`--preregistration-sha256` 和 `--path-addendum-sha256`。预检用 `--estimate-only --id stage2b-headroom-estimate-01`，不加载凭据或发请求。验真通过后才启动。
 2. 按授权移除 `--estimate-only`，加 `--confirm-cost`，换为正式 ID `stage2b-headroom-real-01`。正式启动要求前一步收据绑定同一个干净 HEAD、dev 清单、两个登记摘要和评测身份。不复用 run ID，不续跑或换路由。

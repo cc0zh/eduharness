@@ -1,5 +1,4 @@
 import { appendFileSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isDeepStrictEqual as same, parseArgs } from 'node:util';
 import { policy, rounds, routes } from '../config/e1.mjs';
@@ -197,7 +196,7 @@ export async function stage2bCli(argv) {
   const addendum = readRegistration('path-addendum', 'preregistration-addendum-path.md');
   requireThat(hash(method) === args['preregistration-sha256'] && hash(addendum) === args['path-addendum-sha256'], 'stage 2b launch SHA256 mismatch');
   const locked = stage2bRegistration(method, addendum);
-  const corpus = loadStage2bDev({ primary: join(tmpdir(), 'teacharena', 'stage2-holdout'), backup: 'D:/Archive/teacharena/stage2-holdout', ...locked });
+  const corpus = loadStage2bDev(locked);
   const prepared = prepareStage2b({ mode, corpus, method, addendum });
   const checkReceipt = real ? requireCheckReceipt() : undefined;
   let estimateReceipt;
