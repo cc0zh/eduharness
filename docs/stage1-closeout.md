@@ -57,7 +57,7 @@
 
 ## 评分入口与身份
 
-阶段 2b/3 的工作评分器入口是 [`createWorkingJudge`](../src/working-judge.mjs)。它显式锁 `e1-binary-v3`、`judge-output-v5`、Gemini 策略 `e1-call-policy-v9-bakeoff-gemini` 和 `HTTPS_PROXY`，不接受 v4 切换或直连回退。Gemini 固定 `google/gemini-3.8-flash`、唯一 `google-ai-studio`，推理为 `low`、温度 0、每维输出 4,096、本地截止 120 秒。历史 S1 入口和默认 E1/E2 不改；阶段 2b 的完整 dev 生成与评分编排尚未接入 CLI。
+阶段 2b/3 的工作评分器入口是 [`createWorkingJudge`](../src/working-judge.mjs)。它显式锁 `e1-binary-v3`、`judge-output-v5`、Gemini 策略 `e1-call-policy-v9-bakeoff-gemini` 和 `HTTPS_PROXY`，不接受 v4 切换或直连回退。Gemini 固定 `google/gemini-3.8-flash`、唯一 `google-ai-studio`，推理为 `low`、温度 0、每维输出 4,096、本地截止 120 秒。历史 S1 入口和默认 E1/E2 不改。阶段 2b 的接线和实际运行身份见[开发集余量检查](stage2b-headroom.md)。
 
 运行 `node scripts/working-judge-replay.mjs`，在 `fetch` 边界截获 51 格的 307 次构造请求，包括一条重试。对历史原件逐字核对保存的系统提示、用户 JSON 字符串和脱敏出站字段。允许差异事先限定为本地时间戳、运行坐标、响应或遥测元数据和请求头，它们不在 HTTP body 内。历史原件没有保存完整 body；脚本用历史提交 `d93b5d4` 与同一 SDK 锁离线重建完整 body，再与当前入口逐字比对，307/307 相同，body 内没有豁免字段。两边都用固定本地代理参数和响应夹具，未发网络请求。逐调用 SHA256 见 [回放收据](../.tmp/scratch/stage1-closeout/working-judge-replay.json)。
 

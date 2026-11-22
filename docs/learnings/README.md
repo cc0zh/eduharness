@@ -31,6 +31,7 @@
 | 2026-11 | [连续满分也可能漏掉审核边界](2026-11/20261122-audit-validation-needs-boundary-cases.md) | 阶段 2a `stage2a-audit-validation-2`、`stage2a-hard-learners-05` |
 | 2026-11 | [自证伪减少不等于画像达线](2026-11/20261122-self-falsification-is-not-profile-fidelity.md) | 阶段 2a `stage2a-learner-fix-pilot-01`、`stage2a-learner-fix-full-01` |
 | 2026-11 | [同对话的重复评测也要核对请求内容](2026-11/20261122-repeat-pairs-require-same-request.md) | ①h Gemini 补跑、v3 冻结复测的两次支持维重试 |
+| 2026-11 | [分档稳定时仍要找出实际失分的题位](2026-11/20261122-headroom-by-question.md) | `stage2b-headroom-real-01`，交还主动权 23/24 对同档 |
 
 ## 目录与命名
 
