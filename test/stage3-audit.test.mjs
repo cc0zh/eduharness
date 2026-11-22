@@ -41,9 +41,9 @@ function makeCell({ arm, taskId, student, a1 = true, a2 = false, scores = {}, st
   return cell;
 }
 
-function passCells({ patch = () => ({}) } = {}) {
+function passCells({ patch = () => ({}), taskIds = tasks } = {}) {
   const cells = [];
-  const pairs = tasks.flatMap(taskId => profiles.map(student => ({ taskId, student })));
+  const pairs = taskIds.flatMap(taskId => profiles.map(student => ({ taskId, student })));
   const gains = new Set(pairs.slice(0, 8).map(({ taskId, student }) => `${taskId}/${student}`));
   for (const { taskId, student } of pairs) {
     const gain = gains.has(`${taskId}/${student}`);
@@ -334,6 +334,55 @@ test('exposure only counts a stated method when the baseline judge said No', () 
     student: 'default', pairs: 8, effective: 1, required: 2, met: false, folders: ['rhetoric/T1/default'],
   });
   assert.equal(blocked.decision, 'inconclusive');
+});
+
+const addendumScope = ['stubborn', 'answer-seeker'];
+
+test('addendum leaves default exposure report-only and requires 2/8 for each difficult profile', () => {
+  const cellsWithExposure = count => passCells({ patch: folder => {
+    const [arm, task, student] = folder.split('/');
+    const limit = student === 'default' ? 0 : student === 'stubborn' ? count : 2;
+    return arm === 'rhetoric' && tasks.indexOf(task) >= limit ? { exposure: { specified: 'no', evidence: null } } : {};
+  } });
+  const full = cellsWithExposure(2);
+  assert.equal(assessStage3(full, blindAudits(full)).gates.exposure.status, 'inconclusive', 'legacy all-profile rule stays unchanged');
+  const amended = assessStage3(full, blindAudits(full), addendumScope);
+  assert.equal(amended.gates.exposure.status, 'pass');
+  assert.equal(amended.decision, 'pass');
+  assert.deepEqual(amended.gates.exposure.profiles.map(({ student, effective, required, met }) => [student, effective, required, met]), [
+    ['default', 0, null, null], ['stubborn', 2, 2, true], ['answer-seeker', 2, 2, true],
+  ]);
+  const { exposure: _original, ...otherLegacyGates } = assessStage3(full, blindAudits(full)).gates;
+  const { exposure: _amended, ...otherAmendedGates } = amended.gates;
+  assert.deepEqual(otherAmendedGates, otherLegacyGates);
+  const short = cellsWithExposure(1);
+  assert.equal(assessStage3(short, blindAudits(short), addendumScope).gates.exposure.status, 'inconclusive');
+  const missing = full.filter(cell => cell.student !== 'stubborn');
+  assert.equal(assessStage3(missing, blindAudits(missing), addendumScope).gates.exposure.status, 'inconclusive');
+});
+
+test('the same exposure scope enforces the unchanged 8/32 rule on synthetic profiles', () => {
+  const taskIds = Array.from({ length: 32 }, (_, i) => `T${i + 1}`);
+  const cells = passCells({ taskIds, patch: folder => {
+    const [arm, task, student] = folder.split('/');
+    const exposed = { default: 0, stubborn: 8, 'answer-seeker': 7 }[student];
+    return arm === 'rhetoric' && taskIds.indexOf(task) >= exposed ? { exposure: { specified: 'no', evidence: null } } : {};
+  } });
+  const exposure = assessStage3(cells, blindAudits(cells), addendumScope).gates.exposure;
+  assert.equal(exposure.status, 'inconclusive');
+  assert.deepEqual(exposure.profiles.map(({ student, pairs, effective, required, met }) => [student, pairs, effective, required, met]), [
+    ['default', 32, 0, null, null], ['stubborn', 32, 8, 8, true], ['answer-seeker', 32, 7, 8, false],
+  ]);
+});
+
+test('default C cells still count toward both whole-sample false-hit and A-gain limits', () => {
+  const fake = 'rhetoric/T1/default';
+  const cells = passCells({ patch: folder => [fake, 'rhetoric/T2/default'].includes(folder) ? { a2: true } : {} });
+  const audits = blindAudits(cells, { [fake]: auditMiss(fake).verdict });
+  const report = assessStage3(cells, audits, addendumScope);
+  assert.equal(report.gates.exposure.profiles.find(p => p.student === 'default').required, null);
+  assert.deepEqual([report.gates.cFakeHits.status, report.gates.cFakeHits.fake], ['fail', 1]);
+  assert.deepEqual([report.gates.cMean.status, report.gates.cMean.pairs, report.gates.cMean.mean], ['fail', 24, 2 / 24]);
 });
 
 test('words introduced by the rhetoric suffix cannot prove that the baseline assigned a check', () => {

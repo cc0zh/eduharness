@@ -19,7 +19,8 @@ import { stage3Scenario } from '../config/stage3.mjs';
 import { verifyStage2bArtifacts } from './stage2b-verification.mjs';
 import { verifyStage3Artifacts } from './stage3-verification.mjs';
 
-const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--path-addendum', '--path-addendum-sha256', '--concurrency', '--judge-policy', '--learner-fix', '--edition', '--estimate-id']);
+const safeDigests = new Set(['--preregistration-sha256', '--path-addendum-sha256', '--preregistration-addendum-sha256']);
+const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--path-addendum', '--concurrency', '--judge-policy', '--learner-fix', '--edition', '--estimate-id', ...safeDigests]);
 const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario, stage2bScenario, stage3Scenario]);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
@@ -44,7 +45,7 @@ function parameterSummary(argv) {
       || name === '--edition' && ['1', '2'].includes(value)
       || (name.startsWith('--max-') || name === '--concurrency') && /^\d+$/.test(value)
       || name === '--freeze' && /^[a-f0-9]{40}$/.test(value)
-      || ['--preregistration-sha256', '--path-addendum-sha256'].includes(name) && sha256(value);
+      || safeDigests.has(name) && sha256(value);
     values[name.slice(2).replaceAll('-', '_')] = safe ? value : '<redacted>';
   }
   return { flags: [...new Set(flags)].sort(), values };

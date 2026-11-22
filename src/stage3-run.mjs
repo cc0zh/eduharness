@@ -16,7 +16,7 @@ import { installRunReceiptHandlers, startRunReceipt, verifyRun } from './run-rec
 import { splitBinding } from './split-judge-replay.mjs';
 import { auditPrompt, auditSchema, auditWindow, blindJobs, exposurePrompt, exposureSchema, parseAgencyAudit, parseExposure, rhetoricTranscript } from './stage3-audit.mjs';
 import { stage3Fixtures } from './stage3-fixtures.mjs';
-import { judgementManifest, prepareStage3, readStage3Method, stage3Budget, stage3CallId, stage3CallPath, stage3Folder, stage3HardLearner, stage3Ledger } from './stage3-plan.mjs';
+import { judgementManifest, prepareStage3, readStage3Method, stage3AddendumFile, stage3AddendumFlag, stage3Budget, stage3CallId, stage3CallPath, stage3Folder, stage3HardLearner, stage3Ledger } from './stage3-plan.mjs';
 import { assessStage3, tutorExamples } from './stage3-report.mjs';
 import { createTeacher } from './teacher/session.mjs';
 import { observeStudent } from './teacher/state-machine.mjs';
@@ -28,7 +28,7 @@ const pauseKind = kind => ['budget_exhausted', 'batch_stopped'].includes(kind);
 const completeAudit = verdicts => verdicts.every(row => row.verdict);
 
 export async function runStage3({ id, mode, root, recorder, checkReceipt, estimateReceipt }, prepared) {
-  const { identity, identityId, planned, tasks, operatorPolicy, method, budget, limits } = prepared;
+  const { identity, identityId, planned, tasks, operatorPolicy, method, addendum, budget, limits } = prepared;
   const { pid, startedAt, head, clean } = recorder.start;
   requireThat(pid === process.pid && recorder.start.runId === id && recorder.start.mode === mode, 'stage 3 writer differs from start record');
   requireThat(mode !== 'real' || clean && checkReceipt?.head === head && estimateReceipt?.head === head && estimateReceipt.identityId === identityId,
@@ -43,6 +43,7 @@ export async function runStage3({ id, mode, root, recorder, checkReceipt, estima
   const manifest = { id, scenario, mode, identity, identityId, planned, budget, limits, writer: { pid, startedAt }, checkReceipt, estimateReceipt };
   put('manifest.json', manifest);
   put('preregistration.md', method, true);
+  if (addendum) put(stage3AddendumFile, addendum, true);
   const log = join(dir, 'admission.jsonl');
   const events = [];
   const ledger = stage3Ledger(limits, event => {
@@ -188,7 +189,7 @@ export async function runStage3({ id, mode, root, recorder, checkReceipt, estima
   const verdicts = jobs.map(({ id }) => completedAudits.get(id) ?? { id, status: 'not_started' });
   const blindVerdictsSha256 = put('blind-verdicts.json', verdicts);
   const audits = blindMap.map(({ id, folder }) => ({ folder, verdict: completedAudits.get(id)?.verdict }));
-  const report = { ...assessStage3(ordered, audits), blindVerdictsSha256, examples: tutorExamples(ordered) };
+  const report = { ...assessStage3(ordered, audits, identity.preregistrationAddendum?.exposureGateStudents), blindVerdictsSha256, examples: tutorExamples(ordered) };
   put('report.json', report);
 
   const { used, stop, failedCells, peakInFlight, downshifts, inFlight } = ledger.snapshot();
@@ -209,7 +210,8 @@ export async function stage3Cli(argv) {
     scenario: { type: 'string' }, mode: { type: 'string' }, id: { type: 'string' }, 'run-root': { type: 'string' },
     edition: { type: 'string', default: '1' }, concurrency: { type: 'string' }, 'estimate-id': { type: 'string' },
     'estimate-only': { type: 'boolean' }, 'confirm-cost': { type: 'boolean' }, 'proxy-from-env': { type: 'boolean' },
-    'preregistration-sha256': { type: 'string' }, 'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
+    'preregistration-sha256': { type: 'string' }, [stage3AddendumFlag.slice(2)]: { type: 'string' },
+    'max-attempts': { type: 'string' }, 'max-requested-output-tokens': { type: 'string' },
   } });
   const { mode, edition } = args;
   const id = runId(args.id), real = mode === 'real', estimate = Boolean(args['estimate-only']);
@@ -224,8 +226,10 @@ export async function stage3Cli(argv) {
     : root !== realRoot && !estimate && !args['estimate-id'] && !args['confirm-cost'] && !args['proxy-from-env'] && !args['max-attempts'] && !args['max-requested-output-tokens']
       && (args.concurrency === undefined || args.concurrency === String(stage3Concurrency)), 'stage 3 requires registered limits, preflight and cost confirmation in real mode');
   const preflightId = real && !estimate ? runId(args['estimate-id']) : null;
-  const method = readStage3Method();
+  const method = readStage3Method(Number(edition));
   requireThat(!args['preregistration-sha256'] || args['preregistration-sha256'] === method.sha, 'stage 3 preregistration SHA256 mismatch');
+  requireThat(args[stage3AddendumFlag.slice(2)] === (real ? method.addendumIdentity?.sha256 : undefined),
+    'stage 3 preregistration addendum SHA256 mismatch');
   const checkReceipt = real ? requireCheckReceipt() : undefined;
   if (real) {
     mkdirSync(root, { recursive: true });
@@ -251,8 +255,9 @@ export async function stage3Cli(argv) {
     const { identity, identityId, limits, budget, planned } = prepared;
     const value = { id, mode, scenario, requestCount: 0, acceptance, identity, identityId, limits, budget, plannedCells: planned.length, checkReceipt,
       writer: { pid: recorder.start.pid, startedAt: recorder.start.startedAt } };
-    const sha = atomicJson(join(root, id, 'estimate.json'), value);
-    recorder.publishEvaluation({ id, mode, scenario, identityId, acceptance, files: { 'estimate.json': sha } });
+    const files = { 'estimate.json': atomicJson(join(root, id, 'estimate.json'), value) };
+    if (prepared.addendum) files[stage3AddendumFile] = atomicBytes(join(root, id, stage3AddendumFile), prepared.addendum);
+    recorder.publishEvaluation({ id, mode, scenario, identityId, acceptance, files });
     return { value, exitCode: 0 };
   }
   if (real) atomicJson(join(root, '_receipts', `stage3-dev-v${edition}.claim.json`), { id, identityId: prepared.identityId, head: checkReceipt.head, pid: recorder.start.pid });

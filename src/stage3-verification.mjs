@@ -12,7 +12,8 @@ import { replaySplitJudge, splitBinding } from './split-judge-replay.mjs';
 import { auditPrompt, auditWindow, blindSelection, exposurePrompt, parseAgencyAudit, parseExposure, rhetoricTranscript } from './stage3-audit.mjs';
 import { stage3Fixtures } from './stage3-fixtures.mjs';
 import { stage2bManifestSha } from './stage2b-plan.mjs';
-import { judgementManifest, readStage3Method, stage3Budget, stage3CallId, stage3CallPath, stage3Folder, stage3Ledger, stage3Plan, stage3Stop } from './stage3-plan.mjs';
+import { judgementManifest, readStage3Addendum, readStage3Method, stage3AddendumFile, stage3AddendumFlag, stage3AddendumIdentityVersion,
+  stage3Budget, stage3CallId, stage3CallPath, stage3Folder, stage3Ledger, stage3Plan, stage3Stop } from './stage3-plan.mjs';
 import { assessStage3, tutorExamples } from './stage3-report.mjs';
 import { handoffSystemView, linearGoals, teacherActionGoal, usesHandoffContract } from './teacher/session.mjs';
 import { decideStudentAction, emptyObservation, initialPending, observationPromptFor, observationWindow } from './teacher/state-machine.mjs';
@@ -40,10 +41,26 @@ export function verifyStage3Artifacts({ id, start, receipt, evaluation, requests
   const { sha: methodSha } = readStage3Method();
   const budget = stage3Budget();
   const limits = { maxAttempts: budget.maxAttempts, maxRequestedOutputTokens: budget.maxRequestedOutputTokens };
+  const estimateOnly = flags.includes('--estimate-only');
+  const addendumFlag = flags.includes(stage3AddendumFlag);
+  function checkAddendum(identity) {
+    if (identity.version === 'stage3-dev-v1') {
+      requireThat(!addendumFlag && !Object.hasOwn(identity, 'preregistrationAddendum') && (identity.edition === 1 || estimateOnly || !real),
+        'invalid stage 3 preregistration addendum for historical identity');
+      return;
+    }
+    const { addendumIdentity } = readStage3Addendum();
+    requireThat(identity.edition === 2 && same(identity.preregistrationAddendum, addendumIdentity)
+      && (real ? addendumFlag && launch.preregistration_addendum_sha256 === addendumIdentity.sha256 : !addendumFlag),
+    'stage 3 preregistration addendum identity or launch differs');
+    requireThat(hash(read(stage3AddendumFile)) === addendumIdentity.sha256, 'stage 3 preregistration addendum copy differs');
+  }
+
   function identityChecks(identity, identityId) {
     const expected = real ? { dev: stage3DevTasks, manifestSha256: stage2bManifestSha, split: 'dev' } : { ...stage3Fixtures.corpus(), split: 'synthetic' };
     const { dataset } = identity;
-    requireThat(identity.version === 'stage3-dev-v1' && [1, 2].includes(identity.edition) && String(identity.edition) === (launch.edition ?? '1')
+    requireThat(['stage3-dev-v1', stage3AddendumIdentityVersion].includes(identity.version)
+      && [1, 2].includes(identity.edition) && String(identity.edition) === (launch.edition ?? '1')
       && identityId === hash({ mode, scenario, identity }) && identity.preregistrationSha256 === methodSha
       && dataset.split === expected.split && dataset.manifestSha256 === expected.manifestSha256 && same(dataset.dev, expected.dev)
       && same(identity.planned, stage3Plan(expected.dev)) && same(identity.limits, limits) && same(identity.stop, stage3Stop())
@@ -54,19 +71,21 @@ export function verifyStage3Artifacts({ id, start, receipt, evaluation, requests
       && same(identity.judgeCallPolicy, workingJudge.policy) && same(identity.judgeTransport, real ? workingJudge.judgeTransport : null)
       && same(identity.routes, real ? { ...routes, judge: workingJudge.routes.judge, teacher_observer: observerRoute, agency_audit: agencyAudit.route } : 'pi-ai-faux'),
     'stage 3 identity, scorer or development plan differs');
+    checkAddendum(identity);
   }
   requireThat(['offline', 'real'].includes(mode) && sameRun(evaluation) && launch.scenario === scenario && !flags.includes('--resume'), 'invalid stage 3 launch');
   if (real) requireThat(start.clean && launch.concurrency === String(stage3Concurrency) && flags.includes('--proxy-from-env')
     && launch.preregistration_sha256 === methodSha && Number(launch.max_attempts) === limits.maxAttempts
     && Number(launch.max_requested_output_tokens) === limits.maxRequestedOutputTokens, 'unregistered stage 3 real launch');
-  if (flags.includes('--estimate-only')) {
+  if (estimateOnly) {
     const estimate = json('estimate.json');
     identityChecks(estimate.identity, estimate.identityId);
     requireThat(real && !flags.includes('--confirm-cost') && requests.length === 0 && receipt.exitCode === 0 && receipt.acceptance === null
       && estimate.requestCount === 0 && estimate.acceptance === null && sameRun(estimate) && same(estimate.writer, { pid, startedAt })
       && checkPass(estimate.checkReceipt, head) && same(estimate.limits, limits) && same(estimate.budget, budget)
-      && estimate.plannedCells === estimate.identity.planned.length && Object.keys(evaluation.files).length === 1, 'stage 3 estimate evidence differs');
-    return { pid, identityId: estimate.identityId, estimate: true };
+      && estimate.plannedCells === estimate.identity.planned.length && Object.keys(evaluation.files).length === checked.size, 'stage 3 estimate evidence differs');
+    const { preregistrationAddendum } = estimate.identity;
+    return { pid, identityId: estimate.identityId, estimate: true, ...(preregistrationAddendum && { preregistrationAddendum }) };
   }
 
   const manifest = json('manifest.json'), result = json('result.json');
@@ -196,7 +215,8 @@ export function verifyStage3Artifacts({ id, start, receipt, evaluation, requests
     return { folder, verdict: verdict ?? undefined };
   });
   const report = json('report.json');
-  requireThat(same(report, { ...assessStage3(cells, audits), blindVerdictsSha256: evaluation.files['blind-verdicts.json'], examples: tutorExamples(cells) }),
+  requireThat(same(report, { ...assessStage3(cells, audits, identity.preregistrationAddendum?.exposureGateStudents),
+    blindVerdictsSha256: evaluation.files['blind-verdicts.json'], examples: tutorExamples(cells) }),
     'stage 3 report does not follow locked decision rule');
   requireThat(checked.size === Object.keys(evaluation.files).length && checkedAttempts === ledger.attempts.size, 'unbound stage 3 artifacts or attempts');
   const scored = cells.filter(row => row.status === 'scored').length;

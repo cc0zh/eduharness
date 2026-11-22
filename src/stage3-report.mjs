@@ -65,7 +65,7 @@ function effectiveExposure(rhetoricCell, baselineCell) {
   return typeof text === 'string' && text.includes(exposure.evidence.quote.trim());
 }
 
-export function assessStage3(cells, audits = []) {
+export function assessStage3(cells, audits = [], exposureGateStudents) {
   const { list, index, pairs } = pairTable(cells);
   const auditIndex = new Map();
   const decisions = new Map();
@@ -120,10 +120,11 @@ export function assessStage3(cells, audits = []) {
     const group = pairs.filter(pair => pair.student === student);
     const folders = group.filter(pair => effectiveExposure(pair.cells.rhetoric, pair.cells.baseline))
       .map(pair => pair.cells.rhetoric.folder);
-    const required = requiredHits(group.length, stage3Thresholds.exposure);
-    return { student, pairs: group.length, effective: folders.length, required, met: folders.length >= required, folders };
+    const required = !exposureGateStudents || exposureGateStudents.includes(student) ? requiredHits(group.length, stage3Thresholds.exposure) : null;
+    return { student, pairs: group.length, effective: folders.length, required, met: required === null ? null : folders.length >= required, folders };
   });
-  const exposure = gate(profiles.every(row => row.met) ? 'pass' : 'inconclusive',
+  const requiredStudents = exposureGateStudents ?? profiles.map(row => row.student);
+  const exposure = gate(requiredStudents.every(student => profiles.some(row => row.student === student && row.met)) ? 'pass' : 'inconclusive',
     { profiles, threshold: stage3Thresholds.exposure });
 
   const { required: requiredFolders, targets: claimedFolders } = blindCoverage(list);

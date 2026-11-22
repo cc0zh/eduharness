@@ -49,7 +49,7 @@ node src/cli.mjs --scenario stage3-state-machine --mode offline --id stage3-offl
 node src/cli.mjs --verify-run stage3-offline-01 --run-root runs/stage3-offline
 ```
 
-真实 dev 前，先把迁移合入功能分支，提交后在干净 HEAD 上跑 `npm run check`。以下参数在预检和正式启动中保持一致：`--scenario stage3-state-machine --mode real --run-root runs/stage3-dev --edition 1 --concurrency 4 --proxy-from-env --max-attempts 3072 --max-requested-output-tokens 13449216 --preregistration-sha256 <锁定摘要>`。第 2 版用 `--edition 2`，只在上一版未过且按同一判线修订后运行。
+真实 dev 前，先把迁移合入功能分支，提交后在干净 HEAD 上跑 `npm run check`。以下参数在预检和正式启动中保持一致：`--scenario stage3-state-machine --mode real --run-root runs/stage3-dev --edition 1 --concurrency 4 --proxy-from-env --max-attempts 3072 --max-requested-output-tokens 13449216 --preregistration-sha256 <原预登记摘要>`。第 2 版改为 `--edition 2` 并加 `--preregistration-addendum-sha256 <附录摘要>`。原预登记不改。[附录 01](research/stage3/preregistration-addendum-01.md)只改变 C 有效暴露门槛适用的画像。修订前的第 2 版预检只作历史记录，不能用来启动真跑。
 
 1. 加 `--estimate-only --id <新预检 ID>`。核对八个 dev 文件、manifest 摘要、评测身份和零请求验真。硬上限包括三臂、观察器、暴露检查与最多 72 份盲核。按两层停线执行。不得自行放宽额度、换路由或重开已消费的版本。
 2. 获当次授权后，移除 `--estimate-only`，加 `--confirm-cost --estimate-id <已验真预检 ID> --id <新正式 ID>`。每版真实启动只有一份本地占用记录。预检不占用该版。不使用 `--resume`。

@@ -85,6 +85,11 @@ test('stage 3 edition 2 replays a bounded handoff retry and a public fallback wi
   assert.equal(launch.status, 0, launch.stdout + launch.stderr);
   const manifest = read(id, 'manifest.json');
   assert.equal(manifest.identity.edition, 2);
+  assert.equal(manifest.identity.version, 'stage3-dev-v2');
+  const addendumName = 'preregistration-addendum-01.md';
+  const addendum = readFileSync(new URL(`../docs/research/stage3/${addendumName}`, import.meta.url));
+  assert.deepEqual(readFileSync(join(root, id, addendumName)), addendum);
+  assert.deepEqual(manifest.identity.preregistrationAddendum, { sha256: hash(addendum), exposureGateStudents: ['stubborn', 'answer-seeker'] });
   const { taskId, student } = manifest.planned[0];
   const b = `baseline/${taskId}/${student}`, s = `candidate/${taskId}/${student}`, c = `rhetoric/${taskId}/${student}`;
   const candidate = read(id, s, 'transcript.json');
@@ -104,11 +109,19 @@ test('stage 3 edition 2 replays a bounded handoff retry and a public fallback wi
   const verify = run('--verify-run', id);
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
   assert.equal(JSON.parse(verify.stdout).stage3.scored, 72);
-  assert.deepEqual(read(id, 'report.json').examples.handoff.map(row => row.tutor.n), [6, 6, 6]);
+  const report = read(id, 'report.json');
+  assert.deepEqual(report.examples.handoff.map(row => row.tutor.n), [6, 6, 6]);
+  assert.equal(report.gates.exposure.profiles.find(p => p.student === 'default').required, null);
 
   const relative = `${s}/calls/teacher-3-2-1.json`, file = join(root, id, relative);
   const evaluationPath = join(root, '_receipts', `${id}.json`), processPath = join(root, '_receipts', `${id}.process.json`);
   const evaluation = read('_receipts', `${id}.json`), processReceipt = read('_receipts', `${id}.process.json`);
+  const addendumPath = join(root, id, addendumName);
+  writeFileSync(addendumPath, 'changed addendum');
+  const changedAddendum = run('--verify-run', id);
+  assert.equal(changedAddendum.status, 1, changedAddendum.stdout + changedAddendum.stderr);
+  assert.match(changedAddendum.stdout, /preregistration-addendum-01\.md/);
+  writeFileSync(addendumPath, addendum);
   const raw = JSON.parse(readFileSync(file));
   raw.context.messages.find(m => m.role === 'system').sections.pedagogy = 'Give a tiny assigned variant and close now.';
   const put = (path, value) => {
@@ -128,6 +141,18 @@ test('a real stage 3 run cannot be launched without a cost confirmation and matc
   const output = run('--scenario', 'stage3-state-machine', '--mode', 'real', '--id', 'stage3-unapproved');
   assert.notEqual(output.status, 0);
   assert.match(output.stdout + output.stderr, /stage 3.+(preflight|confirmation|registered)/i);
+});
+
+test('a new edition 2 estimate rejects a missing or wrong addendum digest before using real inputs', () => {
+  const lock = readFileSync(new URL('../docs/research/stage3/preregistration.sha256', import.meta.url), 'utf8').split(' ')[0];
+  const args = ['src/cli.mjs', '--scenario', 'stage3-state-machine', '--mode', 'real', '--run-root', 'runs/stage3-dev',
+    '--edition', '2', '--concurrency', '4', '--proxy-from-env', '--max-attempts', '3072', '--max-requested-output-tokens', '13449216',
+    '--preregistration-sha256', lock, '--estimate-only', '--id', 'rejected-v2-addendum-test'];
+  for (const extra of [[], ['--preregistration-addendum-sha256', '0'.repeat(64)]]) {
+    const output = spawnSync(process.execPath, [...args, ...extra], { encoding: 'utf8' });
+    assert.notEqual(output.status, 0);
+    assert.match(output.stdout + output.stderr, /stage 3 preregistration addendum SHA256 mismatch/);
+  }
 });
 
 test('working v3 in stage 3 does not retry an invalid A verdict', async () => {
