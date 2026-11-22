@@ -9,7 +9,7 @@ import { s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, judgeContrastScenario } from './judge-contrast-plan.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
-import { bakeoffBudget, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario } from './judge-bakeoff-plan.mjs';
+import { bakeoffBudget, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario, judgeFreezeV4RunId, judgeFreezeV4Scenario, judgeFreezeV4SlotCount } from './judge-bakeoff-plan.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
@@ -46,6 +46,7 @@ if (option('--export-report') >= 0) {
   }
 } else {
   const id = (() => { try { return runId(optionValue('--id') ?? randomUUID()); } catch { return randomUUID(); } })();
+  const reservedV4Id = id.toLowerCase() === judgeFreezeV4RunId;
   const root = resolve(optionValue('--run-root')?.trim() ? optionValue('--run-root') : 'runs');
   const start = (id, extra) => startRunReceipt({ root, id, mode: optionValue('--mode') ?? 'offline', argv, ...extra });
   let recorder;
@@ -65,7 +66,12 @@ if (option('--export-report') >= 0) {
   };
   const recordRejection = () => {
     if (!recorder && option('--resume') < 0) {
-      try { openRun(); } catch (error) { if (!recorder) console.error(`startup receipt write failed: ${error.message}`); }
+      try {
+        if (reservedV4Id) {
+          recorder = start(randomUUID());
+          installRunReceiptHandlers(recorder, () => acceptance);
+        } else openRun();
+      } catch (error) { if (!recorder) console.error(`startup receipt write failed: ${error.message}`); }
     }
   };
   const rejectInput = error => {
@@ -89,8 +95,10 @@ if (option('--export-report') >= 0) {
       'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
-    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario].includes(values.scenario)) throw new Error('unknown scenario');
-    const freezeRetest = values.scenario === judgeFreezeScenario;
+    if (!['E1', 'E2', 'ruler-expand', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario].includes(values.scenario)) throw new Error('unknown scenario');
+    const freezeV4 = values.scenario === judgeFreezeV4Scenario;
+    if (reservedV4Id && (!freezeV4 || values['estimate-only'] || id !== judgeFreezeV4RunId)) throw new Error('the registered v4 ID is reserved for its real run');
+    const freezeRetest = freezeV4 || values.scenario === judgeFreezeScenario;
     const split = freezeRetest || values.scenario === judgeBakeoffScenario;
     const contrast = split || values.scenario === judgeContrastScenario;
     if (values['proxy-from-env'] && (!split || values.mode !== 'real' || !['haiku', 'gemini'].includes(values['judge-policy']) || values.resume)) {
@@ -122,7 +130,7 @@ if (option('--export-report') >= 0) {
         const { resolveOpenRouterProxySource } = await import('./openrouter-proxy.mjs');
         config.judgeProxySource = resolveOpenRouterProxySource().source;
       }
-      ceiling = (freezeRetest ? judgeFreezeBudget : split ? bakeoffBudget : contrastBudget)(candidates[judgePolicy].policy);
+      ceiling = (freezeRetest ? judgeFreezeBudget : split ? bakeoffBudget : contrastBudget)(candidates[judgePolicy].policy, freezeV4 ? judgeFreezeV4SlotCount : undefined);
     } else if (values.scenario === s1Scenario) {
       if (!config.judgeOnly || values.phase !== undefined || values.freeze !== undefined || values['generate-only']) throw new Error('S1-binary only admits --judge-only <frozen E2 run ID>');
       s1Runner = await import('./s1-binary.mjs');
@@ -159,7 +167,8 @@ if (option('--export-report') >= 0) {
     config.limits = { maxAttempts: limit('max-attempts', ceiling.maxCalls), maxRequestedOutputTokens: limit('max-requested-output-tokens', ceiling.maxOutputTokens) };
     if (!estimate && config.mode === 'real' && !values['confirm-cost']) throw new Error('real mode requires explicit cost authorization and --confirm-cost');
     if (s1Runner) config.prepared = s1Runner.prepareS1(config, estimate);
-    if (freezeRetest) config.prepared = (await import('./judge-freeze-retest.mjs')).prepareJudgeFreeze(config, estimate);
+    if (freezeV4) config.prepared = (await import('./judge-freeze-v4.mjs')).prepareJudgeFreezeV4(config, estimate);
+    else if (freezeRetest) config.prepared = (await import('./judge-freeze-retest.mjs')).prepareJudgeFreeze(config, estimate);
     else if (contrastRunner) config.prepared = (contrastRunner.prepareJudgeBakeoff ?? contrastRunner.prepareJudgeContrast)(config, estimate);
   } catch (error) {
     rejectInput(error);
@@ -178,6 +187,8 @@ if (option('--export-report') >= 0) {
           route: config.prepared.candidate.route, preregistrationSha256: config.registrationDigest, concurrency: config.concurrency, retriesPerKind: config.prepared.plan.retriesPerKind,
           ...(config.prepared.identity.judgeTransport && { judgeTransport: config.prepared.identity.judgeTransport,
             parentRegistrationSha256: config.prepared.identity.parentRegistrationSha256 }),
+          ...(config.prepared.identity.judgeFingerprint && { ruler: config.prepared.identity.ruler, identityVersion: config.prepared.identity.version,
+            judgeFingerprint: config.prepared.identity.judgeFingerprint }),
           ...(config.prepared.plan.stop && { stop: config.prepared.plan.stop, maxAttemptsPerDimension: config.prepared.plan.maxAttemptsPerDimension }) }),
         ...rulerRunner?.holdoutEstimate(config.prepared) });
       else if (!process.exitCode) {

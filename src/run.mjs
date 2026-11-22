@@ -129,11 +129,13 @@ export async function executeCell({ runDir, id, variant, coordinate, task, opera
     if (generateOnly) return { messages };
     role = 'judge'; turn = rounds; call = 1;
     if (control?.splitNext) {
+      turn = messages.at(-1).turn;
       for (let next; (next = control.splitNext());) {
         ({ call } = next);
         if (next.nextAttempt > control.splitMaxAttempts) return { interruptedSplit: true };
         await gradeBinaryDimension(models, messages, { turn, runId: id, cell: variant, sourceRunId: judgeOnly,
-          repetition: coordinate?.repetition, dimension: next.dimension, nextAttempt: next.nextAttempt, retryFeedback: next.retryFeedback });
+          repetition: coordinate?.repetition, dimension: next.dimension, nextAttempt: next.nextAttempt, retryFeedback: next.retryFeedback,
+          ruler: control.judgeRuler });
       }
       return { messages };
     }

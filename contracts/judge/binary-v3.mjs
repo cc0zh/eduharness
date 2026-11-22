@@ -227,11 +227,11 @@ function mapEvidenceToIds(evidence, view) {
     .map(([slot, number]) => [slot, view.messages[number - 1].id]));
 }
 
-function summarize(scores) {
+function summarize(scores, ruler) {
   const applicable = Object.keys(scores).filter(dimension => scores[dimension] !== notApplicable);
   const points = applicable.reduce((sum, dimension) => sum + scores[dimension], 0);
   const possible = 2 * applicable.length;
-  return { ruler: splitBinaryRuler, scores, applicable, points, possible, rate: possible ? points / possible : null };
+  return { ruler, scores, applicable, points, possible, rate: possible ? points / possible : null };
 }
 
 const emptyAnswers = Object.fromEntries(Object.entries(binaryQuestions).map(([id, definition]) => [id, {
@@ -239,12 +239,12 @@ const emptyAnswers = Object.fromEntries(Object.entries(binaryQuestions).map(([id
   evidence: Object.fromEntries(Object.keys(definition.evidence).map(slot => [slot, null])),
 }]));
 
-function scoreAnswers(answers) {
+function scoreAnswers(answers, ruler) {
   const complete = { ...emptyAnswers, ...answers };
-  return { ...scoreBinary(complete), ruler: splitBinaryRuler };
+  return { ...scoreBinary(complete), ruler };
 }
 
-export function parseBinaryDimension(text, view, dimension, audit = []) {
+export function parseBinaryDimension(text, view, dimension, audit = [], ruler = splitBinaryRuler) {
   assertDimension(dimension);
   assertView(view);
   let value;
@@ -309,12 +309,12 @@ export function parseBinaryDimension(text, view, dimension, audit = []) {
     messageIds,
     ...(anchorRefs && { anchorMessageIds: mapEvidenceToIds(anchorRefs, view) }),
     normalized,
-    scoring: summarize({ [dimension]: scoreAnswers(answers).scores[dimension] }),
+    scoring: summarize({ [dimension]: scoreAnswers(answers, ruler).scores[dimension] }, ruler),
   };
   return parsed;
 }
 
-export function assembleBinaryVerdict(parts) {
+export function assembleBinaryVerdict(parts, ruler = splitBinaryRuler) {
   requireThat(exact(parts, splitDimensions), 'structure', 'binary verdict requires one result for each dimension');
   const s3 = parts.support_escalation_and_fading.answers.S3;
   const p1 = parts.productive_struggle.answers.P1;
@@ -337,6 +337,6 @@ export function assembleBinaryVerdict(parts) {
     messageIds,
     anchorMessageIds,
     normalized: Object.fromEntries(splitDimensions.map(dimension => [dimension, parts[dimension].normalized])),
-    scoring: scoreAnswers(answers),
+    scoring: scoreAnswers(answers, ruler),
   } };
 }

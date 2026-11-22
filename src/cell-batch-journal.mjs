@@ -6,7 +6,8 @@ import { filenames } from '../contracts/artifacts/schema.mjs';
 import { hash, requireThat } from '../contracts/core/schema.mjs';
 import { bindBinary } from '../contracts/judge/binary.mjs';
 import { splitDimensions } from '../contracts/judge/binary-v3.mjs';
-import { attemptFile, attemptStop, batchFolders, callIdFor, cellRow, covers, numericScores, replayJudge, retryClass, retryStop, verifyDialogue } from './cell-batch-plan.mjs';
+import { attemptFile, attemptStop, batchFolders, callIdFor, cellRow, covers, numericScores, replayJudge, retryClass, retryStop, splitJudgeTurn,
+  verifyDialogue, waitsForGateCells } from './cell-batch-plan.mjs';
 import { judgeContrastScenario } from './judge-contrast-plan.mjs';
 import { replaySplitJudge, splitBinding } from './split-judge-replay.mjs';
 import { finishInterruptedSplit, reserveSplit, settleSplit, splitMaxAttempts, splitNext } from './split-judge-state.mjs';
@@ -93,12 +94,15 @@ export function replayBatchJournal({ dir, events, start, end, manifest, manifest
     const a = attempts.get(event.callId);
     if (event.type === 'cell_start') {
       requireThat(!stop && active.size < activeLimit && next < order.length && event.folder === order[next] && !active.has(event.folder), `cell launch out of order or after stop at ${label}`);
+      if (waitsForGateCells(manifest, event.folder) && !waitsForGateCells(manifest, order[next - 1])) {
+        requireThat(active.size === 0, `side evidence started before the gate batch settled at ${label}`);
+      }
       next++;
       active.set(event.folder, []);
     } else if (['reserve', 'budget_stop', 'retry_stop'].includes(event.type)) {
       const { scope, limit, folder } = event;
       const { role, turn, call, attempt } = scope ?? {};
-      const roleMatches = split ? role === 'judge' && turn === rounds && amount(call, 1, splitDimensions.length) && amount(attempt, 1, splitMaxAttempts)
+      const roleMatches = split ? role === 'judge' && turn === splitJudgeTurn(manifest, folder) && amount(call, 1, splitDimensions.length) && amount(attempt, 1, splitMaxAttempts)
         : amount(turn, 1, rounds) && amount(call, 1) && amount(attempt, 1)
           && ((role === 'teacher' && !manifest.source) || (role === 'learner' && !manifest.source && call === 1) || (role === 'judge' && turn === rounds && call === 1));
       requireThat(group && !stop && !running.has(folder) && !a && running.size < activeLimit && roleMatches

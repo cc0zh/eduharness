@@ -8,13 +8,13 @@ import { checkSnapshot, checkout } from './real-preflight.mjs';
 import { atomicBytes, atomicJson, readRequestEvents, receiptPaths } from './receipt-files.mjs';
 import { s1Scenario } from './s1-binary-plan.mjs';
 import { judgeContrastScenario } from './judge-contrast-plan.mjs';
-import { judgeBakeoffScenario, judgeFreezeScenario } from './judge-bakeoff-plan.mjs';
+import { judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario } from './judge-bakeoff-plan.mjs';
 import { verifyS1Artifacts } from './s1-binary-verification.mjs';
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 
 const safeOptions = new Set(['--mode', '--run-root', '--id', '--scenario', '--phase', '--freeze', '--judge-only', '--max-attempts', '--max-requested-output-tokens', '--harness', '--source-root', '--preregistration', '--preregistration-sha256', '--concurrency', '--judge-policy']);
-const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario]);
+const safeValues = new Set(['offline', 'real', 'E1', 'E2', 'ruler-expand', 'train', 'test', 'ab', 'baseline', 'improved', 'rhetoric', s1Scenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario]);
 const pathFor = (root, id, suffix) => join(root, '_receipts', `${id}.${suffix}.json`);
 const isoNow = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');

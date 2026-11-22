@@ -4,14 +4,15 @@ import { filenames } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
 import { bindBinary } from '../contracts/judge/binary.mjs';
 import { splitDimensions } from '../contracts/judge/binary-v3.mjs';
-import { attemptStop, batchFolders, batchPolicy, batchVersion, callIdFor, cellRow, covers, numericScores, projectResult, replayJudge, retryClass, retryStop, splitScenario } from './cell-batch-plan.mjs';
+import { attemptStop, batchFolders, batchPolicy, batchVersion, callIdFor, cellRow, covers, numericScores, projectResult, replayJudge, retryClass, retryStop,
+  splitProgressForBatch, splitScenario, waitsForGateCells } from './cell-batch-plan.mjs';
 import { cellArtifacts } from './cell-batch-journal.mjs';
 import { evidenceFor, readBatch } from './cell-batch-verification.mjs';
 import { checkSnapshot } from './real-preflight.mjs';
 import { atomicBytes, atomicJson, jsonBytes, processDir } from './receipt-files.mjs';
 import { s1PreregistrationFile } from './s1-binary-plan.mjs';
 import { replaySplitJudge, splitBinding } from './split-judge-replay.mjs';
-import { createSplitProgress, finishInterruptedSplit, reserveSplit, settleSplit, splitMaxAttempts, splitNext } from './split-judge-state.mjs';
+import { finishInterruptedSplit, reserveSplit, settleSplit, splitMaxAttempts, splitNext } from './split-judge-state.mjs';
 
 export async function runCellBatch({ root, id, concurrency = 1, resume, openRun }, values, execute, preregistration) {
   const policy = batchPolicy(values);
@@ -58,7 +59,7 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
   const retries = history?.retries ?? new Map();
   const lastAttempt = history?.lastAttempt ?? new Map();
   const folders = batchFolders(manifest);
-  const split = splitScenario(manifest.scenario) ? history?.split ?? createSplitProgress(folders.length) : undefined;
+  const split = splitScenario(manifest.scenario) ? history?.split ?? splitProgressForBatch(manifest) : undefined;
   const pending = folders.filter(folder => !selected.has(folder) || !split && selected.get(folder).row.failure);
   const running = new Set(), active = new Map(), waiters = new Set();
   let activeLimit = concurrency, stop = split?.stop ?? undefined, fatal;
@@ -98,7 +99,7 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
       judgeReasoningOff: !split && Boolean(policy.judge.reasoning),
       judgePolicy: manifest.identity.judgePolicy,
       judgeProxySource: manifest.identity.judgeTransport?.proxySource,
-      ...(split && { splitMaxAttempts, splitNext() {
+      ...(split && { judgeRuler: manifest.identity.ruler, splitMaxAttempts, splitNext() {
         const next = splitNext(split, folder);
         return next && { ...next, dimension: splitDimensions[next.call - 1] };
       } }),
@@ -196,9 +197,18 @@ export async function runCellBatch({ root, id, concurrency = 1, resume, openRun 
   }
 
   let next = 0;
+  let sideEvidenceStarted = false;
   while (true) {
     try {
-      while (!stop && !fatal && next < pending.length && running.size < activeLimit) launch(pending[next++]);
+      while (!stop && !fatal && next < pending.length && running.size < activeLimit) {
+        const folder = pending[next];
+        if (!sideEvidenceStarted && waitsForGateCells(manifest, folder)) {
+          if (running.size) break;
+          sideEvidenceStarted = true;
+        }
+        next++;
+        launch(folder);
+      }
     } catch (error) { abort(error); }
     if (!running.size) break;
     await Promise.race(running);

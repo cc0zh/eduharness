@@ -3,13 +3,12 @@ import { join, resolve } from 'node:path';
 import { isDeepStrictEqual as same } from 'node:util';
 import { filenames } from '../contracts/artifacts/schema.mjs';
 import { failure, hash, requireThat } from '../contracts/core/schema.mjs';
-import { batchFolders, batchVersion, projectResult, splitScenario, validateBatchPlan } from './cell-batch-plan.mjs';
+import { batchFolders, batchVersion, projectResult, splitProgressForBatch, splitScenario, validateBatchPlan } from './cell-batch-plan.mjs';
 import { amount, replayBatchJournal, sha256 } from './cell-batch-journal.mjs';
 import { jsonBytes, processDir, readOptional, readRequestEvents, receiptPaths } from './receipt-files.mjs';
 import { constructExpectations, requireRegisteredSource, s1PreregistrationFile, s1Scenario, s1SourceId } from './s1-binary-plan.mjs';
 import { contrastRegistration, judgeContrastScenario } from './judge-contrast-plan.mjs';
 import { bakeoffConcurrency } from './judge-bakeoff-plan.mjs';
-import { createSplitProgress } from './split-judge-state.mjs';
 
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
 const readJson = path => JSON.parse(readFileSync(path));
@@ -69,7 +68,7 @@ export function readBatch(root, id, { resume = false } = {}) {
   validateBatchPlan(manifest);
   const { identity, mode, scenario } = manifest;
   const contrast = scenario === judgeContrastScenario;
-  const split = splitScenario(scenario) ? createSplitProgress(manifest.planned.length) : undefined;
+  const split = splitScenario(scenario) ? splitProgressForBatch(manifest) : undefined;
   const regSha = identity.preregistrationSha256;
   let registrationStored = false;
   if (regSha) {
@@ -86,7 +85,7 @@ export function readBatch(root, id, { resume = false } = {}) {
           && same(candidate.limits, manifest.limits) && same(plan.sources, identity.sources) && same(plan.prior, manifest.source.prior)
           && same(plan.queue, manifest.planned) && same(plan.stop, split.rules)
           && same(plan.judgeTransport, identity.judgeTransport) && plan.parentRegistrationSha256 === identity.parentRegistrationSha256
-          && same(plan.freeze, identity.freeze),
+          && same(plan.freeze, identity.freeze) && plan.judgeFingerprint === identity.judgeFingerprint,
         'judge bakeoff preregistration does not match the batch');
       } else if (contrast) {
         const plan = contrastRegistration(markdown);

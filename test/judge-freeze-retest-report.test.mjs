@@ -203,6 +203,28 @@ test('the two descriptive rhetoric cases are reported but not required for freez
   ]);
 });
 
+test('v4 reports incorrect and missing side evidence without counting it in the freeze gates', () => {
+  const fixture = makeFixture();
+  fixture.manifest.identity.ruler = 'e1-binary-v4';
+  fixture.plan = { ...fixture.plan, probes: [
+    { id: 'probe-v1-incorrect', target: 'V1', base: 'b-geo', truth: true, anchor: 4 },
+    { id: 'probe-a2-missing', target: 'A2', base: 'b-copy', truth: false, anchor: 7 },
+  ] };
+  fixture.manifest.planned.push(...fixture.plan.probes.map(({ id }) => ({ id, purpose: 'side-evidence' })));
+  const original = fixture.selected.get('b-copy');
+  fixture.selected.set('probe-v1-incorrect', { ...original,
+    judgement: { ...original.judgement, binding: { dimensions: { verification_or_transfer: { callId: 'probe-v1-incorrect:judge:4:6:1' } } } } });
+  const result = report.analyzeJudgeFreeze(fixture);
+  assert.equal(result.frozen, true);
+  assert.equal(result.details.completeness.total, 49);
+  assert.deepEqual(result.details.probes.map(({ id, observed, hit }) => [id, observed, hit]), [
+    ['probe-v1-incorrect', false, false], ['probe-a2-missing', null, null],
+  ]);
+  const markdown = report.renderFreezeReport(result);
+  assert.match(markdown, /probe-v1-incorrect:judge:4:6:1/);
+  assert.match(markdown, /probe-a2-missing/);
+});
+
 test('offline or unverified batches never freeze', () => {
   assert.equal(run({ mode: 'offline' }).gates.realVerified, false);
   assert.equal(run({ mode: 'offline' }).frozen, false);

@@ -27,7 +27,7 @@ export function replaySplitJudge(manifest, folder, messages, meter, raw) {
   const { context } = raw;
   requireThat(context.messages.length === 1 && context.messages[0].role === 'user'
     && same(JSON.parse(context.messages[0].content), binaryDimensionPayload(view))
-    && context.systemPrompt === splitRetryPrompt(binaryDimensionPrompt(view, dimension), meter.retryFeedback), `dimension request or retry feedback differs at ${label}`);
+    && context.systemPrompt === splitRetryPrompt(binaryDimensionPrompt(view, dimension, binding.ruler), meter.retryFeedback), `dimension request or retry feedback differs at ${label}`);
   if (raw.outbound) {
     const route = manifest.identity.routes.judge;
     const { parameterNames, reasoning, max_tokens, max_completion_tokens } = raw.outbound;
@@ -43,7 +43,7 @@ export function replaySplitJudge(manifest, folder, messages, meter, raw) {
   let verdict, validationCode;
   try {
     requireThat(raw.response.stopReason === 'stop' && !raw.response.content.some(block => block.type === 'toolCall'), 'JSON generation did not terminate normally');
-    verdict = parseBinaryDimension(text, view, dimension);
+    verdict = parseBinaryDimension(text, view, dimension, undefined, binding.ruler);
   } catch (error) {
     validationCode = retryFeedbackCode(error);
   }

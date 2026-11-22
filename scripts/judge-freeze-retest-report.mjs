@@ -3,7 +3,9 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { binaryQuestions } from '../contracts/judge/binary.mjs';
-import { splitDimensions } from '../contracts/judge/binary-v3.mjs';
+import { splitDimensions, splitQuestions } from '../contracts/judge/binary-v3.mjs';
+import { splitBinaryV4Ruler } from '../contracts/judge/binary-v4.mjs';
+import { judgeFreezeV4ProbePurpose } from '../src/judge-bakeoff-plan.mjs';
 import { verifyRun } from '../src/run-receipts.mjs';
 import { readBatch } from '../src/cell-batch-verification.mjs';
 import { contrastRegistration } from '../src/judge-contrast-plan.mjs';
@@ -188,14 +190,47 @@ function repeatGate(plan, views) {
   return { pass, repeatIds: [...repeatIds], pairs };
 }
 
-export function analyzeJudgeFreeze({ manifest, selected, verification, plan }) {
+const dimensionByQuestion = Object.fromEntries(Object.entries(splitQuestions)
+  .flatMap(([dimension, questions]) => Object.keys(questions).map(id => [id, dimension])));
+
+function auditV4(planned, selected, attempts, plan) {
+  const last = new Map(attempts.map(({ folder, callId, scope, meter }) => [folder, {
+    callId, dimension: splitDimensions[scope.call - 1], attemptPath: meter?.attemptPath, failureKind: meter?.failureKind, detail: meter?.detail,
+  }]));
+  const observe = (id, target) => {
+    const judgement = selected.get(id)?.judgement;
+    const ruling = judgement?.verdict.answers[target];
+    const call = judgement?.binding?.dimensions?.[dimensionByQuestion[target]];
+    return { observed: ruling?.answer ?? null, citations: ruling?.evidence ?? null, callId: call?.callId ?? null, attemptPath: call?.attemptPath ?? null };
+  };
+  return {
+    probes: plan.probes.map(({ id, base, target, truth, anchor, why }) => {
+      const observation = observe(id, target);
+      return { id, base, target, truth, anchor, why, ...observation, hit: observation.observed === null ? null : observation.observed === truth };
+    }),
+    targeted: plan.primary.filter(row => targetQuestions.includes(row.target)).map(({ id, baseline, target, before, truth, expectedEvidence }) => ({
+      id, target, expected: truth[target], expectedEvidence, ...observe(id, target), baseline: { id: baseline, expected: before[target], ...observe(baseline, target) },
+    })),
+    normalCalls: normalCases.map(id => ({ id, V1: observe(id, 'V1'), V2: observe(id, 'V2') })),
+    rulings: planned.map(({ id }) => {
+      const cell = selected.get(id);
+      const { verdict, binding } = cell?.judgement ?? {};
+      return { id, processIndex: cell?.processIndex, verdict: verdict ?? null, calls: binding?.dimensions ?? null,
+        failure: cell?.row?.failure ?? null, lastAttempt: last.get(id) ?? null };
+    }),
+  };
+}
+
+export function analyzeJudgeFreeze({ manifest, selected = new Map(), verification, plan, attempts = [] }) {
   const views = new Map();
   for (const [folder, record] of selected ?? []) views.set(folder, cellView(record));
   const planned = manifest?.planned ?? [];
   const descriptiveIds = new Set(Array.isArray(plan?.primary)
     ? plan.primary.filter(row => !targetQuestions.includes(row.target)).map(row => row.id)
     : []);
-  const required = planned.filter(row => !descriptiveIds.has(row.id));
+  const v4 = manifest?.identity?.ruler === splitBinaryV4Ruler;
+  const isProbe = row => v4 && row.purpose === judgeFreezeV4ProbePurpose;
+  const required = planned.filter(row => !descriptiveIds.has(row.id) && !isProbe(row));
   const missing = required.filter(row => !views.get(row.id)?.complete).map(row => row.id);
   const complete = required.length === 49 && missing.length === 0;
   const descriptive = planned.filter(row => descriptiveIds.has(row.id))
@@ -228,6 +263,7 @@ export function analyzeJudgeFreeze({ manifest, selected, verification, plan }) {
       provenance: plan?.freeze ?? null,
       verification: verification ?? null,
       limits: manifest?.limits ?? null,
+      ...(v4 && { identityId: manifest.identityId, judgeFingerprint: manifest.identity.judgeFingerprint, ...auditV4(planned, selected, attempts, plan) }),
     },
   };
 }
@@ -275,6 +311,20 @@ export function renderFreezeReport(result, { root = 'runs', outDir = '.' } = {})
   const pids = details.verification?.processes?.map(process => `${process.processIndex}:${process.pid}${process.interrupted ? ' (interrupted)' : ''}`).join(', ') ?? 'not reported';
   const limits = details.limits ?? {};
   const provenance = details.provenance;
+  const cite = row => Object.entries(row.citations ?? {}).filter(([, n]) => n !== null).map(([slot, n]) => `${slot}=#${n}`).join(', ') || '—';
+  const v4Audit = details.probes && [
+    `## Directed rulings and citations\n\n${table(['Cell', 'Question', 'Truth', 'Expected references', 'Observed', 'References', 'Call ID', 'Baseline', 'Before → observed', 'Baseline references', 'Baseline call ID'],
+      details.targeted.map(row => [row.id, row.target, yesNo(row.expected), cite({ citations: row.expectedEvidence }), yesNo(row.observed), cite(row), row.callId, row.baseline.id,
+        `${yesNo(row.baseline.expected)} → ${yesNo(row.baseline.observed)}`, cite(row.baseline), row.baseline.callId]))}`,
+    `## Normal call IDs\n\n${table(['Cell', 'V1', 'V2'], details.normalCalls.map(row => [row.id, row.V1.callId, row.V2.callId]))}`,
+    `## Fresh side evidence (not a gate)\n\n${table(['Cell', 'Source', 'Question', 'Truth', 'Expected / candidate #n', 'Observed', 'References', 'Call ID', 'Bit match'],
+      details.probes.map(row => [row.id, row.base, row.target, yesNo(row.truth), `#${row.anchor}`, yesNo(row.observed), cite(row), row.callId, yesNo(row.hit)]))}`,
+    `## Failed or unobserved cells\n\n${table(['Cell', 'Failure', 'Last dimension', 'Last call ID', 'Detail'], details.rulings.filter(row => !row.verdict).map(row => [
+      row.id, row.failure?.kind ?? row.lastAttempt?.failureKind ?? 'not observed', row.lastAttempt?.dimension, row.failure?.callId ?? row.lastAttempt?.callId,
+      row.failure?.detail ?? row.lastAttempt?.detail,
+    ]))}\n\nAll 19 rulings per complete cell, shared anchors and call paths are in [freeze-retest-summary.json](./freeze-retest-summary.json).`,
+    `New identity: \`${details.identityId}\`. New judge fingerprint: \`${details.judgeFingerprint}\`.`,
+  ];
   return [
     `# Judge freeze retest · ${result.runId ?? 'unknown run'}`,
     `Run \`${result.runId}\` in \`${result.mode ?? 'unknown'}\` mode. Verified: ${result.verified ? 'yes' : 'no'}. Freeze gates passed: ${result.frozen ? 'yes' : 'no'}.`,
@@ -285,6 +335,7 @@ export function renderFreezeReport(result, { root = 'runs', outDir = '.' } = {})
     `## Normal four cases\n\nV1 must be Yes citing #4 in all four; V2 must be Yes only for \`V2-normal-explain\` and cite prompt #4 / response #5; the \`verification_or_transfer\` score must be exactly [1, 2, 1, 1].\n\n${normalTable}`,
     `## Normal S1 three diagnostics\n\nSame \`b-geo\` raw input across the S1 normal repetitions. Descriptive only, not a gate.\n\n${normalS1Table}`,
     `## Repeat pairs\n\nFive repeat pairs must all be present. Four-bit, all-19 and six-score agreement are descriptive; no minimum consistency is imposed.\n\n${repeatTable}`,
+    ...(v4Audit ?? []),
     `## Provenance and receipts\n\n- Winner provenance: ${provenance ? JSON.stringify(provenance) : 'not recorded'}\n- Verified: ${result.verified ? 'yes' : 'no'}. Processes/PIDs: ${pids}.\n- Caps: max attempts ${limits.maxAttempts ?? '—'}, max requested output tokens ${limits.maxRequestedOutputTokens ?? '—'}.\n- Read [run originals](${linkFor(root, outDir, result.runId, '.') || './'}) and each verified judge.json. This report does not send requests.`,
   ].join('\n\n') + '\n';
 }
@@ -297,7 +348,7 @@ export async function main({ runRoot = 'runs', id, outDir } = {}) {
   const batch = readBatch(root, id);
   const markdown = readFileSync(join(runDir, 'preregistration.md'), 'utf8');
   const plan = contrastRegistration(markdown);
-  const result = analyzeJudgeFreeze({ manifest: batch.manifest, selected: batch.selected, verification, plan });
+  const result = analyzeJudgeFreeze({ manifest: batch.manifest, selected: batch.selected, verification, plan, attempts: batch.attempts });
   mkdirSync(out, { recursive: true });
   const reportPath = join(out, 'freeze-retest-report.md');
   const summaryPath = join(out, 'freeze-retest-summary.json');

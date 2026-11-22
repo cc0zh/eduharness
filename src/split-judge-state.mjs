@@ -54,7 +54,7 @@ export function settleSplit(progress, folder, meter, judgement, binding, sent = 
     cell.previous = null;
     if (cell.parts.length === splitDimensions.length) {
       const byDimension = project => Object.fromEntries(splitDimensions.map((key, i) => [key, project(cell.parts[i])]));
-      const { verdict, conflict } = assembleBinaryVerdict(byDimension(part => part.verdict));
+      const { verdict, conflict } = assembleBinaryVerdict(byDimension(part => part.verdict), binding?.ruler);
       if (conflict) {
         const crossDimension = { ...conflict, dimensions: byDimension(part => part.binding) };
         outcome = { failure: failure('judge_partial_failure', { ...where, crossDimension }, 'S3 and P1 disagree across dimension judgements').failure };

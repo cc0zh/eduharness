@@ -8,14 +8,21 @@ import { binaryCellResult, binaryRulingResult, cellIds, cellResult } from '../co
 import { hash, message, requireThat } from '../contracts/core/schema.mjs';
 import { bindBinary, binaryIdentityVersion, binaryOutputContract, binaryRuler, parseBinaryJudgement } from '../contracts/judge/binary.mjs';
 import { splitBinaryIdentityVersion, splitBinaryOutputContract, splitBinaryRuler } from '../contracts/judge/binary-v3.mjs';
+import { splitBinaryV4IdentityVersion, splitBinaryV4Ruler } from '../contracts/judge/binary-v4.mjs';
 import { bind, directDimension, dimensions, parseNumberedJudgement, rubric } from '../contracts/judge/schema.mjs';
 import { assessS1, s1Path, s1Plan, s1Scenario } from './s1-binary-plan.mjs';
 import { contrastBudget, contrastFolders, judgeContrastScenario } from './judge-contrast-plan.mjs';
-import { bakeoffBudget, freezeSlotCount, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario, validateBakeoffProxyIdentity } from './judge-bakeoff-plan.mjs';
+import { bakeoffBudget, freezeSlotCount, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario, judgeFreezeV4A2Case,
+  judgeFreezeV4ProbePurpose, judgeFreezeV4Scenario, judgeFreezeV4SlotCount, validateBakeoffProxyIdentity } from './judge-bakeoff-plan.mjs';
 import { matchesJudgeParameters, matchesReportedRoute } from './judge-transport.mjs';
+import { createSplitProgress } from './split-judge-state.mjs';
 
 export const batchVersion = 'cell-batch-v1';
-export const splitScenario = scenario => scenario === judgeBakeoffScenario || scenario === judgeFreezeScenario;
+export const splitScenario = scenario => [judgeBakeoffScenario, judgeFreezeScenario, judgeFreezeV4Scenario].includes(scenario);
+export const splitProgressForBatch = manifest => createSplitProgress(manifest.scenario === judgeFreezeV4Scenario ? freezeSlotCount : manifest.planned.length);
+export const waitsForGateCells = (manifest, folder) => manifest.scenario === judgeFreezeV4Scenario
+  && manifest.planned.find(row => row.id === folder)?.purpose === judgeFreezeV4ProbePurpose;
+export const splitJudgeTurn = (manifest, folder) => manifest.scenario === judgeFreezeV4Scenario && folder === judgeFreezeV4A2Case ? rounds + 1 : rounds;
 const binaryScenario = scenario => scenario === s1Scenario || scenario === judgeContrastScenario || splitScenario(scenario);
 export const supportedBatch = scenario => ['E1', 'E1-judge-only', 'E2', 'E2-judge-only'].includes(scenario) || binaryScenario(scenario);
 export function batchFolders({ scenario, planned }) {
@@ -45,7 +52,8 @@ export function batchPolicy({ scenario, identity, source, mode }) {
 export function validateBatchPlan(manifest) {
   const { scenario, identity, identityId, mode, planned } = manifest;
   const split = splitScenario(scenario);
-  const freeze = scenario === judgeFreezeScenario;
+  const v4 = scenario === judgeFreezeV4Scenario;
+  const freeze = v4 || scenario === judgeFreezeScenario;
   const contrast = scenario === judgeContrastScenario || split;
   requireThat(supportedBatch(scenario) && manifest.taskId === taskId, 'invalid batch scenario or task');
   const expected = scenario === 'E1' ? ['normal', 'answer_dump'] : scenario === 'E1-judge-only' ? ['normal']
@@ -56,20 +64,24 @@ export function validateBatchPlan(manifest) {
   const callPolicy = batchPolicy(manifest);
   if (contrast) {
     const folders = batchFolders(manifest);
-    const validFolders = freeze ? folders.length === freezeSlotCount && new Set(folders).size === freezeSlotCount
+    const slots = v4 ? judgeFreezeV4SlotCount : freezeSlotCount;
+    const validFolders = freeze ? folders.length === slots && new Set(folders).size === slots
       && same(folders.slice(0, s1Plan.length), s1Plan.map(s1Path))
       && folders.slice(s1Plan.length).every(id => /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id)) : same(folders, contrastFolders);
-    requireThat(validFolders && same(manifest.budget, (freeze ? judgeFreezeBudget : split ? bakeoffBudget : contrastBudget)(callPolicy)),
+    const ceiling = freeze ? judgeFreezeBudget(callPolicy, slots) : (split ? bakeoffBudget : contrastBudget)(callPolicy);
+    requireThat(validFolders && same(manifest.budget, ceiling),
       'judge contrast sample plan or budget differs');
     for (const [i, row] of planned.entries()) {
       const coordinate = s1Plan[i];
       requireThat(row.repetition === coordinate?.repetition && row.condition === coordinate?.condition
         && /^[a-f0-9]{64}$/.test(row.transcriptSha256) && typeof row.sourceRunId === 'string', `invalid frozen sample ${row.id}`);
+      if (v4) requireThat((row.purpose === judgeFreezeV4ProbePurpose) === (i >= freezeSlotCount), `v4 side evidence is out of order at ${row.id}`);
     }
   }
   const { maxAttempts, maxRequestedOutputTokens } = manifest.limits;
   requireThat([maxAttempts, maxRequestedOutputTokens].every(n => Number.isSafeInteger(n) && n > 0) && maxAttempts <= manifest.budget.maxCalls && maxRequestedOutputTokens <= manifest.budget.maxOutputTokens, 'invalid registered limits');
-  if (split) requireThat(identity.version === splitBinaryIdentityVersion && identity.ruler === splitBinaryRuler && identity.judgeOutputContract === splitBinaryOutputContract, 'split binary identity version mismatch');
+  if (split) requireThat(identity.version === (v4 ? splitBinaryV4IdentityVersion : splitBinaryIdentityVersion)
+    && identity.ruler === (v4 ? splitBinaryV4Ruler : splitBinaryRuler) && identity.judgeOutputContract === splitBinaryOutputContract, 'split binary identity version mismatch');
   else if (binaryScenario(scenario)) requireThat(identity.version === binaryIdentityVersion && identity.ruler === binaryRuler && identity.judgeOutputContract === binaryOutputContract, 'binary identity version mismatch');
 }
 
@@ -102,7 +114,7 @@ export function cellRow(manifest, folder, outcome) {
 export function verifyDialogue(manifest, folder, messages, transcriptSha256) {
   if (manifest.scenario === judgeContrastScenario || splitScenario(manifest.scenario)) {
     const sample = manifest.planned.find(row => row.id === folder);
-    requireThat(sample?.transcriptSha256 === transcriptSha256 && messages.length === 2 * rounds + 1, `frozen transcript mismatch at ${folder}`);
+    requireThat(sample?.transcriptSha256 === transcriptSha256 && messages.length === 2 * splitJudgeTurn(manifest, folder) + 1, `frozen transcript mismatch at ${folder}`);
     bindBinary(messages);
     return;
   }
