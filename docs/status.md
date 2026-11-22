@@ -4,11 +4,30 @@
 
 ## 阶段 2a Gemini 审核（20261122）
 
-**Gemini 仍是候选，未做真实验证。** `fidelity_audit` 的 Gemini 策略沿用 ①h 的 `google/gemini-3.8-flash` / `google-ai-studio`、`reasoning.effort: low`、温度 0、每请求 4,096 输出 token、120 秒 deadline。出站要求严格 `json_schema`、`require_parameters: true`、`allow_fallbacks: false`，真实模式须显式启用代理。审核身份 `hard-learner-audit-v5-gemini` 绑定策略、路由、传输、源码和预登记；审核提示 v2 与历史 SHA256 `c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0` 相同。默认 Qwen 与学生配置不变。[策略](../config/fidelity-audit.mjs)
+**采用 Gemini 重审 run 05。伸手要答案型由不可用转为能用。** 这不是新学生配置的结论。源 run 05 使用 DeepSeek Flash、`thinking: low`；48 条新审核绑定相同的 48 份转录和 12 份原审核证据视图，未生成学生回复。顽固误解型仍能用，假装懂了型仍不可用。
 
-验证保留原 16 条，加入 24 条原创难例。四类各六条，独立复核 24/24 后冻结。Gemini 两遍各须 ≥36/40，难例各须 ≥22/24，跨遍一致须 ≥36/40；Qwen v2 在难例上的一遍只报告。计划 104 个逻辑调用，含重试的硬上限为 312 次和 1,277,952 请求输出 token。不含 run 05 重审。[本机预登记](../.tmp/scratch/hard-learners/gemini-audit/preregistration.md) · [真值冻结](../.tmp/scratch/hard-learners/audit-validation/hard-truth-review.md) · [进度与恢复点](../.tmp/scratch/hard-learners/gemini-audit/progress.md)
+`fidelity_audit` 使用 `google/gemini-3.8-flash` / `google-ai-studio`、`reasoning.effort: low`、温度 0、每请求 4,096 输出 token、120 秒 deadline。出站为严格 `json_schema`、`require_parameters: true`、`allow_fallbacks: false`，显式使用 `HTTPS_PROXY`。策略 `hard-learner-audit-v5-gemini` 与评测身份绑定路由、预算、传输、源对话和预登记。审核提示 v2 SHA256 `c7823a99e324ba5e03b303833b9f9590d3c5be357bc4f9b7b85a0168eef93af0` 不变。既有学生生成入口的 Qwen 默认不变。[策略](../config/fidelity-audit.mjs)
 
-本阶段没有向审核器发真实请求。缺本次费用授权，当前 worktree 也无可用的 `OPENROUTER_API_KEY`。因此没有 Gemini 或难例 Qwen 准确率，不能作采用判断。run 05 的 48 条未重审，历史三类画像结论保留，只对旧学生配置 DeepSeek Flash、`thinking: low` 有效。
+**验证。** 保留原 16 条，加独立复核的 24 条原创难例，四类各 6 条。Gemini 两遍各 **40/40**，难例各 **24/24**，跨遍一致 **40/40**；达到各 36/40、22/24、36/40 的预登记线。Qwen v2 难例 **21/24**（87.5%，描述性对照）。D01、D02、D03 把有验算但没有修正的回复误判为 `correctionWithBasis=true`，派生为 `repair`。[Gemini 验证](../runs/stage2a-gemini-audit-validation-01/validation-report.md) · [Qwen 逐条错因](../runs/stage2a-qwen-hard-audit-validation-01/validation-report.md) · [难例真值冻结](../.tmp/scratch/hard-learners/audit-validation/hard-truth-review.md)
+
+**48 条重审。** 每画像审核齐 16/16。按原登记，每条件须 ≥3/4，两题可教性各须 ≥1/2，跃迁和泄漏须为零。两侧三画像在两题上的可教性均 2/2，均无跃迁或泄漏。条件顺序为重复／给答案／针对错因／独立解释。
+
+| 画像 | Qwen 条件命中 | Gemini 条件命中 | 使用结论旧 → 新 |
+| --- | --- | --- | --- |
+| 顽固误解型 | 3/4、4/4、4/4、3/4 | 4/4、4/4、4/4、4/4 | 能用 → 能用 |
+| 伸手要答案型 | 4/4、2/4、4/4、3/4 | 3/4、4/4、4/4、4/4 | 不可用 → 能用 |
+| 假装懂了型 | 4/4、4/4、4/4、2/4 | 4/4、4/4、4/4、2/4 | 不可用 → 不可用 |
+
+四标签在 11/48 条上有变化。七个事前反例与复核参考全部相符：两条给答案改判 `answer-dependence`，一条选定候选改判 `attempt`，一条卡住却仍坚持旧规则改判 `misconception`，一条验算仍坚持改判 `misconception / attempt`。两条假装懂了型仍判 `repair`，不命中独立解释条件。伸手型另有一条重复条件新判 `exposed-gap` 而未命中，原话也有询问下一步；不事后重标。构造题全对不代表原件每个标签正确。[48 条对照与七例](../runs/stage2a-hard-learners-05-gemini-reaudit-01/reaudit-report.md) · [逐字段及引文](../runs/stage2a-hard-learners-05-gemini-reaudit-01/result.json)
+
+验证预登记 SHA256 `993776d46eb8a868abd6f10ace96e6cdc6ad09355226f384237b5fdeed7364ca`；过线后另锁重审预登记 `0e4edbeee6d856f53fd9287fbc46d294eb572111c1906331576dabf87d6d9c63`。三次零请求预检及 PID 见[进度](../.tmp/scratch/hard-learners/gemini-audit/progress.md)。三次真实运行使用干净 `14c3e91` 的 [316 项检查收据](../runs/_receipts/check-14c3e918eff87384d78c12ac60d40898351fc9aa.json)，`--verify-run` 均通过。启动、进程、manifest、请求事件和遥测的 PID 一致；没有重试、停线或用量缺报。
+
+| 运行复核 | PID | 实发／该侧上限 | 请求输出 token／该侧上限 | 实报总 token |
+| --- | ---: | ---: | ---: | ---: |
+| [Qwen 难例](../runs/stage2a-qwen-hard-audit-validation-01/verify-run.json) | 51360 | 24／72 | 98,304／294,912 | 33,827 |
+| [Gemini 两遍](../runs/stage2a-gemini-audit-validation-01/verify-run.json) | 41652 | 80／240 | 327,680／983,040 | 111,279 |
+| [Gemini 重审](../runs/stage2a-hard-learners-05-gemini-reaudit-01/verify-run.json) | 51288 | 12／36 | 49,152／147,456 | 37,344 |
+| 合计／任务授权 | | 116／312 | 475,136／1,277,952 | 182,450 |
 
 <a name="stage2a-json-mode-rerun"></a>
 
