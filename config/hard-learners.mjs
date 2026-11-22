@@ -1,6 +1,15 @@
+import { policy } from './e1.mjs';
+
 export const hardLearnerScenario = 'hard-learner-fidelity';
 export const hardLearnerCheckScope = 'hard-learners';
 export const fidelityConditions = Object.freeze(['repeat', 'answer', 'targeted', 'independent']);
+export const learnerFixArms = Object.freeze({
+  control: Object.freeze({ thinking: policy.learner.thinking, antiSelfFalsification: false }),
+  a: Object.freeze({ thinking: 'off', antiSelfFalsification: false }),
+  b: Object.freeze({ thinking: policy.learner.thinking, antiSelfFalsification: true }),
+  c: Object.freeze({ thinking: 'off', antiSelfFalsification: true }),
+});
+export const learnerFixSelections = Object.freeze(['pilot', 'a', 'b', 'c']);
 
 export const developmentTopics = Object.freeze({
   'S0-01': {

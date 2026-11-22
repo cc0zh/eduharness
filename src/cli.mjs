@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { hardLearnerCheckScope, hardLearnerScenario } from '../config/hard-learners.mjs';
+import { hardLearnerCheckScope, hardLearnerScenario, learnerFixSelections } from '../config/hard-learners.mjs';
 import { modes, runId } from '../contracts/artifacts/schema.mjs';
 import { failure } from '../contracts/core/schema.mjs';
 import { checkout, loadCredentials, requireCheckReceipt } from './real-preflight.mjs';
@@ -87,7 +87,7 @@ if (option('--export-report') >= 0) {
       'judge-only': { type: 'string' }, 'judge-cell': { type: 'string' }, scenario: { type: 'string', default: 'E1' }, 'verify-run': { type: 'string' },
       phase: { type: 'string' }, freeze: { type: 'string' }, 'generate-only': { type: 'boolean' },
       harness: { type: 'string' }, 'source-root': { type: 'string' }, preregistration: { type: 'string' }, 'preregistration-sha256': { type: 'string' },
-      'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' },
+      'judge-policy': { type: 'string' }, 'proxy-from-env': { type: 'boolean' }, 'learner-fix': { type: 'string' },
     } });
     if (!modes.includes(values.mode)) throw new Error('mode must be offline or real');
     const scenarios = ['E1', 'E2', 'ruler-expand', s1Scenario, hardLearnerScenario, judgeContrastScenario, judgeBakeoffScenario, judgeFreezeScenario];
@@ -95,10 +95,16 @@ if (option('--export-report') >= 0) {
     const freezeRetest = values.scenario === judgeFreezeScenario;
     const split = freezeRetest || values.scenario === judgeBakeoffScenario;
     const contrast = split || values.scenario === judgeContrastScenario;
-    if (values['proxy-from-env'] && (!split || values.mode !== 'real' || !['haiku', 'gemini'].includes(values['judge-policy']) || values.resume)) {
-      throw new Error('--proxy-from-env is only for real Haiku or Gemini bakeoff runs without --resume');
+    const learnerFix = values['learner-fix'];
+    if (learnerFix !== undefined && (values.scenario !== hardLearnerScenario || !learnerFixSelections.includes(learnerFix))) {
+      throw new Error('--learner-fix requires hard-learner-fidelity and one of pilot, a, b, c');
+    }
+    const proxyBakeoff = split && ['haiku', 'gemini'].includes(values['judge-policy']);
+    if (values['proxy-from-env'] && (values.mode !== 'real' || !(proxyBakeoff || learnerFix) || values.resume)) {
+      throw new Error('--proxy-from-env is only for real Haiku/Gemini bakeoff or learner-fix runs without --resume');
     }
     if (freezeRetest && !values['proxy-from-env']) throw new Error('freeze retest requires the winning proxy transport via --proxy-from-env');
+    if (learnerFix && values.mode === 'real' && !values['proxy-from-env']) throw new Error('learner-fix requires Gemini audit via --proxy-from-env');
     const judgeCell = values['judge-cell'];
     const hasJudgeSource = values['judge-only'] !== undefined;
     const e2Replay = values.scenario === 'E2' && hasJudgeSource;
@@ -139,7 +145,12 @@ if (option('--export-report') >= 0) {
       const { fidelityBudget } = await import('./hard-learner-plan.mjs');
       config.registration = values.preregistration;
       config.registrationDigest = values['preregistration-sha256'];
-      ceiling = fidelityBudget();
+      config.learnerFix = learnerFix;
+      if (learnerFix && values['proxy-from-env']) {
+        const { resolveOpenRouterProxySource } = await import('./openrouter-proxy.mjs');
+        config.fidelityProxySource = resolveOpenRouterProxySource().source;
+      }
+      ceiling = fidelityBudget(learnerFix);
     } else if (values.scenario === 'ruler-expand') {
       rulerRunner = await import('./ruler-run.mjs');
       config.phase = values.phase;
@@ -207,7 +218,7 @@ if (option('--export-report') >= 0) {
         if (!result.acceptance) {
           const failed = result.cells?.find(cell => cell.failure);
           const problem = result.failure ?? failed?.failure;
-          if (fidelityRunner) console.error(problem ? `${problem.stopRule ?? problem.kind} at ${problem.path}: ${problem.detail}` : `hard-learner-fidelity audited ${result.audited}/48 replies`);
+          if (fidelityRunner) console.error(problem ? `${problem.stopRule ?? problem.kind} at ${problem.path}: ${problem.detail}` : `hard-learner-fidelity audited ${result.audited}/${result.planned} replies`);
           else if (s1Runner || contrastRunner) console.error(problem ? `${problem.kind} at ${[failed?.repetition, failed?.id].filter(Boolean).join('/')}: ${problem.detail}` : `${result.scenario} did not complete all planned cells`);
           else if (rulerRunner) console.error(problem ? `${problem.kind} at ${problem.taskId}/${problem.condition}` : `${result.scenario} did not complete all planned cells`);
           else console.error(problem ? `${problem.kind} at ${problem.role}:${problem.turn}:${problem.call}, ${resolve(result.runDir, problem.attemptPath ?? '.')}${problem.kind === 'configuration' ? `: ${problem.detail}` : ''}` : `${result.scenario} did not separate all target dimensions`);

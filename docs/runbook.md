@@ -19,10 +19,12 @@ E2 入口为 `node src/cli.mjs --scenario E2 --id <新 ID>`。见 [预登记与�
 1. 在干净 HEAD 运行 `npm run check -- --scope=hard-learners`。该检查运行导入边界和不读取题库的测试。收据为 `runs/_receipts/check-hard-learners-<sha>.json`，只准入本场景，不代替全量检查。
 2. 用 `node src/cli.mjs --scenario hard-learner-fidelity --mode real --estimate-only --id <新预检 ID>` 取得零请求预算。写好四条件、预期行为、判线和停线并计算预登记 SHA256。记录正式 ID 和事前授权硬上限。
 3. 串行执行 `node src/cli.mjs --scenario hard-learner-fidelity --mode real --confirm-cost --id <已登记 ID> --preregistration <文件> --preregistration-sha256 <摘要>`，用 `--max-attempts` 和 `--max-requested-output-tokens` 指定预登记上限。凭据从 `DEEPSEEK_API_KEY` 和 `OPENROUTER_API_KEY` 读取。DeepSeek 学生请求使用 `response_format: {type:"json_object"}`，系统提示含 JSON 示例。调用原件记录围栏、首尾文字和可逐字恢复的反斜线修复。歧义转义作为回复失败记录。
-4. 单条学生或审核回复最多重试 2 次。整批按计划 48 条学生回复为分母：连续 3 次供应商级/传输级调用失败、连续 3 条学生回复失败、或累计学生回复失败达到 8 条，任一即停。失败回复逐条列出，不计画像行为分母、不算画像行为失败；审核只覆盖有效学生回复，审核回复故障另列。遇到该三条停线后保留原件，不重启或补稿。这个生成入口沿用 `config/fidelity-audit.mjs` 的 Qwen 策略，要求严格 JSON，不发送推理字段或允许回退。账户模型目录不能证明推理访问成功。
-5. 运行 `node src/cli.mjs --verify-run <ID>`。核对启动和进程 PID、manifest 写入 PID 与逐调用遥测。`result.json` 的 `acceptance` 表示拿齐 48 条审核，`assessment` 才是画像判线。每份审核都绑定 `r<遍次>/<题号>/<画像>/<条件>/transcript.json` 的 #8、#9。固定前八条不是新生成。不要把 faux 夹具当保真证据。
+4. 单条学生或审核回复最多重试 2 次。连续 3 次供应商级/传输级调用失败、连续 3 条学生回复失败、或累计学生回复失败达到 8 条，任一即停。失败回复逐条列出，不计画像行为分母、不算画像行为失败；审核只覆盖有效学生回复，审核回复故障另列。停线后保留原件，不重启或补稿。省略 `--learner-fix` 沿用 `config/fidelity-audit.mjs` 的 Qwen 策略，严格 JSON，不发送推理字段或允许回退。
+5. 运行 `node src/cli.mjs --verify-run <ID>`。核对启动和进程 PID、manifest 写入 PID 与逐调用遥测。`result.json` 的 `acceptance` 只表示拿齐审核，正式 48 条的 `assessment` 才是画像判线。每份审核都绑定 `r<遍次>/<题号>/<画像>/<条件>/transcript.json` 的 #8、#9。固定前八条不是新生成。不要把 faux 夹具当保真证据。
 
-Gemini 对验证集和 run 05 的审核不走学生生成入口。只读复核已完成运行时，从本工作树根执行以下命令。不需要凭据，也不会向模型发请求。本地脚本、输入和 SHA256 见[阶段进度](../.tmp/scratch/hard-learners/gemini-audit/progress.md)。
+学生自证伪小样在预检和实跑都加 `--learner-fix pilot`。预登记锁定四组各 10 条的规模、行为计数与选优线。只有预登记选出胜者，才用新 ID 和新预登记将 `pilot` 换成对应的 `a`、`b` 或 `c`，按原计划生成 48 条。两步的真实模式必须加 `--proxy-from-env`，固定使用 Gemini v5 审核。读 `manifest.json` 的 `identity.students` 和出站原件，核对共享条款的画像哈希与实际发送的 `thinking`。小样按组存放原件，不计算正式画像判线。历史原件仍按各自身份复核。
+
+Gemini 对验证集和 run 05 的历史审核不走学生生成入口。只读复核已完成运行时，从保存原件的工作树根执行以下命令。不需要凭据，也不会向模型发请求。本地脚本、输入和 SHA256 见[阶段进度](../.tmp/scratch/hard-learners/gemini-audit/progress.md)。
 
 ```sh
 node .tmp/scratch/hard-learners/gemini-audit/validation.mjs --verify-run stage2a-qwen-hard-audit-validation-01

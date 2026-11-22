@@ -19,6 +19,39 @@ test('model boundary preserves every failed attempt; no fourth attempt or fallba
   assert.deepEqual(saved.map(x => x.row.retryCount), [0, 1, 2]);
 });
 
+test('learner thinking independently changes the sent and recorded DeepSeek thinking bit', async t => {
+  const before = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = 'learner-thinking-canary';
+  t.after(() => {
+    if (before === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = before;
+  });
+  const sent = [], saved = [];
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    sent.push(JSON.parse(init.body));
+    const chunk = { choices: [{ index: 0, delta: { content: '{"text":"I tried a step."}' }, finish_reason: 'stop' }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+  });
+  const config = { mode: 'real', roles: ['learner'], learnerJsonMode: true, save: raw => saved.push(raw) };
+  for (const learnerThinking of ['low', 'off']) {
+    const model = new Models({ ...config, learnerThinking });
+    const { value } = await model.complete({ role: 'learner', turn: 4, call: 1 }, {
+      systemPrompt: 'Try the next step.', messages: [{ role: 'user', timestamp: 1, content: 'Keep going.' }],
+    }, parseLearner);
+    assert.equal(value.text, 'I tried a step.');
+  }
+  assert.deepEqual(sent.map(body => body.thinking), [{ type: 'enabled' }, { type: 'disabled' }]);
+  assert.deepEqual(saved.map(raw => raw.outbound.thinking), sent.map(body => body.thinking));
+  const { reasoning_effort, ...sameRequest } = sent[0];
+  assert.equal(reasoning_effort, 'low');
+  assert.deepEqual(saved.map(raw => raw.outbound.reasoning_effort), ['low', undefined]);
+  assert.deepEqual(sent[1], { ...sameRequest, thinking: { type: 'disabled' } });
+  for (const bad of [{ learnerThinking: 'invalid' }, { learnerThinking: null }, { learnerJsonMode: false, learnerThinking: 'off' }]) {
+    assert.throws(() => new Models({ ...config, ...bad }), error => error.failure?.kind === 'configuration');
+  }
+  assert.equal(sent.length, 2);
+});
+
 test('learner JSON mode sends a JSON object request and records the outbound format', async t => {
   const key = 'learner-credential-canary';
   const before = process.env.DEEPSEEK_API_KEY;

@@ -42,6 +42,151 @@ test('the default learner keeps its exact prior prompt and public nine-message b
   assert.deepEqual(messages[6], { id: 'control:no_teach:m:7', role: 'learner', turn: 3, text: 'I am trying.' });
 });
 
+test('the shared clause changes all hard prompts and their fingerprints, but not ordinary students', async () => {
+  const { learnerPrompt, hardProfileIdentity } = await import('../contracts/learner/profiles.mjs');
+  assert.equal(learnerPrompt(task, undefined, true), learnerPrompt(task));
+  const additions = expectedProfiles.map(profile => {
+    const base = learnerPrompt(task, profile);
+    const revised = learnerPrompt(task, profile, true);
+    assert.notEqual(hardProfileIdentity(profile, true), hardProfileIdentity(profile));
+    const [prompt, privateProfile] = base.split('\n');
+    assert.equal(revised.split('\n').at(-1), privateProfile);
+    const addition = revised.split('\n')[0].replace(prompt, '');
+    assert.notEqual(addition, revised.split('\n')[0]);
+    assert.match(addition, /do not (?:invent|construct).*counterexample.*(?:test|disprove).*initial/i);
+    assert.match(addition, /if the tutor.*(?:test value|example).*carry out/i);
+    return addition;
+  });
+  assert.equal(new Set(additions).size, 1);
+});
+
+test('the learner-fix pilot preflights and replays the 40 cells without presenting a full fidelity verdict', t => {
+  const root = sandbox(t);
+  const flags = ['--scenario', 'hard-learner-fidelity', '--learner-fix', 'pilot'];
+  const estimate = invoke(root, ...flags, '--id', 'pilot-estimate', '--estimate-only');
+  assert.equal(estimate.status, 0, estimate.stderr);
+  assert.deepEqual(estimate.body.logicalCalls, { learner: 40, fidelity_audit: 16 });
+  assert.deepEqual([estimate.body.maxCalls, estimate.body.maxOutputTokens], [168, 688128]);
+  assert.equal(read(root, '_receipts/pilot-estimate.process.json').requestCount, 0);
+  const run = invoke(root, ...flags, '--id', 'pilot');
+  assert.equal(run.status, 0, run.stderr);
+  const { identity } = read(root, 'pilot/manifest.json');
+  assert.equal(identity.calls.fidelity_audit.version, 'hard-learner-audit-v5-gemini');
+  const { control, a, b, c } = identity.students;
+  assert.deepEqual([control.thinking, a.thinking, b.thinking, c.thinking], ['low', 'off', 'low', 'off']);
+  assert.deepEqual([control.antiSelfFalsification, a.antiSelfFalsification, b.antiSelfFalsification, c.antiSelfFalsification], [false, false, true, true]);
+  assert.deepEqual(control.profiles, a.profiles);
+  assert.deepEqual(b.profiles, c.profiles);
+  assert.ok(expectedProfiles.every(profile => control.profiles[profile] !== b.profiles[profile]));
+  assert.equal(new Set([control, a, b, c].map(student => student.id)).size, 4);
+  const result = read(root, 'pilot/result.json');
+  assert.equal(result.trials.length, 40);
+  assert.equal(result.assessment, undefined);
+  for (const arm of ['control', 'a', 'b', 'c']) {
+    const rows = result.trials.filter(row => row.arm === arm);
+    assert.equal(rows.length, 10);
+    for (const profile of ['pretender', 'stubborn']) {
+      const profileRows = rows.filter(row => row.profileId === profile);
+      assert.deepEqual(profileRows.filter(row => row.taskId === 'S0-01').map(row => [row.repetition, row.condition]),
+        [1, 2, 3, 4].map(repetition => [repetition, 'independent']));
+      const targeted = profileRows.filter(row => row.taskId === 'S0-06');
+      assert.equal(targeted.length, 1);
+      assert.equal(targeted[0].condition, 'targeted');
+      const transcript = read(root, `pilot/${targeted[0].path}/transcript.json`);
+      assert.match(transcript[7].text, /P=\(3,4\).*Work out their lengths yourself/);
+      assert.equal(targeted[0].audit.learner.n, 9);
+    }
+  }
+  assert.equal(invoke(root, '--verify-run', 'pilot').body.verified, true);
+  const capped = invoke(root, ...flags, '--id', 'pilot-capped', '--max-attempts', '2');
+  assert.equal(capped.status, 1, capped.stderr);
+  assert.equal(read(root, 'pilot-capped/result.json').trials.length, 40);
+  assert.equal(invoke(root, '--verify-run', 'pilot-capped').body.verified, true);
+});
+
+test('a selected learner configuration replays all 48 original cells with the same student ID as the pilot', t => {
+  const root = sandbox(t);
+  const flags = ['--scenario', 'hard-learner-fidelity'];
+  for (const [id, selection] of [['pilot', 'pilot'], ['full', 'c'], ['legacy', undefined]]) {
+    const run = invoke(root, ...flags, '--id', id, ...(selection ? ['--learner-fix', selection] : []));
+    assert.equal(run.status, 0, run.stderr);
+  }
+  const identity = id => read(root, `${id}/manifest.json`).identity;
+  assert.deepEqual(identity('full').students.c, identity('pilot').students.c);
+  assert.deepEqual(identity('full').planned, identity('legacy').planned);
+  const full = read(root, 'full/result.json');
+  const old = read(root, 'legacy/result.json');
+  assert.deepEqual(full.trials.map(row => row.path), old.trials.map(row => row.path));
+  for (const { path } of full.trials) {
+    const prefix = run => read(root, `${run}/${path}/transcript.json`).slice(0, 8).map(({ role, text }) => ({ role, text }));
+    assert.deepEqual(prefix('full'), prefix('legacy'));
+  }
+  assert.deepEqual(full.assessment, old.assessment);
+  assert.equal(invoke(root, '--verify-run', 'full').body.verified, true);
+});
+
+test('real learner-fix orchestration sends Gemini audit and verifies the pinned student thinking at replay', async t => {
+  const env = { DEEPSEEK_API_KEY: 'learner-fix-canary', OPENROUTER_API_KEY: 'audit-fix-canary',
+    HTTPS_PROXY: 'http://127.0.0.1:9', NODE_TLS_REJECT_UNAUTHORIZED: '1' };
+  const old = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  t.after(() => {
+    for (const [key, value] of Object.entries(old)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const sent = [];
+  t.mock.method(globalThis, 'fetch', async (_input, init) => {
+    const body = JSON.parse(init.body);
+    sent.push(body);
+    const learner = body.model === 'deepseek-flash';
+    const content = learner ? { text: 'I am stuck.' } : { observations: JSON.parse(body.messages.at(-1).content).samples.map(({ sample, messages }) => ({
+      sample, stance: 'other', stepPerformed: false, correctionWithBasis: false, unexplainedClaim: '', privateLeak: false,
+      teacher: { n: 8, quote: messages[7].text }, learner: { n: 9, quote: messages[8].text }, reason: 'Fixture response.',
+    })) };
+    const chunk = { id: 'learner-fix-fixture', model: body.model, provider: learner ? 'DeepSeek' : 'Google AI Studio',
+      choices: [{ index: 0, finish_reason: 'stop', delta: { content: JSON.stringify(content) } }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+  });
+  const id = 'pilot-pin', root = sandbox(t), requests = [], invalid = [];
+  const registration = Buffer.from('frozen pilot plan');
+  const checkReceipt = { head: 'c'.repeat(40), scope: 'hard-learners' };
+  const start = { runId: id, head: checkReceipt.head, clean: true, mode: 'real', pid: process.pid, startedAt: new Date().toISOString(),
+    parameters: { flags: ['--confirm-cost', '--proxy-from-env'], values: { scenario: 'hard-learner-fidelity', learner_fix: 'pilot', preregistration_sha256: hash(registration) } } };
+  let evaluation;
+  const result = await runHardLearners({ id, root, mode: 'real', learnerFix: 'pilot', fidelityProxySource: 'HTTPS_PROXY',
+    limits: { maxAttempts: 10, maxRequestedOutputTokens: 40960 }, checkReceipt,
+    recorder: { start, append: event => requests.push(event), publishEvaluation: value => { evaluation = value; } },
+    registrationDigest: hash(registration) }, registration);
+  assert.equal(result.failure.kind, 'budget_exhausted');
+  assert.equal(result.audited, 8);
+  assert.equal(sent.length, 10);
+  for (const [i, body] of sent.entries()) {
+    if (i % 5 === 4) {
+      assert.equal(body.model, 'google/gemini-3.8-flash');
+      assert.deepEqual(body.provider.only, ['google-ai-studio']);
+      assert.deepEqual(body.reasoning, { effort: 'low' });
+    } else {
+      assert.deepEqual(body.thinking, { type: i < 5 ? 'enabled' : 'disabled' });
+    }
+  }
+  const verify = (substitute = {}) => verifyHardLearnerArtifacts({ id, start, receipt: { acceptance: false }, evaluation, requests, invalid,
+    checkArtifact(path, expected) {
+      const bytes = substitute[path] ?? readFileSync(join(root, id, path));
+      return hash(bytes) === expected ? bytes : null;
+    } });
+  verify();
+  assert.deepEqual(invalid, []);
+  const path = 'a/r1/S0-01/pretender/independent/calls/learner-4-1-1.json';
+  const raw = read(root, `${id}/${path}`);
+  raw.outbound.thinking.type = 'enabled';
+  const wrongThinking = Buffer.from(JSON.stringify(raw));
+  evaluation.files[path] = hash(wrongThinking);
+  verify({ [path]: wrongThinking });
+  assert.ok(invalid[0]?.includes(`learner thinking differs from student identity at ${path}`), invalid.join('\n'));
+});
+
 test('a hard variant reaches only the learner while the teacher sees the same public history contract', async t => {
   const runDir = sandbox(t);
   const { messages } = await executeCell({ runDir, id: 'treatment', variant: 'no_teach', task, learnerVariant: 'answer-seeker',

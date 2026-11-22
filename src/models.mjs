@@ -116,6 +116,7 @@ export class Models {
   #judgeRoute;
   #judgeTimeoutMs;
   #learnerJsonMode;
+  #learnerThinking;
   #audit;
   #proxyRole;
   #proxySource;
@@ -126,7 +127,7 @@ export class Models {
   #probe;
 
   constructor({ mode, responses, save, reserve, recorder, cell, roles = Object.keys(routes), judgeTimeoutMs, judgeReasoningOff = false,
-    judgePolicy, judgeProbeStep, judgeProxySource, beforeAttempt, learnerJsonMode = false, fidelityAuditPolicy, fidelityProxySource }) {
+    judgePolicy, judgeProbeStep, judgeProxySource, beforeAttempt, learnerJsonMode = false, learnerThinking, fidelityAuditPolicy, fidelityProxySource }) {
     const probe = judgeProbeStep === undefined ? undefined : make403Probe(judgePolicy, judgeProbeStep);
     const split = Object.hasOwn(splitJudgeCandidates, judgePolicy) ? splitJudgeCandidates[judgePolicy] : undefined;
     const candidate = probe ?? split ?? (Object.hasOwn(judgeCandidates, judgePolicy) ? judgeCandidates[judgePolicy] : undefined);
@@ -142,6 +143,10 @@ export class Models {
       throw failure('configuration', { role: 'learner', turn: 0, call: 0 }, 'learner JSON mode requires the learner role');
     }
     this.#learnerJsonMode = learnerJsonMode;
+    if (learnerThinking !== undefined && (!learnerJsonMode || !['low', 'off'].includes(learnerThinking))) {
+      throw failure('configuration', { role: 'learner', turn: 0, call: 0 }, 'learner thinking must be low or off in learner JSON mode');
+    }
+    this.#learnerThinking = learnerThinking;
     if (typeof judgeReasoningOff !== 'boolean' || judgeReasoningOff && (roles.length !== 1 || roles[0] !== 'judge')) {
       throw failure('configuration', { role: 'judge', turn: 0, call: 0 }, 'reasoning-off requires a judge-only run');
     }
@@ -262,6 +267,8 @@ export class Models {
     const config = auditRoute ? this.#audit.policy : callPolicy[canonical];
     const model = this.model(role);
     const learnerJsonMode = this.#learnerJsonMode && canonical === 'learner';
+    const learnerThinking = learnerJsonMode ? this.#learnerThinking : undefined;
+    const thinkingType = learnerThinking === undefined ? undefined : learnerThinking === 'off' ? 'disabled' : 'enabled';
     const learnerRequest = learnerJsonMode && { ...context, systemPrompt: `${context.systemPrompt}${learnerJsonExample}` };
     const strictAudit = auditRoute && model.provider === auditRoute.provider;
     const auditProvider = strictAudit && (auditRoute.routing ?? { require_parameters: true, only: [auditRoute.endpoint], allow_fallbacks: false });
@@ -343,13 +350,16 @@ export class Models {
         const body = JSON.parse(init.body);
         const cap = body.max_tokens ?? body.max_completion_tokens;
         if (body.model !== routes.learner.id || cap !== requestLimit || body.response_format?.type !== 'json_object'
+          || thinkingType !== undefined && (body.thinking?.type !== thinkingType || Object.keys(body.thinking).length !== 1
+            || body.reasoning_effort !== (learnerThinking === 'low' ? 'low' : undefined))
           || !body.messages.some(message => message.role === 'system' && message.content === request.systemPrompt)) {
-          outboundRejection = 'outbound learner JSON mode, prompt or budget mismatch';
+          outboundRejection = 'outbound learner JSON mode, prompt, thinking or budget mismatch';
           throw new Error(outboundRejection);
         }
         raw.outbound = { model: body.model,
           ...(body.max_completion_tokens === undefined ? { max_tokens: cap } : { max_completion_tokens: cap }),
-          response_format: body.response_format };
+          response_format: body.response_format,
+          ...(thinkingType !== undefined && { thinking: body.thinking, reasoning_effort: body.reasoning_effort }) };
         return send(input, init);
       } : structuredJudge ? (input, init) => {
         const body = JSON.parse(init.body);
@@ -377,7 +387,7 @@ export class Models {
         ...(fetch && { fetch }),
         ...(this.#keys && { apiKey: this.#keys[canonical] }),
         identity: { attribution: null }, temperature: route?.temperature === null ? undefined : route?.temperature ?? auditRoute?.temperature ?? 0, maxTokens: requestLimit, maxRetries: 0,
-        reasoning: stream ? agentOptions.reasoning : config.thinking,
+        reasoning: learnerThinking ?? (stream ? agentOptions.reasoning : config.thinking),
         onPayload(payload) {
           const sent = payload.max_completion_tokens ?? payload.max_tokens ?? payload.max_output_tokens;
           if (!Number.isInteger(sent) || sent <= 0 || sent > config.maxTokens) throw new Error('provider request output cap invalid');

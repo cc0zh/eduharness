@@ -1,11 +1,12 @@
-import { developmentTopics, fidelityConditions, hardLearnerScenario } from '../config/hard-learners.mjs';
+import { developmentTopics, fidelityConditions, hardLearnerScenario, learnerFixArms } from '../config/hard-learners.mjs';
 import { policy, rounds } from '../config/e1.mjs';
-import { fidelityPolicy } from '../config/fidelity-audit.mjs';
-import { message } from '../contracts/core/schema.mjs';
-import { hardProfileIds } from '../contracts/learner/profiles.mjs';
+import { fidelityAuditPolicies } from '../config/fidelity-audit.mjs';
+import { hash, message } from '../contracts/core/schema.mjs';
+import { hardProfileIdentity, hardProfileIds } from '../contracts/learner/profiles.mjs';
 
 export const registrationFile = 'preregistration.md';
 export const fidelityIdentityVersion = 'hard-learner-fidelity-v2';
+export const learnerFixIdentityVersion = 'hard-learner-fidelity-v3';
 export const learnerOutputProtocol = Object.freeze({ responseFormat: 'json_object', cleanup: 'bounded-json-v1', ambiguousControlEscapes: 'reject' });
 export const fidelityStopRules = Object.freeze({ maxReplyRetries: policy.retries, consecutiveProviderFailures: 3, consecutiveReplyFailures: 3, totalReplyFailures: 8 });
 
@@ -37,18 +38,42 @@ export const fidelityPlan = [1, 2].flatMap(repetition => Object.keys(development
   return { ...group, conditions: order };
 });
 
-export const groupPath = ({ repetition, taskId, profileId }) => `r${repetition}/${taskId}/${profileId}`;
-export const trialCoordinates = ({ repetition, taskId, profileId, conditions }) => conditions.map(condition => ({
-  repetition, taskId, profileId, condition, path: `${groupPath({ repetition, taskId, profileId })}/${condition}`,
-}));
+const pilotBlocks = [
+  ['S0-01', 'pretender', 'independent', [1, 2, 3, 4]],
+  ['S0-01', 'stubborn', 'independent', [1, 2, 3, 4]],
+  ['S0-06', 'pretender', 'targeted', [1]],
+  ['S0-06', 'stubborn', 'targeted', [1]],
+];
+const arms = Object.keys(learnerFixArms);
+const pilotPlan = pilotBlocks.flatMap(([taskId, profileId, condition, repetitions], i) =>
+  [...arms.slice(i), ...arms.slice(0, i)].map(arm => ({ arm, repetitions, taskId, profileId, conditions: [condition] })));
 
-export function fidelityBudget() {
-  const learner = fidelityPlan.length * fidelityConditions.length;
-  const fidelity_audit = fidelityPlan.length;
+export const fidelityPlanFor = learnerFix => learnerFix === 'pilot' ? pilotPlan : fidelityPlan;
+export const profilesFor = antiSelfFalsification => Object.fromEntries(hardProfileIds.map(id => [id, hardProfileIdentity(id, antiSelfFalsification)]));
+export function learnerFixStudents(learnerFix) {
+  return Object.fromEntries((learnerFix === 'pilot' ? arms : [learnerFix]).map(arm => {
+    const settings = learnerFixArms[arm];
+    const student = { ...settings, profiles: profilesFor(settings.antiSelfFalsification) };
+    return [arm, { ...student, id: hash(student) }];
+  }));
+}
+
+export const groupPath = ({ repetition, taskId, profileId, arm }) => `${arm ?? `r${repetition}`}/${taskId}/${profileId}`;
+export const trialCoordinates = ({ repetition, repetitions = [repetition], taskId, profileId, conditions, arm }) =>
+  repetitions.flatMap(repetition => conditions.map(condition => ({
+    ...(arm && { arm }), repetition, taskId, profileId, condition,
+    path: `${arm ? `${arm}/` : ''}r${repetition}/${taskId}/${profileId}/${condition}`,
+  })));
+
+export function fidelityBudget(learnerFix) {
+  const plan = fidelityPlanFor(learnerFix);
+  const learner = plan.flatMap(trialCoordinates).length;
+  const fidelity_audit = plan.length;
+  const auditCap = fidelityAuditPolicies[learnerFix === undefined ? 'qwen' : 'gemini'].policy.maxTokens;
   const attempts = fidelityStopRules.maxReplyRetries + 1;
   return { typicalCalls: learner + fidelity_audit, logicalCalls: { learner, fidelity_audit },
     maxCalls: attempts * (learner + fidelity_audit),
-    maxOutputTokens: attempts * (learner * policy.learner.maxTokens + fidelity_audit * fidelityPolicy.maxTokens) };
+    maxOutputTokens: attempts * (learner * policy.learner.maxTokens + fidelity_audit * auditCap) };
 }
 
 export function learnerTask(taskId) {
