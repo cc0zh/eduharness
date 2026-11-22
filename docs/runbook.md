@@ -32,6 +32,16 @@ node .tmp/scratch/hard-learners/gemini-audit/validation.mjs --verify-run stage2a
 node .tmp/scratch/hard-learners/gemini-audit/re-audit.mjs --verify-run stage2a-hard-learners-05-gemini-reaudit-01
 ```
 
+## 阶段 2b 开发集余量检查
+
+`--scenario stage2b-headroom` 只准入路径附录登记的 8 个 dev 文件。主位置是 `%TEMP%\teacharena\stage2-holdout\dev`。主位置缺失或 manifest SHA256 不符时才核对只读备份 `D:\Archive\teacharena\stage2-holdout\dev`。两处都先校验 manifest 摘要；仅从 dev 清单读文件，不复制完整 manifest。阶段 2b 不生成保真审核，也不使用 v4。
+
+1. 将方法和路径附录保留在 `.tmp/scratch/stage2b-headroom/`。在干净 HEAD 上运行 `npm run check`。正式模式与预检均带 `--mode real --proxy-from-env --concurrency 4 --max-attempts 2592 --max-requested-output-tokens 11999232`、`--preregistration`、`--path-addendum`、`--preregistration-sha256` 和 `--path-addendum-sha256`。预检用 `--estimate-only --id stage2b-headroom-estimate-01`，不加载凭据或发请求。验真通过后才启动。
+2. 按授权移除 `--estimate-only`，加 `--confirm-cost`，换为正式 ID `stage2b-headroom-real-01`。正式启动要求前一步收据绑定同一个干净 HEAD、dev 清单、两个登记摘要和评测身份。不复用 run ID，不续跑或换路由。
+3. 对正式 ID 运行 `node src/cli.mjs --verify-run <ID>`，核对启动、结束、manifest 与逐调用 PID。`acceptance` 只表示 48 格全部交付判决；技术停线后也核对已存产物，然后用 `node scripts/stage2b-headroom-report.mjs <ID>` 读实际观察。缺判不计零、也不计 `N/A`，比较时同时看[同输入裁判波动](stage1-closeout.md#同输入翻转率)和两遍生成后的差异。
+
+## E2 冻结对话复核
+
 E2 的 `no_teach` 裁判复核使用 `--scenario E2 --judge-only <源 run ID> --judge-cell no_teach`。运行器把冻结对话与源裁判请求的消息和绑定核对，即使源裁判未产出分数也可复核。新 run 单列裁判结果，完整 E2 验收仍按场景卡核对。
 
 使用 `--scenario E2 --judge-only <源 run ID> --judge-cell all` 可用当前尺子补评冻结五格。真实模式要求真实源 run。新 manifest 保存源评测身份、源 manifest 哈希和每格对话哈希，结果对照使用本次裁判给出的分档。OpenRouter 结构化裁判的调用原件保存脱敏 `outbound` 请求字段。将 `reasoning.max_tokens` 与遥测的 `reasoningTokens` 核对。超限时记录「路由未执行上限」，用量缺失时记录未知。

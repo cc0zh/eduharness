@@ -11,6 +11,7 @@ import { contrastBudget, judgeContrastScenario } from './judge-contrast-plan.mjs
 import { judgeCandidates } from '../config/judge-contrast.mjs';
 import { splitJudgeCandidates } from '../config/judge-bakeoff.mjs';
 import { bakeoffBudget, judgeBakeoffScenario, judgeFreezeBudget, judgeFreezeScenario, judgeFreezeV4RunId, judgeFreezeV4Scenario, judgeFreezeV4SlotCount } from './judge-bakeoff-plan.mjs';
+import { stage2bScenario } from '../config/stage2b-headroom.mjs';
 
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const argv = process.argv.slice(2);
@@ -44,6 +45,17 @@ if (option('--export-report') >= 0) {
     console.error(error.message);
     emit({ verified: false, conclusion: 'invalid', missing: [], invalid: [error.message] });
     process.exitCode = 2;
+  }
+} else if (optionValue('--scenario') === stage2bScenario) {
+  try {
+    const { stage2bCli } = await import('./stage2b-run.mjs');
+    const { value, exitCode } = await stage2bCli(argv);
+    emit(value);
+    process.exitCode = exitCode;
+  } catch (error) {
+    console.error(error.message);
+    emit({ failure: error.failure ?? failure('invalid_input', {}, error.message).failure });
+    process.exitCode = error.failure ? 1 : 2;
   }
 } else {
   const id = (() => { try { return runId(optionValue('--id') ?? randomUUID()); } catch { return randomUUID(); } })();
